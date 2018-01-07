@@ -18,3 +18,10 @@ cabal.sandbox.config
 .stack-work/
 cabal.project.local
 .HTF/
+
+# Update scripts
+upload.sh
+update.log
+
+*.nogit
+
