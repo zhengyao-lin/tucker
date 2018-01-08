@@ -18,8 +18,11 @@ import Crypto.PubKey.ECC.ECDSA
 import Crypto.PubKey.ECC.Generate
 import Crypto.PubKey.ECC.Types
 
+import Data.ASN1.Encoding
+import Data.ASN1.BinaryEncoding
+import Data.ASN1.Types
+
 -- import Data.ByteString.Base58
-import Data.Bits
 import Data.List
 import Data.Hex
 
@@ -27,24 +30,13 @@ import Debug.Trace
 
 import Control.Monad.Loops
 
-type ByteString = BS.ByteString
+import Tucker.Int
 
 sha256 :: BA.ByteArrayAccess a => a -> Digest SHA256
 sha256 = hash
 
 ripemd160 :: BA.ByteArrayAccess a => a -> Digest RIPEMD160
 ripemd160 = hash
-
-str2int :: ByteString -> Integer
-str2int = BSR.foldr (\x a -> shift a 8 + (toInteger x)) 0
-
-int2str :: Integer -> ByteString
-int2str 0 = BSR.pack []
-int2str i =
-    let
-        (rest, m) = i `divMod` 256
-    in
-        BSR.cons (fromInteger m) $ int2str rest
 
 ba2bs :: BA.ByteArrayAccess a => a -> ByteString
 ba2bs = BSR.pack . BA.unpack
@@ -64,7 +56,7 @@ base58enc raw =
         alphabet = base58'alphabet
         numz = BSR.length $ BSR.takeWhile (== 0) raw
         pref = take numz $ repeat '1'
-        rawi = str2int $ BS.reverse $ BS.drop numz raw
+        rawi = bs2vint'le $ BS.reverse $ BS.drop numz raw
 
 base58dec' :: Integer -> String -> Maybe Integer
 base58dec' cur [] = Just cur
@@ -77,7 +69,7 @@ base58dec' cur (c:str) = do
 base58dec :: ByteString -> Maybe ByteString
 base58dec enc = do
     res <- base58dec' (0 :: Integer) rest
-    return $ BS.append (BS.pack pref) (BS.reverse $ int2str res)
+    return $ BS.append (BS.pack pref) (BS.reverse $ vint2bs'le res)
     where
         str = BS.unpack enc
         numz = length $ takeWhile (== '1') str
@@ -104,17 +96,18 @@ base58dec'check enc = do
     else
         Nothing
 
-genRaw :: IO (PublicKey, PrivateKey)
-genRaw = generate $ getCurveByName SEC_p256k1
+bitcoinCurve = getCurveByName SEC_p256k1
 
 type WIF = String
 type Address = String
+
+data ECCKeyPair = ECCKeyPair Integer Point deriving (Show, Read, Eq)
 
 priv2wif :: Integer -> WIF
 priv2wif num =
     BS.unpack $ base58enc'check priv'proc
     where
-        priv'raw = int2str num
+        priv'raw = vint2bs'le num
         priv'proc = BSR.append (BSR.singleton 0x80) priv'raw
 
 wif2priv :: WIF -> Maybe Integer
@@ -125,15 +118,14 @@ wif2priv wif = do
         Nothing
     else do
         let priv'raw = BSR.drop 1 priv'proc
-        return $ str2int priv'raw
+        return $ bs2vint'le priv'raw
 
 format'Point :: Point -> ByteString
 format'Point (Point x y) =
     BSR.concat [ BSR.singleton 0x04, x'raw, y'raw ]
     where
-        x'raw = int2str x
-        y'raw = int2str y
-        
+        x'raw = encodeInt 4 BigEndian x
+        y'raw = encodeInt 4 BigEndian y
 
 pub2addr :: Point -> Address
 pub2addr pt =
@@ -142,10 +134,21 @@ pub2addr pt =
         pub'raw = format'Point pt
         pub'hash = BSR.append (BSR.singleton 0x00) $ ba2bs $ ripemd160 $ sha256 pub'raw
 
-genAddress :: WIF -> Maybe Address
-genAddress wif = do
+priv2pub :: Integer -> Point
+priv2pub = generateQ bitcoinCurve
+
+wif2addr :: WIF -> Maybe Address
+wif2addr wif = do
     priv <- wif2priv wif
-    return $ pub2addr $ generateQ (getCurveByName SEC_p256k1) priv
+    return $ pub2addr $ priv2pub priv
+
+wif2pair :: WIF -> Maybe ECCKeyPair
+wif2pair wif = do
+    priv <- wif2priv wif
+    return $ ECCKeyPair priv (priv2pub priv)
+
+genRaw :: IO (PublicKey, PrivateKey)
+genRaw = generate bitcoinCurve
 
 gen :: IO (WIF, Address)
 gen = do
@@ -156,9 +159,41 @@ gen = do
     
     return (wif, addr)
 
--- LZY
+-- generate with condition on the (wif, address)
+genCond :: ((WIF, Address) -> Bool) -> IO (WIF, Address)
+genCond cond = iterateUntil cond gen
 
-genWithPrefix :: String -> IO (WIF, Address)
-genWithPrefix pref = do
-    iterateUntil ((pref `isPrefixOf`) . (drop 1) . snd) gen
+-- encode a signature using ASN1 by the following structure
+-- SEQUENCE { r INTEGER, s INTEGER }
+         -- r        s
+signenc :: Signature -> ByteString
+signenc (Signature r s) =
+    encodeASN1' DER [ Start Sequence, IntVal r, IntVal s, End Sequence ]
 
+signdec :: ByteString -> Maybe Signature
+signdec str =
+    case decodeASN1' DER str of
+        Right ((Start Sequence):(IntVal r):(IntVal s):(End Sequence):[])
+            -> Just (Signature r s)
+        _ -> Nothing
+
+-- hash & sign
+sign'sha256 :: ECCKeyPair -> ByteString -> IO Signature
+sign'sha256 (ECCKeyPair priv _) =
+    sign privk SHA256
+    where privk = PrivateKey bitcoinCurve priv
+
+verify'sha256 :: ECCKeyPair -> ByteString -> Signature -> Bool
+verify'sha256 (ECCKeyPair _ pub) msg sign =
+    verify SHA256 pubk sign msg
+    where pubk = PublicKey bitcoinCurve pub
+
+sign'sha256'der :: ECCKeyPair -> ByteString -> IO ByteString
+sign'sha256'der pair msg = do
+    sign <- sign'sha256 pair msg
+    return $ signenc sign
+
+verify'sha256'der :: ECCKeyPair -> ByteString -> ByteString -> Maybe Bool
+verify'sha256'der pair msg sign' = do
+    sign <- signdec sign'
+    return $ verify'sha256 pair msg sign

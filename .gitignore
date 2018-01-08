@@ -21,7 +21,7 @@ cabal.project.local
 
 # Update scripts
 upload.sh
-update.log
+upload.log
 
 *.nogit
 
