@@ -10,6 +10,8 @@ import Data.Word
 import Data.Char
 import qualified Data.ByteString as BSR
 
+import Control.Monad
+
 import Tucker.Error
 
 type ByteString = BSR.ByteString
@@ -128,3 +130,118 @@ bs2vintBE = decodeVInt BigEndian
 -- pre-condition: n >= 0
 vint2bsBE :: Integer -> Either TCKRError ByteString
 vint2bsBE = encodeVInt BigEndian
+
+-- decoding
+newtype Decoder r = Decoder { doDecode :: Endian -> ByteString -> (Either TCKRError r, ByteString) }
+
+instance Functor Decoder where
+    -- fmap f (Parser ps) = Parser $ \p -> [ (f a, b) | (a, b) <- ps p ]
+    fmap f (Decoder d) =
+        Decoder $ \end bs ->
+            case d end bs of
+                (Right r, rest) -> (Right $ f r, rest)
+                (Left err, rest) -> (Left err, rest)
+
+instance Applicative Decoder where
+    pure = return
+
+    (Decoder d1) <*> (Decoder d2) =
+        Decoder $ \end bs ->
+            case d1 end bs of
+                (Right f, rest) ->
+                    case d2 end rest of
+                        (Right r, rest) -> (Right $ f r, rest)
+                        (Left err, rest) -> (Left err, rest)
+
+instance Monad Decoder where
+    return res = Decoder $ \end rest -> (Right res, rest)
+
+    fail err = Decoder $ \end bs -> (Left $ TCKRError err, bs)
+
+    (Decoder d) >>= f =
+        Decoder $ \end bs ->
+            case d end bs of
+                (Right r, rest) -> doDecode (f r) end rest
+                (Left err, rest) -> (Left err, rest)
+
+class Decodable t where
+    decoder :: Decoder t
+
+    decode :: Endian -> ByteString -> (Either TCKRError t, ByteString)
+    decode = doDecode decoder
+
+    decodeLE :: ByteString -> (Either TCKRError t, ByteString)
+    decodeLE = decode LittleEndian
+
+    decodeBE :: ByteString -> (Either TCKRError t, ByteString)
+    decodeBE = decode BigEndian
+
+intD :: Integral t => Int -> Decoder t
+intD nbyte = Decoder $ \end bs ->
+    if BSR.length bs >= nbyte then
+        (Right $ fromInteger $ decodeInt nbyte end bs, BSR.drop nbyte bs)
+    else
+        (Left $ TCKRError
+            ("no enough byte for a " ++
+             (show nbyte) ++
+             "-byte int"), bs)
+
+byteD :: Decoder Word8
+byteD =
+    Decoder $ \_ bs ->
+        if BSR.length bs >= 1 then
+            (Right $ BSR.head bs, BSR.tail bs)
+        else
+            (Left $ TCKRError "need 1 byte", bs)
+
+bsD :: Int -> Decoder ByteString
+bsD len =
+    Decoder $ \_ bs ->
+        if BSR.length bs >= len then
+            (Right $ BSR.take len bs, BSR.drop len bs)
+        else
+            (Left $ TCKRError ("need " ++ (show len) ++ " byte(s)"), bs)
+
+listD :: Int -> Decoder t -> Decoder [t]
+listD len d = forM [ 1 .. len ] (`seq` d)
+
+lenD :: Decoder Int
+lenD = Decoder $ \_ bs -> (Right $ BSR.length bs, bs)
+
+checkLenD :: Int -> Decoder Bool
+checkLenD len = (len <=) <$> lenD
+
+instance Decodable Bool where
+    decoder = do
+        c <- byteD
+        case c of
+            0x00 -> return False
+            0x01 -> return True
+            _ -> fail "illegal bool"
+
+instance Decodable Char where
+    decoder = (chr. fromIntegral) <$> byteD
+
+instance Decodable Int8 where
+    decoder = fromIntegral <$> byteD
+
+instance Decodable Word8 where
+    decoder = byteD
+
+instance Decodable Int16 where
+    decoder = intD 2
+
+instance Decodable Int32 where
+    decoder = intD 4
+
+instance Decodable Int64 where
+    decoder = intD 8
+
+instance Decodable Word16 where
+    decoder = intD 2
+
+instance Decodable Word32 where
+    decoder = intD 4
+
+instance Decodable Word64 where
+    decoder = intD 8

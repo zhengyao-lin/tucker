@@ -17,6 +17,8 @@ import Data.Word
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
+import Debug.Trace
+
 type Hash = String
 type RawScript = ByteString
 
@@ -56,6 +58,8 @@ data Wallet =
         keypair :: ECCKeyPair
     }
 
+type RPCHash = String
+
 -- data OutPoint = OutPoint Hash Word32
 
 instance Encodable OutPoint where
@@ -63,7 +67,7 @@ instance Encodable OutPoint where
         BSR.append (BSR.reverse $ encode end hash) (encode end index)
         
 instance Encodable TxInput where
-    encode _ (TxInput {
+    encode end (TxInput {
         prev_out = prev_out,
         sig_script = sig_script,
         seqn = seqn
@@ -76,10 +80,10 @@ instance Encodable TxInput where
         ]
         where
             e :: Encodable t => t -> ByteString
-            e = encodeLE
+            e = encode end
 
 instance Encodable TxOutput where
-    encode _ (TxOutput {
+    encode end (TxOutput {
         value = value,
         pk_script = pk_script
     }) =
@@ -90,13 +94,13 @@ instance Encodable TxOutput where
         ]
         where
             e :: Encodable t => t -> ByteString
-            e = encodeLE
+            e = encode end
 
 instance Encodable TxWitness where
     encode _ _ = BSR.pack []
 
 instance Encodable TxPayload where
-    encode _ (TxPayload {
+    encode end (TxPayload {
         version = version,
         flag = flag, -- currently only 1 or 0
         
@@ -123,7 +127,7 @@ instance Encodable TxPayload where
         ]
         where
             e :: Encodable t => t -> ByteString
-            e = encodeLE
+            e = encode end
 
 -- what do we want:
 -- given
@@ -177,7 +181,7 @@ signRawTx pair tx = do
         hash_raw = ba2bs $ sha256 $ BS.append raw $ BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
 
     -- another sha256 is performed here
-    signSHA256DER pair hash_raw
+    seq (trace (show $ sha256 $ sha256 raw) 0) $ signSHA256DER pair hash_raw
 
 stdSigScript :: ECCKeyPair -> ByteString -> ByteString
 stdSigScript pair sign =
@@ -243,21 +247,27 @@ unpackEither :: Either TCKRError a -> a
 unpackEither (Right v) = v
 unpackEither (Left err) = error $ show err
 
-buildTx :: WIF -> [OutPoint] -> [(Value, Address)] -> IO TxPayload
-buildTx wif in_lst out_lst =
-    unpackEither $ stdTx btc_testnet3 pair in_lst out_lst
-    where pair = unpackEither $ wif2pair btc_testnet3 wif
+buildTxPayload :: BTCNetwork -> WIF -> [OutPoint] -> [(Value, Address)] -> IO TxPayload
+buildTxPayload net wif in_lst out_lst =
+    unpackEither $ stdTx net pair in_lst out_lst
+    where pair = unpackEither $ wif2pair net wif
 
-buildTxPayload :: WIF -> [OutPoint] -> [(Value, Address)] -> IO ByteString
-buildTxPayload wif in_lst out_lst = do
-    tx <- buildTx wif in_lst out_lst
+encodeTxPayload :: BTCNetwork -> WIF -> [OutPoint] -> [(Value, Address)] -> IO ByteString
+encodeTxPayload net wif in_lst out_lst = do
+    tx <- buildTxPayload net wif in_lst out_lst
     return $ encodeLE tx
+
+-- generate a RPC-byte-order hash from the raw byte string of the transaction
+genRPCHash :: ByteString -> RPCHash
+genRPCHash = (map toLower) . hex . BS.unpack . BS.reverse . ba2bs . sha256 . sha256
 
 -- testBuildTx "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9" [ OutPoint "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48" 0 ] [ (10, "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9") ]
 -- testBuildTx "5HusYj2b2x4nroApgfvaSfKYZhRbKFH41bVyPooymbC6KfgSXdD" [ OutPoint (((!! 0) . unhex) "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48") 0 ] [ (91234, "1KKKK6N21XKo48zWKuQKXdvSsCf95ibHFa") ]
 
 -- total 1.3 btc = 130000000 satoshis
 -- testBuildTx "933qtT8Ct7rGh29Eyb5gG69QrWmwGein85F1kuoShaGjJFFBSjk" [ OutPoint (((!! 0) . unhex) "beb7822fe10241c3c7bb69bd6866487bcaff85ce2dd5cec9b41624eabb1804b5") 0 ] [ (1000, "miro9ZNPjcLnqvnJpSm8P6CUf1WPU98jET"), (129899000, "mvU2ysD322amhCeCPMhPc3L7hKDGGWSBz7") ] -- tip 0.001
+
+-- encodeTxPayload btc_testnet3 "933qtT8Ct7rGh29Eyb5gG69QrWmwGein85F1kuoShaGjJFFBSjk" [ OutPoint (((!! 0) . unhex) "beb7822fe10241c3c7bb69bd6866487bcaff85ce2dd5cec9b41624eabb1804b5") 0 ] [ (1000, "miro9ZNPjcLnqvnJpSm8P6CUf1WPU98jET"), (129899000, "mvU2ysD322amhCeCPMhPc3L7hKDGGWSBz7") ]
 
 -- 0100000001B50418BBEA2416B4C9CED52DCE85FFCA7B486668BD69BBC7C34102E12F82B7BE000000008C4930460221009273528BBBDFF9952604BB495D1E0379B62719B5ADA94F128956CD59B158C32F022100A0CD8FAF9DF0923CBAC413D9379E3ED2B92EF56D2927C300672969E6460452BB014104F789605ECABF791B719B4D0AA911E4EF80010904AA32E37C2B7BF427E6BC2ED40CC21568E7C5AED188E58CF7CF25B3C540FC8B3D20EEC49D967416D755944740FFFFFFFF02E8030000000000001976A91424A90FBE7E852F1C233CFABA9E473F801A5E790A88ACF819BE07000000001976A914A3FC8D07B59B4137BFEE2D4E0CF940A3B656B50C88AC00000000
 
