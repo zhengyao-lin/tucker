@@ -26,7 +26,7 @@ data VersionPayload =
         user_agent   :: VStr,
         start_height :: Int32,
         relay        :: Bool
-    } deriving (Show, Eq)
+    } | VersionPending deriving (Show, Eq)
 
 instance Encodable VersionPayload where
     encode end (VersionPayload {

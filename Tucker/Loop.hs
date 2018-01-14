@@ -40,6 +40,8 @@ data BTCNode =
         addr           :: AddrInfo,
         incoming       :: Bool,
 
+        vers_payload   :: Atom VersionPayload,
+
         sock_buf       :: Atom ByteString,
         msg_list       :: Atom [MsgHead], -- prepend
 
@@ -60,9 +62,36 @@ envMsg env msg = do
     LK.release (io_lock env)
     return ()
 
+node2netaddr :: BTCNode -> IO NetAddr
+node2netaddr node = do
+    let sock = conn_sock node
+    sockaddr <- getSocketName sock
+
+    vers <- getA (vers_payload node)
+
+    case vers of
+        VersionPayload {
+            vers_serv = vers_serv
+        } -> sockaddr2netaddr sockaddr vers_serv
+
+        _ -> throw $ TCKRError "version message not ready"
+
 nodeMsg :: MainLoopEnv -> BTCNode -> String -> IO ()
 nodeMsg env node msg = do
     envMsg env $ (show node) ++ ": " ++ msg
+    return ()
+
+-- default actions
+-- addr -> do nothing
+-- getaddr -> return addr
+-- version -> do nothing
+-- verack -> do nothing
+-- ping -> return pong
+
+nodeProcMsg :: MainLoopEnv -> BTCNode -> MsgHead -> IO ()
+nodeProcMsg env node msg = do
+    -- case command msg of
+    --     BTC_CMD_GETADDR ->
     return ()
 
 nodeExec :: MainLoopEnv -> BTCNode -> IO ()
@@ -79,8 +108,9 @@ nodeExec env node = do
     whileM_ (pure True) $ do
         msg <- nodeRecvOneMsg env node (return LackData)
 
-        if msg /= LackData then
+        if msg /= LackData then do
             nodeMsg env node $ show msg
+            nodeProcMsg env node msg
         else return ()
 
     return ()
@@ -143,13 +173,17 @@ handshake env node = do
                 } -> do
                     ack <- encodeMsg net BTC_CMD_VERACK $ encodeVerackPayload
                     
-                    let res = doDecode (decoder :: Decoder VersionPayload) LittleEndian payload
+                    let (res, _) = doDecode (decoder :: Decoder VersionPayload) LittleEndian payload
+
                     case res of
-                        (Right (VersionPayload {
+                        Right vp@(VersionPayload {
                             vers = vers,
                             user_agent = VStr user_agent
-                        }), _) -> nodeMsg env node $ "version received: " ++ (show vers) ++ user_agent
-                        p -> nodeMsg env node $ "version decode failed: " ++ (show p)
+                        }) -> do
+                            nodeMsg env node $ "version received: " ++ (show vers) ++ user_agent
+                            setA (vers_payload node) vp
+                        
+                        Left err -> throw $ TCKRError $ "version decode failed: " ++ (show err)
 
                     send sock ack
                     recv_verack
@@ -199,6 +233,8 @@ probe env addrs = do
                 return Nothing
 
             Just _ -> do
+                vers_payload <- newA VersionPending -- placeholder
+                
                 sock_buf <- newA $ BSR.pack []
                 msg_list <- newA []
                 thread_id <- myThreadId >>= newA
@@ -209,6 +245,8 @@ probe env addrs = do
                     conn_sock = sock,
                     addr = addr,
                     incoming = False,
+
+                    vers_payload = vers_payload,
 
                     sock_buf = sock_buf,
                     msg_list = msg_list,
