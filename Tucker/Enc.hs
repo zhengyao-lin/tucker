@@ -167,6 +167,12 @@ instance Monad Decoder where
 class Decodable t where
     decoder :: Decoder t
 
+    decoderLE :: Decoder t
+    decoderLE = Decoder $ \_ -> decodeLE
+
+    decoderBE :: Decoder t
+    decoderBE = Decoder $ \_ -> decodeBE
+
     decode :: Endian -> ByteString -> (Either TCKRError t, ByteString)
     decode = doDecode decoder
 
@@ -210,6 +216,13 @@ lenD = Decoder $ \_ bs -> (Right $ BSR.length bs, bs)
 
 checkLenD :: Int -> Decoder Bool
 checkLenD len = (len <=) <$> lenD
+
+ifD :: Bool -> t -> Decoder t -> Decoder t
+ifD cond t d = if cond then return t else d
+
+-- append a bytestring to the parsing buffer
+appendD :: ByteString -> Decoder ()
+appendD bs = Decoder $ \end orig -> (Right (), BSR.append bs orig)
 
 instance Decodable Bool where
     decoder = do

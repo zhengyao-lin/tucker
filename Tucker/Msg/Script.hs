@@ -1,9 +1,9 @@
-module Tucker.Script where
+module Tucker.Msg.Script where
 
 import Tucker.Enc
 
-import Data.Word
 import Data.Int
+import Data.Word
 
 import Debug.Trace
 

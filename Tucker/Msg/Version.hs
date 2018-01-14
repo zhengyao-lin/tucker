@@ -1,75 +1,16 @@
--- trivial BTC protocol messages
-
-module Tucker.Msg.Other where
+module Tucker.Msg.Version where
 
 import Data.Int
 import Data.Word
-import Data.Bits
-import Data.Time.Clock.POSIX
 import qualified Data.ByteString as BSR
 
-import Network.Socket
+import Debug.Trace
 import System.Random
 
 import Tucker.Enc
 import Tucker.Std
 
 import Tucker.Msg.Common
-
-unixTimestamp :: Integral a => IO a
-unixTimestamp = round `fmap` getPOSIXTime
-
--- defined in Tucker.Std
-instance Encodable BTCServiceType where
-    encode end (BTCServiceType serv) =
-        encode end $
-        ((foldr (.|.) 0) $
-        map (\s -> case s of
-            BTC_NODE_NETWORK -> 0x01
-            BTC_NODE_GETUTXO -> 0x02
-            BTC_NODE_BLOOM -> 0x04) serv :: Word64)
-
-data NetAddr =
-    NetAddr {
-        time         :: Word32,
-        neta_serv    :: BTCServiceType,
-        ipv6o4       :: ByteString, 
-        port         :: Word16
-    } deriving (Show, Eq)
-
-instance Encodable NetAddr where
-    encode end (NetAddr {
-        time = time,
-        neta_serv = neta_serv,
-        ipv6o4 = ipv6o4,
-        port = port
-    }) =
-        BSR.concat [
-            e time,
-            e neta_serv,
-            e ipv6o4,
-            encodeBE port -- port here is big-endian
-        ]
-        where
-            e :: Encodable t => t -> ByteString
-            e = encode end
-
-ip42ip6 :: ByteString -> ByteString
-ip42ip6 addrv4 =
-    BSR.append (BSR.pack pref) addrv4
-    where pref = [ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff ]
-
-ip42netaddr :: String -> Word16 -> BTCServiceType -> IO NetAddr
-ip42netaddr addr port serv = do
-    time <- unixTimestamp
-    enc <- inet_addr addr
-    let addrv6 = ip42ip6 $ encodeBE enc
-    pure $ NetAddr {
-        time = time,
-        neta_serv = serv,
-        ipv6o4 = addrv6,
-        port = port
-    }
 
 data VersionPayload =
     VersionPayload {
@@ -118,6 +59,39 @@ instance Encodable VersionPayload where
             e :: Encodable t => t -> ByteString
             e = encode end
 
+instance Decodable VersionPayload where
+    decoder = do
+        vers <- decoder
+        vers_serv <- decoder
+        timestamp <- decoder
+
+        -- net_addr in version payload does not have timestamp field
+        -- so fill in a temporary timestamp field
+        let decoderAddr = (appendD $ encodeLE (fromIntegral timestamp :: Word32)) >> decoder
+
+        addr_recv <- decoderAddr
+
+        addr_from <- ifD (vers < 106) addr_recv decoderAddr
+
+        nonce <- ifD (vers < 106) 0 decoder
+        user_agent <- ifD (vers < 106) (VStr "") decoder
+
+        start_height <- ifD (vers < 106) 0 decoder
+        relay <- ifD (vers < 70001) False decoder
+
+        return $ VersionPayload {
+            vers = vers,
+            vers_serv = vers_serv,
+            timestamp = timestamp,
+            addr_recv = addr_recv,
+            addr_from = addr_from,
+    
+            nonce = nonce,
+            user_agent = user_agent,
+            start_height = start_height,
+            relay = relay
+        }
+
 buildVersionPayload :: BTCNetwork -> IO VersionPayload
 buildVersionPayload net = do
     timestamp <- unixTimestamp
@@ -126,7 +100,7 @@ buildVersionPayload net = do
     addr1 <- ip42netaddr "127.0.0.1" (listenPort net) btc_cli_service
 
     return $ VersionPayload {
-        vers = 60002,
+        vers = btc_version,
         vers_serv = btc_cli_service,
         timestamp = timestamp,
 
@@ -135,7 +109,7 @@ buildVersionPayload net = do
 
         nonce = nonce,
 
-        user_agent = VStr "",
+        user_agent = VStr btc_user_agent,
         start_height = 0,
         relay = False
     }
@@ -143,3 +117,6 @@ buildVersionPayload net = do
 encodeVersionPayload :: BTCNetwork -> IO ByteString
 encodeVersionPayload net =
     buildVersionPayload net >>= (pure . encodeLE)
+
+encodeVerackPayload :: IO ByteString
+encodeVerackPayload = return $ BSR.pack []

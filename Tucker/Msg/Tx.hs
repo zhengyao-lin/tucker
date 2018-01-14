@@ -2,17 +2,16 @@
 
 module Tucker.Msg.Tx where
 
-import Tucker.Error
 import Tucker.Enc
 import Tucker.Std
 import Tucker.Auth
-import Tucker.Script
-
+import Tucker.Error
+import Tucker.Msg.Script
 import Tucker.Msg.Common
 
-import Data.Char
 import Data.Hex
 import Data.Int
+import Data.Char
 import Data.Word
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS

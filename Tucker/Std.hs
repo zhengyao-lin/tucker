@@ -6,6 +6,7 @@ import qualified Data.ByteString as BSR
 import Crypto.PubKey.ECC.Types
 
 import Tucker.Enc
+import Tucker.Conf
 
 data BTCNetwork = BTCNetwork {
         wifPref :: Word8,
@@ -38,3 +39,8 @@ data BTCServiceTypeSingle = BTC_NODE_NETWORK | BTC_NODE_GETUTXO | BTC_NODE_BLOOM
 data BTCServiceType = BTCServiceType [BTCServiceTypeSingle] deriving (Show, Eq)
 
 btc_cli_service = BTCServiceType [ BTC_NODE_NETWORK ]
+
+btc_version :: Integral t => t
+btc_version = 60002
+
+btc_user_agent = "/Tucker:" ++ tucker_version ++ "/"
