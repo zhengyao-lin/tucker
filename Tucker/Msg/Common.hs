@@ -72,6 +72,9 @@ data Command
     | BTC_CMD_REJECT
     | BTC_CMD_ALERT deriving (Show, Eq)
 
+data Hash256 = Hash256FromBS ByteString deriving (Show, Eq)
+type RawScript = ByteString
+
 data MsgHead
     = LackData -- lack data mark
     | MsgHead {
@@ -81,6 +84,16 @@ data MsgHead
         -- checksum :: Word32 -- first 4 bytes of double sha256 of payload
         payload :: ByteString
     } deriving (Show, Eq)
+
+instance Encodable Hash256 where
+    encode _ (Hash256FromBS bs) =
+        if BSR.length bs == 32 then
+            bs
+        else error "hash 256 length not correct"
+
+instance Decodable Hash256 where
+    decoder =
+        bsD 32 >>= pure . Hash256FromBS
 
 instance Encodable VInt where
     encode end (VInt num)

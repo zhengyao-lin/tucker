@@ -18,10 +18,7 @@ import qualified Data.ByteString.Char8 as BS
 
 import Debug.Trace
 
-type Hash = String
-type RawScript = ByteString
-
-data OutPoint = OutPoint Hash Word32 deriving (Eq, Show, Read)
+data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show)
 
 type Value = Int64
 
@@ -30,15 +27,15 @@ data TxInput =
         prev_out        :: OutPoint,
         sig_script      :: RawScript,
         seqn            :: Int32 -- sequence, currently not used
-    } deriving (Eq, Show, Read)
+    } deriving (Eq, Show)
 
 data TxOutput =
     TxOutput {
         value           :: Value, -- in Satoshis, 10^-8 BTC
         pk_script       :: RawScript
-    } deriving (Eq, Show, Read)
+    } deriving (Eq, Show)
 
-data TxWitness = TxWitness deriving (Eq, Show, Read)
+data TxWitness = TxWitness deriving (Eq, Show)
     
 data TxPayload =
     TxPayload {
@@ -49,21 +46,21 @@ data TxPayload =
         tx_out      :: [TxOutput],
         tx_witness  :: [TxWitness],
 
-        lock_time   :: Int32 -- time when the tx is locked in a block
-    } deriving (Eq, Show, Read)
+        lock_time   :: Int32 -- the earliest time the tx can be used
+                             -- if lock_time < 500,000,000, treat it as a block height
+                             -- if lock_time >= 500,000,000, treat it as an unix timestamp
+    } deriving (Eq, Show)
 
 data Wallet =
     Wallet {
         keypair :: ECCKeyPair
     }
 
-type RPCHash = String
-
 -- data OutPoint = OutPoint Hash Word32
 
 instance Encodable OutPoint where
     encode end (OutPoint hash index) =
-        BSR.append (BSR.reverse $ encode end hash) (encode end index)
+        BSR.append (encode end hash) (encode end index)
         
 instance Encodable TxInput where
     encode end (TxInput {
@@ -127,6 +124,24 @@ instance Encodable TxPayload where
         where
             e :: Encodable t => t -> ByteString
             e = encode end
+
+-- update on Jan 14, 2018
+-- there are(maybe) 5 standard transactions
+-- 1. P2PKH(currently implemented)
+--    sig_script: <signature> <public key>
+--     pk_script: OP_DUP OP_HASH160 <public key hash> OP_EQUAL OP_CHECKSIG
+-- 2. P2PK
+--    sig_script: <signature>
+--     pk_script: <public key> OP_CHECKSIG
+-- 3. multi-signature(m out of n signatures must be provided)
+--    sig_script: OP_0 <signature 1> <signature 2>
+--     pk_script: M <public key 1> <public key 2> ... <public key N> N OP_CHECKMULTISIG
+-- 4. data storage
+--    sig_script: no sig_script(not spendable)
+--     pk_script: OP_RETURN <data>(max 40 bytes)
+-- 5. pay to script hash
+--     reason: the length of UTXO of type 3 is too long(because it needs to contain many long public keys)
+--     using P2SH, the script(redeem script) is presented later to save some memory on full nodes(maybe?)
 
 -- what do we want:
 -- given
@@ -255,10 +270,6 @@ encodeTxPayload :: BTCNetwork -> WIF -> [OutPoint] -> [(Value, Address)] -> IO B
 encodeTxPayload net wif in_lst out_lst = do
     tx <- buildTxPayload net wif in_lst out_lst
     return $ encodeLE tx
-
--- generate a RPC-byte-order hash from the raw byte string of the transaction
-genRPCHash :: ByteString -> RPCHash
-genRPCHash = (map toLower) . hex . BS.unpack . BS.reverse . ba2bs . sha256 . sha256
 
 -- testBuildTx "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9" [ OutPoint "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48" 0 ] [ (10, "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9") ]
 -- testBuildTx "5HusYj2b2x4nroApgfvaSfKYZhRbKFH41bVyPooymbC6KfgSXdD" [ OutPoint (((!! 0) . unhex) "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48") 0 ] [ (91234, "1KKKK6N21XKo48zWKuQKXdvSsCf95ibHFa") ]

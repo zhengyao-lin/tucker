@@ -1,3 +1,5 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+
 module Tucker.Loop where
 
 import qualified Data.ByteString as BSR
@@ -87,6 +89,42 @@ nodeMsg env node msg = do
 -- version -> do nothing
 -- verack -> do nothing
 -- ping -> return pong
+
+{-
+
+things to implement:
+1. address propagation & discovery(addr, getaddr)
+2. inventory exchange(getblocks & inv)
+    A: me, B: other
+
+    for full nodes(x):
+    A: getblocks
+    B: inv
+    A: getdata
+    B: many notfound/block
+
+    for SPV:
+    A: getheaders
+    B: headers
+
+3. bloom filter for SPV
+    A: filterload
+    B: inv(maybe??)
+(1) A: getdata
+    B: merkleblock/tx
+
+    A(if not satisfied): filteradd
+    B: inv(maybe??)
+    .. repeat from (1)
+
+4. memory pool(x)
+
+5. alert
+
+6. tx broadcast
+    A: inv + tx
+
+-}
 
 nodeProcMsg :: MainLoopEnv -> BTCNode -> MsgHead -> IO ()
 nodeProcMsg env node msg = do
