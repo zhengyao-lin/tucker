@@ -277,31 +277,6 @@ ip42netaddr addr port serv = do
         port = port
     }
 
-sockaddr2netaddr :: SockAddr -> BTCServiceType -> IO NetAddr
-
-sockaddr2netaddr (SockAddrInet port host) serv = do
-    time <- unixTimestamp
-    pure $ NetAddr {
-        time = time,
-        net_serv = serv,
-        ipv6o4 = ip42ip6 $ encodeBE (fromIntegral host :: Word32),
-        port = fromIntegral port
-    }
-
-sockaddr2netaddr (SockAddrInet6 port _ (h1, h2, h3, h4) _) serv = do
-    time <- unixTimestamp
-    pure $ NetAddr {
-        time = time,
-        net_serv = serv,
-        ipv6o4 = BSR.concat $ [
-            encodeBE (fromIntegral h1 :: Word32),
-            encodeBE (fromIntegral h2 :: Word32),
-            encodeBE (fromIntegral h3 :: Word32),
-            encodeBE (fromIntegral h4 :: Word32)
-        ],
-        port = fromIntegral port
-    }
-
 encodeMsg :: BTCNetwork -> Command -> IO ByteString -> IO ByteString
 encodeMsg net cmd mpayload = do
     payload <- mpayload

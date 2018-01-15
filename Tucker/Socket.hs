@@ -19,12 +19,10 @@ import Tucker.Std
 import Tucker.Msg
 import Tucker.Error
 
-ip42addr :: String -> Word16 -> IO AddrInfo
-ip42addr ip port =
+ip2addr :: String -> Word16 -> IO AddrInfo
+ip2addr ip port =
     (getAddrInfo (Just defaultHints {
-        addrFamily = AF_INET,
         addrSocketType = Stream
-
         -- addrFlags = [AI_NUMERICHOST, AI_NUMERICSERV],
     }) (Just ip) (Just $ show port)) >>= (pure . head)
 
@@ -38,7 +36,6 @@ buildSocketTo addr =
 seedLookup :: BTCNetwork -> String -> IO [AddrInfo]
 seedLookup net host =
     getAddrInfo (Just defaultHints {
-        addrFamily = AF_INET,
         addrSocketType = Stream
     }) (Just host) (Just $ show $ listenPort net)
 
@@ -75,6 +72,51 @@ recvOneMsg sock buf = do
 
     return (res, buf)
 
+sockaddr2netaddr :: SockAddr -> BTCServiceType -> IO NetAddr
+
+sockaddr2netaddr (SockAddrInet port host) serv = do
+    time <- unixTimestamp
+    pure $ NetAddr {
+        time = time,
+        net_serv = serv,
+        ipv6o4 = ip42ip6 $ encodeBE (fromIntegral host :: Word32),
+        port = fromIntegral port
+    }
+
+sockaddr2netaddr (SockAddrInet6 port _ (h1, h2, h3, h4) _) serv = do
+    time <- unixTimestamp
+    pure $ NetAddr {
+        time = time,
+        net_serv = serv,
+        ipv6o4 = BSR.concat $ [
+            encodeBE (fromIntegral h1 :: Word32),
+            encodeBE (fromIntegral h2 :: Word32),
+            encodeBE (fromIntegral h3 :: Word32),
+            encodeBE (fromIntegral h4 :: Word32)
+        ],
+        port = fromIntegral port
+    }
+
+netaddr2sockaddr :: NetAddr -> IO SockAddr
+netaddr2sockaddr netaddr = do
+    return $ if isSupportedSockAddr (SockAddrInet6 0 0 (0, 0, 0, 0) 0) then
+        -- support ipv6
+        SockAddrInet6 (fromIntegral $ port netaddr) 0 (
+            fromIntegral $ decodeInt 4 BigEndian h1,
+            fromIntegral $ decodeInt 4 BigEndian h2,
+            fromIntegral $ decodeInt 4 BigEndian h3,
+            fromIntegral $ decodeInt 4 BigEndian h4
+        ) 0
+    else
+        SockAddrInet (fromIntegral $ port netaddr) (fromIntegral $ decodeInt 4 BigEndian h4)
+
+    where
+        ip = ipv6o4 netaddr
+        h1 = BSR.take 4 $ BSR.drop 0 ip
+        h2 = BSR.take 4 $ BSR.drop 4 ip
+        h3 = BSR.take 4 $ BSR.drop 8 ip
+        h4 = BSR.take 4 $ BSR.drop 12 ip
+
 {-
 
 need to check bitseed.xf2.org
@@ -94,7 +136,7 @@ msg <- encodeMsg btc_testnet3 BTC_CMD_VERSION $ encodeVersionPayload btc_testnet
 send sock msg
 recv sock 1024
 recv sock 1024
-msg <- encodeMsg btc_testnet3 BTC_CMD_TX $ encodeTxPayload btc_testnet3 "933qtT8Ct7rGh29Eyb5gG69QrWmwGein85F1kuoShaGjJFFBSjk" [ OutPoint (((!! 0) . unhex) "beb7822fe10241c3c7bb69bd6866487bcaff85ce2dd5cec9b41624eabb1804b5") 0 ] [ (10000, "miro9ZNPjcLnqvnJpSm8P6CUf1WPU98jET"), (119990000, "mvU2ysD322amhCeCPMhPc3L7hKDGGWSBz7") ]
+msg <- encodeMsg btc_testnet3 BTC_CMD_TX $ encodeTxPayload btc_testnet3 "933qtT8Ct7rGh29Eyb5gG69QrWmwGein85F1kuoShaGjJFFBSjk" [ OutPoint (decodeRPCHash "beb7822fe10241c3c7bb69bd6866487bcaff85ce2dd5cec9b41624eabb1804b5") 0 ] [ (10000, "miro9ZNPjcLnqvnJpSm8P6CUf1WPU98jET"), (119990000, "mvU2ysD322amhCeCPMhPc3L7hKDGGWSBz7") ]
 send sock msg
 recv sock 1024
 
@@ -120,4 +162,3 @@ F9BEB4D976657273696F6E000000000066000000A2FFDC737F1101000D00000000000000279A555A
 "\249\190\180\217version\NUL\NUL\NUL\NUL\NULf\NUL\NUL\NUL\162\255\220s\DEL\DC1\SOH\NUL\r\NUL\NUL\NUL\NUL\NUL\NUL\NUL'\154UZ\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\255\255p\DC1\239\195\135\182\r\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NULTo\241p'\152\221/\DLE/Satoshi:0.14.2/\154\174\a\NUL\SOH\249\190\180\217verack\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL]\246\224\226\249\190\180\217alert\NUL\NUL\NUL\NUL\NUL\NUL\NUL\168\NUL\NUL\NUL\ESC\249\170\234`\SOH\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\255\255\255\DEL\NUL\NUL\NUL\NUL\255\255\255\DEL\254\255\255\DEL\SOH\255\255\255\DEL\NUL\NUL\NUL\NUL\255\255\255\DEL\NUL\255\255\255\DEL\NUL/URGENT: Alert key compromised, upgrade required\NULF0D\STX e?\235\214A\SIG\SIk\174\DC1\202\209\156HA;\236\177\172,\ETB\249\b\253\SI\213;\220:\189R\STX m\SO\156\150\254\136\212\160\240\RS\217\222\218\226\182\249\224\r\169L\173\SI\236\170\230n\207h\155\247\ESCP"
 
 -}
-    

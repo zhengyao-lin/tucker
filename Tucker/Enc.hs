@@ -182,6 +182,12 @@ class Decodable t where
     decodeBE :: ByteString -> (Either TCKRError t, ByteString)
     decodeBE = decode BigEndian
 
+    decodeAllLE :: ByteString -> Either TCKRError t
+    decodeAllLE = fst . decodeLE
+
+    decodeAllBE :: ByteString -> Either TCKRError t
+    decodeAllBE = fst . decodeBE
+
 intD :: Integral t => Int -> Decoder t
 intD nbyte = Decoder $ \end bs ->
     if BSR.length bs >= nbyte then

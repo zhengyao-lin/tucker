@@ -171,12 +171,31 @@ things to implement:
 -}
 
 nodeDefaultActionHandler :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
-nodeDefaultActionHandler env node msg = do
-    h msg
-    where
-        h msg = do
-            nodeMsg env node $ "message received: " ++ (show msg)
-            return []
+nodeDefaultActionHandler env node msg@(MsgHead {
+        command = command,
+        payload = payload
+    }) = do
+        h command where
+            sock = conn_sock node
+            net = btc_network env
+
+            h BTC_CMD_PING = do
+                case decodeAllLE payload of
+                    Left err -> do
+                        nodeMsg env node $ "uncrucial decoding error: " ++ (show err)
+                        return []
+
+                    Right ping@(PingPongPayload {}) -> do
+                        pong <- encodeMsg net BTC_CMD_PONG $ pure $ encodeLE ping
+
+                        nodeMsg env node $ "pinging back: " ++ (show pong)
+
+                        send sock pong
+                        return []
+
+            h _ = do
+                nodeMsg env node $ "unhandled message: " ++ (show msg)
+                return []
 
 nodeDefaultAction = NormalAction nodeDefaultActionHandler
 
