@@ -222,7 +222,10 @@ ifD cond t d = if cond then return t else d
 
 -- append a bytestring to the parsing buffer
 appendD :: ByteString -> Decoder ()
-appendD bs = Decoder $ \end orig -> (Right (), BSR.append bs orig)
+appendD bs = Decoder $ \_ orig -> (Right (), BSR.append bs orig)
+
+allD :: Decoder ByteString
+allD = Decoder $ \_ bs -> (Right bs, BSR.pack [])
 
 instance Decodable Bool where
     decoder = do

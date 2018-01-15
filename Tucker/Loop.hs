@@ -92,6 +92,41 @@ nodeMsg env node msg = do
 
 {-
 
+message decoding/encoding support:
+
+(/) -> support
+(.) -> not implemented
+(x) -> no plan
+
+(/) version
+(/) verack
+(/) addr
+(/) inv
+(/) getdata
+(/) notfound
+(/) getblocks
+(/) getheaders
+(/) tx
+(/) block
+(/) headers
+(/) getaddr
+(/) mempool(empty)
+(/) ping
+(/) pong
+(/) reject
+(/) alert(very rough support)
+
+(x) filterload
+(x) filteradd
+(x) filterclear
+(x) merkleblock
+(x) sendheaders
+(x) feefilter
+(x) sendcmpct
+(x) cmpctblock
+(x) getblocktxn
+(x) blocktxn
+
 things to implement:
 1. address propagation & discovery(addr, getaddr)
 2. inventory exchange(getblocks & inv)

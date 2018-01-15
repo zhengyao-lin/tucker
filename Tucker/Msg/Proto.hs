@@ -78,8 +78,6 @@ recvOneMsg sock buf = do
 
     return (res, buf)
 
-
-
 {-
 
 need to check bitseed.xf2.org

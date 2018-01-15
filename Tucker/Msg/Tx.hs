@@ -61,7 +61,13 @@ data Wallet =
 instance Encodable OutPoint where
     encode end (OutPoint hash index) =
         BSR.append (encode end hash) (encode end index)
-        
+
+instance Decodable OutPoint where
+    decoder = do
+        hash <- decoder
+        index <- decoder
+        return $ OutPoint hash index
+
 instance Encodable TxInput where
     encode end (TxInput {
         prev_out = prev_out,
@@ -78,6 +84,19 @@ instance Encodable TxInput where
             e :: Encodable t => t -> ByteString
             e = encode end
 
+instance Decodable TxInput where
+    decoder = do
+        prev_out <- decoder
+        (VInt slen) <- decoder
+        sig_script <- bsD $ fromIntegral slen
+        seqn <- decoder
+
+        return $ TxInput {
+            prev_out = prev_out,
+            sig_script = sig_script,
+            seqn = seqn
+        }
+
 instance Encodable TxOutput where
     encode end (TxOutput {
         value = value,
@@ -92,8 +111,21 @@ instance Encodable TxOutput where
             e :: Encodable t => t -> ByteString
             e = encode end
 
+instance Decodable TxOutput where
+    decoder = do
+        value <- decoder
+        (VInt slen) <- decoder
+        pk_script <- bsD $ fromIntegral slen
+        return $ TxOutput {
+            value = value,
+            pk_script = pk_script
+        }
+
 instance Encodable TxWitness where
     encode _ _ = BSR.pack []
+
+instance Decodable TxWitness where
+    decoder = return TxWitness
 
 instance Encodable TxPayload where
     encode end (TxPayload {
@@ -124,6 +156,31 @@ instance Encodable TxPayload where
         where
             e :: Encodable t => t -> ByteString
             e = encode end
+
+instance Decodable TxPayload where
+    decoder = do
+        version <- decoder
+
+        -- TODO: ignoring flag here
+
+        (VInt len) <- decoder
+        tx_in <- listD (fromIntegral len) decoder
+
+        (VInt len) <- decoder
+        tx_out <- listD (fromIntegral len) decoder
+
+        lock_time <- decoder
+
+        return $ TxPayload {
+            version = version,
+            flag = 0,
+
+            tx_in = tx_in,
+            tx_out = tx_out,
+            tx_witness = [],
+
+            lock_time = lock_time
+        }
 
 -- update on Jan 14, 2018
 -- there are(maybe) 5 standard transactions

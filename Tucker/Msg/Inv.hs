@@ -106,10 +106,15 @@ instance Decodable GetblocksPayload where
             stop_hash = stop_hash
         }
 
-encodeGetblockPayload :: [Hash256] -> Hash256 -> IO ByteString
-encodeGetblockPayload locator stop_hash =
+encodeGetblocksPayload :: [Hash256] -> Hash256 -> IO ByteString
+encodeGetblocksPayload locator stop_hash =
     return $ encodeLE $ GetblocksPayload {
         vers = btc_version,
         locator = locator,
         stop_hash = stop_hash
     }
+
+encodeGetheadersPayload = encodeGetblocksPayload
+
+encodeMempoolPayload :: IO ByteString
+encodeMempoolPayload = return $ BSR.pack []
