@@ -34,7 +34,14 @@ data MainLoopEnv =
         io_lock     :: LK.Lock
     }
 
-data NodeAction = NoAction deriving (Show, Eq)
+data RouterAction
+    = StopProp -- stop the propagation of the message
+    | DumpMe -- dump the current handler
+    | UpdateMe NodeAction -- update to a new action
+
+data NodeAction
+    = NormalAction { handler :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction] }
+    | NoAction
 
 data BTCNode =
     BTCNode {
@@ -48,7 +55,9 @@ data BTCNode =
         msg_list       :: Atom [MsgHead], -- prepend
 
         thread_id      :: Atom ThreadId,
+
         action_list    :: Atom [NodeAction],
+        new_action     :: Atom [NodeAction],
 
         alive          :: Atom Bool
     } deriving (Eq)
@@ -161,10 +170,115 @@ things to implement:
 
 -}
 
+nodeDefaultActionHandler :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
+nodeDefaultActionHandler env node msg = do
+    h msg
+    where
+        h msg = do
+            nodeMsg env node $ "message received: " ++ (show msg)
+            return []
+
+nodeDefaultAction = NormalAction nodeDefaultActionHandler
+
+-- testAction1 = NormalAction $ \env node _ -> do
+--     nodeMsg env node "test action 1 triggered"
+--     return []
+
+-- testAction2 = NormalAction $ \env node _ -> do
+--     nodeMsg env node "test action 2 triggered"
+--     return [ DumpMe ]
+
+-- testAction3 = NormalAction $ \env node _ -> do
+--     nodeMsg env node "test action 3 triggered"
+--     return [ UpdateMe testAction4 ]
+
+-- testAction4 = NormalAction $ \env node _ -> do
+--     nodeMsg env node "test action 4 triggered"
+--     return [ UpdateMe testAction3 ]
+
+-- testAction5 = NormalAction $ \env node _ -> do
+--     nodeMsg env node "test action 5 triggered"
+--     return [ StopProp, DumpMe ]
+
+-- testAction6 = NormalAction $ \env node _ -> do
+--     nodeMsg env node "test action 6 triggered"
+--     return []
+
+nodeDefaultActionList = [
+        nodeDefaultAction
+        -- testAction1,
+        -- testAction2,
+        -- testAction3,
+        -- testAction4,
+        -- testAction5,
+        -- testAction6
+    ]
+
+-- upon receiving a new message
+-- nodeProcMsg route the message through the action_list
 nodeProcMsg :: MainLoopEnv -> BTCNode -> MsgHead -> IO ()
 nodeProcMsg env node msg = do
     -- case command msg of
     --     BTC_CMD_GETADDR ->
+
+    -- prepend new actions
+    new_alist <- getA $ new_action node
+    appA (new_alist ++) (action_list node)
+    
+    current_alist <- getA $ action_list node
+
+    -- tmp_res :: [m (Maybe NodeAction, Bool)]
+    let tmp_res = (flip map) current_alist $ \action -> do
+        case action of
+            NormalAction handler -> do
+                res <- handler env node msg
+
+                new_action <- newA $ Just action
+                continue <- newA True
+
+                forM res $ \res -> do
+                    case res of
+                        StopProp -> do
+                            setA continue False -- stop propagation
+
+                        DumpMe -> do
+                            setA new_action Nothing
+
+                        UpdateMe new_a -> do
+                            setA new_action $ Just new_a
+
+                new_action <- getA new_action
+                continue <- getA continue
+
+                return (new_action, continue)
+
+            _ -> error "unsupported action"
+
+    (exec_res, _) <- concatM (map (\m -> \orig@(exec_res, continue) -> do
+        if continue then do
+            res@(_, continue) <- m
+            return (exec_res ++ [res], continue)
+        else return orig) tmp_res) ([], True)
+
+    -- exec_res <- (flip takeWhileM) tmp_res $ \m -> do
+    --     (new_action, continue) <- m
+    --     return continue
+
+    let exec_count = length exec_res
+        exec_alist =
+            map (\(Just v) -> v) .
+            filter (\v -> case v of
+                Nothing -> False
+                _ -> True) .
+            map fst $
+            exec_res
+    
+    -- new list = old updated action list + rest action list
+
+    let new_alist = exec_alist ++ drop exec_count current_alist
+
+    setA (action_list node) new_alist
+
     return ()
 
 nodeExec :: MainLoopEnv -> BTCNode -> IO ()
@@ -182,7 +296,6 @@ nodeExec env node = do
         msg <- nodeRecvOneMsg env node (return LackData)
 
         if msg /= LackData then do
-            nodeMsg env node $ show msg
             nodeProcMsg env node msg
         else return ()
 
@@ -311,7 +424,8 @@ probe env addrs = do
                 sock_buf <- newA $ BSR.pack []
                 msg_list <- newA []
                 thread_id <- myThreadId >>= newA
-                action_list <- newA []
+                action_list <- newA nodeDefaultActionList
+                new_action <- newA []
                 alive <- newA True
 
                 let node = BTCNode {
@@ -325,6 +439,7 @@ probe env addrs = do
                     msg_list = msg_list,
                     thread_id = thread_id,
                     action_list = action_list,
+                    new_action = new_action,
                     alive = alive
                 }
 
