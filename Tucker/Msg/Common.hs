@@ -41,6 +41,8 @@ cmd_map = [
 
 cmd_map_r = map (\(a, b) -> (b, a)) cmd_map
 
+class (Encodable p, Decodable p) => MsgPayload p where
+
 newtype VInt = VInt Integer deriving (Show, Eq)
 data VStr = VStr String | VBStr ByteString deriving (Show, Eq)
 

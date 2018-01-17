@@ -59,6 +59,8 @@ data InvPayload =
         inv_vect :: [InvVector]
     }
 
+instance MsgPayload InvPayload
+
 instance Encodable InvPayload where
     encode end (InvPayload inv_vect) =
         BSR.append
@@ -83,6 +85,8 @@ data GetblocksPayload =
         locator   :: [Hash256],
         stop_hash :: Hash256
     }
+
+instance MsgPayload GetblocksPayload
 
 instance Encodable GetblocksPayload where
     encode end (GetblocksPayload vers locator stop_hash) =

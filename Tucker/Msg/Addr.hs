@@ -13,6 +13,8 @@ data AddrPayload =
         addrs :: [NetAddr]
     } deriving (Show)
 
+instance MsgPayload AddrPayload
+
 instance Encodable AddrPayload where
     encode end (AddrPayload addrs) =
         BSR.concat [

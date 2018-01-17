@@ -127,6 +127,8 @@ instance Encodable TxWitness where
 instance Decodable TxWitness where
     decoder = return TxWitness
 
+instance MsgPayload TxPayload
+
 instance Encodable TxPayload where
     encode end (TxPayload {
         version = version,

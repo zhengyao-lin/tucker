@@ -8,6 +8,8 @@ import Tucker.Msg.Common
 
 data PingPongPayload = PingPongPayload Word64 deriving (Show, Eq)
 
+instance MsgPayload PingPongPayload
+
 instance Encodable PingPongPayload where
     encode end (PingPongPayload nonce) =
         encode end nonce

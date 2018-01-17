@@ -32,6 +32,9 @@ data BlockPayload =
 
 data HeadersPayload = HeadersPayload [BlockHeader] deriving (Show, Eq)
 
+instance MsgPayload BlockPayload
+instance MsgPayload HeadersPayload
+
 instance Encodable HeadersPayload where
     encode end (HeadersPayload headers) =
         BSR.append

@@ -73,19 +73,19 @@ envMsg env msg = do
     LK.release (io_lock env)
     return ()
 
-node2netaddr :: BTCNode -> IO NetAddr
-node2netaddr node = do
-    let sock = conn_sock node
-    sockaddr <- getSocketName sock
+-- node2netaddr :: BTCNode -> IO NetAddr
+-- node2netaddr node = do
+--     let sock = conn_sock node
+--     sockaddr <- getSocketName sock
 
-    vers <- getA (vers_payload node)
+--     vers <- getA (vers_payload node)
 
-    case vers of
-        VersionPayload {
-            vers_serv = vers_serv
-        } -> sockaddr2netaddr sockaddr vers_serv
+--     case vers of
+--         VersionPayload {
+--             vers_serv = vers_serv
+--         } -> sockaddr2netaddr sockaddr vers_serv
 
-        _ -> throw $ TCKRError "version message not ready"
+--         _ -> throw $ TCKRError "version message not ready"
 
 nodeMsg :: MainLoopEnv -> BTCNode -> String -> IO ()
 nodeMsg env node msg = do
@@ -170,6 +170,32 @@ things to implement:
 
 -}
 
+decodePayload :: MsgPayload t
+              => MainLoopEnv
+              -> BTCNode
+              -> ByteString
+              -> (t -> IO [RouterAction])
+              -> IO [RouterAction]
+decodePayload env node payload proc = do
+    case decodeAllLE payload of
+        Left err -> do
+            nodeMsg env node $ "uncrucial decoding error: " ++ (show err)
+            return []
+
+        Right v -> proc v
+
+node2netaddr :: BTCNode -> IO (Maybe NetAddr)
+node2netaddr node = do
+    sockaddr <- getPeerName $ conn_sock node
+    vers <- getA $ vers_payload node
+
+    if vers == VersionPending then
+        -- error "version not ready(no handshake?)"
+        return Nothing
+    else do
+        netaddr <- sockaddr2netaddr sockaddr (vers_serv vers)
+        return $ Just $ netaddr
+
 nodeDefaultActionHandler :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
 nodeDefaultActionHandler env node msg@(MsgHead {
         command = command,
@@ -178,20 +204,31 @@ nodeDefaultActionHandler env node msg@(MsgHead {
         h command where
             sock = conn_sock node
             net = btc_network env
+            timeout_ms = timeout_s env * 1000000
+
+            d = decodePayload env node payload
 
             h BTC_CMD_PING = do
-                case decodeAllLE payload of
-                    Left err -> do
-                        nodeMsg env node $ "uncrucial decoding error: " ++ (show err)
-                        return []
+                d $ \ping@(PingPongPayload {}) -> do
+                    pong <- encodeMsg net BTC_CMD_PONG $ pure $ encodeLE ping
 
-                    Right ping@(PingPongPayload {}) -> do
-                        pong <- encodeMsg net BTC_CMD_PONG $ pure $ encodeLE ping
+                    nodeMsg env node $ "pinging back: " ++ (show pong)
 
-                        nodeMsg env node $ "pinging back: " ++ (show pong)
+                    timeout timeout_ms $ send sock pong
+                    
+                    return []
 
-                        send sock pong
-                        return []
+            h BTC_CMD_GETADDR = do
+                nodes <- getA (node_list env)
+
+                netaddrs <- forM nodes node2netaddr
+                let tmp = map (\(Just v) -> v) . filter (/= Nothing) $ netaddrs
+
+                addr <- encodeMsg net BTC_CMD_ADDR $ encodeAddrPayload tmp
+
+                timeout timeout_ms $ sock addr
+
+                return []
 
             h _ = do
                 nodeMsg env node $ "unhandled message: " ++ (show msg)
@@ -345,7 +382,7 @@ nodeRecvOneMsg env node timeout_proc = do
             case msg of
                 Right msg@(MsgHead {}) ->
                     if magicno msg /= magicNo net then
-                        throw $ TCKRError "magic no not match"
+                        throw $ TCKRError "network magic number not match"
                     else do
                         -- update buffer
                         appA (msg:) (msg_list node)

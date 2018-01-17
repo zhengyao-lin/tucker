@@ -28,6 +28,8 @@ data VersionPayload =
         relay        :: Bool
     } | VersionPending deriving (Show, Eq)
 
+instance MsgPayload VersionPayload
+
 instance Encodable VersionPayload where
     encode end (VersionPayload {
         vers = vers,
