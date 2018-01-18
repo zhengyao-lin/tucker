@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Exception
 import Control.Concurrent
 import Control.Monad.Loops
+import Control.Concurrent.Thread.Delay
 
 import Network.Socket
 import System.Timeout
@@ -15,6 +16,7 @@ import System.Timeout
 import Tucker.Std
 import Tucker.Msg
 import Tucker.Enc
+import Tucker.Conf
 import Tucker.Atom
 import Tucker.Error
 import Tucker.P2P.Msg
@@ -22,22 +24,11 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 import Tucker.Transport
 
-decodePayload :: MsgPayload t
-              => MainLoopEnv
-              -> BTCNode
-              -> ByteString
-              -> (t -> IO [RouterAction])
-              -> IO [RouterAction]
-
-decodePayload env node payload proc = do
-    case decodeAllLE payload of
-        Left err -> do
-            nodeMsg env node $ "uncrucial decoding error: " ++ (show err)
-            return []
-
-        Right v -> proc v
-
 nodeDefaultActionHandler :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
+nodeDefaultActionHandler env node LackData = do
+    delay 100000 -- 100ms
+    return []
+
 nodeDefaultActionHandler env node msg@(MsgHead {
         command = command,
         payload = payload
@@ -45,8 +36,9 @@ nodeDefaultActionHandler env node msg@(MsgHead {
         h command where
             sock = conn_trans node
             net = btc_network env
-            timeout_ms = timeout_s env * 1000000
+            timeout_us = timeout_s env * 1000000
 
+            d :: MsgPayload t => (t -> IO [RouterAction]) -> IO [RouterAction]
             d = decodePayload env node payload
 
             h BTC_CMD_PING = do
@@ -55,7 +47,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
                     nodeMsg env node $ "pinging back: " ++ (show pong)
 
-                    timeout timeout_ms $ tSend sock pong
+                    timeout timeout_us $ tSend sock pong
                     
                     return []
 
@@ -67,12 +59,45 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
                 addr <- encodeMsg net BTC_CMD_ADDR $ encodeAddrPayload tmp
 
-                timeout timeout_ms $ tSend sock addr
+                nodeMsg env node $ "return addresses"
+
+                timeout timeout_us $ tSend sock addr
 
                 return []
 
+            h BTC_CMD_ADDR = do
+                d $ \addrmsg@(AddrPayload {
+                    addrs = netaddrs
+                }) -> do
+                    nodes <- getA $ node_list env
+                    seek_max <- getEnvConf env tckr_seek_max
+
+                    nodeMsg env node (show addrmsg)
+
+                    if length nodes < seek_max then do
+                        new_list <- forM netaddrs netAddrToAddrInfo
+
+                        -- nodeMsg env node $ "new probing: " ++ (show $ map addrAddress addrinfo)
+                        -- nodeMsg env node $ "already has: " ++ (show $ map addrAddress exist_addrinfo)
+
+                        filted <- filterProbingList env new_list
+
+                        -- nodeMsg env node $ "filted: " ++ (show $ map addrAddress filted)
+
+                        if length filted /= 0 then do
+                            nodeMsg env node $ "probing " ++ (show $ length filted) ++ " new nodes"
+                            forkIO $ probe env filted
+
+                            return ()
+                        else
+                            return ()
+                    else do
+                        nodeMsg env node "max number of nodes reached, no more probing"
+
+                    return []
+
             h _ = do
-                nodeMsg env node $ "unhandled message: " ++ (show msg)
+                nodeMsg env node $ "unhandled message: " ++ (show command)
                 return []
 
 nodeDefaultAction = NormalAction nodeDefaultActionHandler
@@ -160,13 +185,13 @@ nodeExec env node = do
     handshake env node
 
     whileM_ (pure True) $ do
-        msg <- nodeRecvOneMsg env node (return LackData)
+        msg <- nodeRecvOneMsgNonBlocking env node
 
-        if msg /= LackData then do
-            nodeProcMsg env node msg
-        else return ()
+        -- if msg /= LackData then do
+        --     nodeProcMsg env node msg
+        -- else return ()
 
-    return ()
+        nodeProcMsg env node msg
 
 nodeFinal :: MainLoopEnv -> BTCNode -> Either SomeException () -> IO ()
 nodeFinal env node res = do
@@ -177,13 +202,17 @@ nodeFinal env node res = do
     setA (alive node) False
     tClose $ conn_trans node
 
-nodeRecvOneMsg :: MainLoopEnv -> BTCNode -> IO MsgHead -> IO MsgHead
-nodeRecvOneMsg env node timeout_proc = do
+nodeRecvOneMsg :: MainLoopEnv
+               -> BTCNode
+               -> (Transport -> ByteString -> IO (Either TCKRError MsgHead, ByteString))
+               -> IO MsgHead
+               -> IO MsgHead
+nodeRecvOneMsg env node recv_proc timeout_proc = do
     let net = btc_network env
         trans = conn_trans node
 
     buf <- getA $ recv_buf node
-    (msg, buf) <- recvOneMsg trans (timeout_s env) buf
+    (msg, buf) <- recv_proc trans buf
 
     case msg of
         Right msg@(MsgHead {}) ->
@@ -200,10 +229,18 @@ nodeRecvOneMsg env node timeout_proc = do
     where
         updateBuf = setA (recv_buf node)
 
+nodeRecvOneMsgTimeout :: MainLoopEnv -> BTCNode -> IO MsgHead -> IO MsgHead
+nodeRecvOneMsgTimeout env node timeout_proc = do
+    nodeRecvOneMsg env node ((flip tRecvOneMsg) (timeout_s env)) timeout_proc
+
+nodeRecvOneMsgNonBlocking :: MainLoopEnv -> BTCNode -> IO MsgHead
+nodeRecvOneMsgNonBlocking env node = do
+    nodeRecvOneMsg env node tRecvOneMsgNonBlocking (return LackData)
+
 -- throw an exception when timeout
 nodeExpectOneMsg :: MainLoopEnv -> BTCNode -> IO MsgHead
 nodeExpectOneMsg env node =
-    nodeRecvOneMsg env node (throw $ TCKRError "recv timeout")
+    nodeRecvOneMsgTimeout env node (throw $ TCKRError "recv timeout")
 
 handshake :: MainLoopEnv -> BTCNode -> IO ()
 handshake env node = do
@@ -256,9 +293,9 @@ handshake env node = do
 
 -- return alive address
 -- timeout in seconds
-probe :: MainLoopEnv -> [AddrInfo] -> IO [BTCNode]
+probe :: MainLoopEnv -> [AddrInfo] -> IO ()
 probe env addrs = do
-    let timeout_ms = timeout_s env * 1000000
+    let timeout_us = timeout_s env * 1000000
         net = btc_network env
 
     res <- (flip mapM) addrs $ \addr -> do
@@ -268,10 +305,10 @@ probe env addrs = do
         sock <- buildSocketTo addr
 
         -- print (isSupportedSocketOption RecvTimeOut)
-        -- setSocketTimeouts sock timeout_ms timeout_ms
+        -- setSocketTimeouts sock timeout_us timeout_us
         -- setSocketOption sock RecvTimeOut 1
 
-        res <- timeout timeout_ms $ connect sock (addrAddress addr)
+        res <- timeout timeout_us $ connect sock (addrAddress addr)
 
         case res of
             Nothing -> do
@@ -306,9 +343,14 @@ probe env addrs = do
 
                 forkFinally (nodeExec env node) (nodeFinal env node)
 
+                appA (++ [node]) (node_list env)
+
                 return $ Just node
             
-    return $ map (\(Just x) -> x) $ filter filt res
+    -- return $ map (\(Just x) -> x) $ filter filt res
+    
+    return ()
+
     where
         filt (Just res) = True
         filt Nothing = False

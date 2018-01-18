@@ -2,6 +2,7 @@ module Tucker.P2P.Node where
 
 import qualified Data.ByteString as BSR
 
+import Control.Monad
 import Control.Concurrent
 import qualified Control.Concurrent.Lock as LK
 
@@ -20,7 +21,10 @@ data MainLoopEnv =
         btc_network :: BTCNetwork,
         timeout_s   :: Int, -- timeout in sec
         node_list   :: Atom [BTCNode],
-        io_lock     :: LK.Lock
+        io_lock     :: LK.Lock,
+        gc_interv   :: Integer, -- in ms
+    
+        global_conf :: TCKRConf    
     }
 
 data RouterAction
@@ -71,8 +75,28 @@ initEnv net conf = do
         btc_network = net,
         timeout_s = tckr_trans_timeout conf,
         node_list = node_list,
-        io_lock = lock
+        io_lock = lock,
+        gc_interv = tckr_gc_interval conf,
+
+        global_conf = conf
     }
+
+getEnvConf :: MainLoopEnv -> (TCKRConf -> t) -> IO t
+getEnvConf env field = do
+    return $ field $ global_conf env
+
+insertAction :: MainLoopEnv -> NodeAction -> IO ()
+insertAction env action = do
+    nodes <- getA $ node_list env
+
+    forM nodes $ \node -> do
+        alive <- getA $ alive node
+        if alive then
+            appA (action:) (new_action node)
+        else
+            return ()
+
+    return ()
 
 nodeMsg :: MainLoopEnv -> BTCNode -> String -> IO ()
 nodeMsg env node msg = do
