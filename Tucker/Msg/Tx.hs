@@ -122,7 +122,7 @@ instance Decodable TxOutput where
         }
 
 instance Encodable TxWitness where
-    encode _ _ = BSR.pack []
+    encode _ _ = BSR.empty
 
 instance Decodable TxWitness where
     decoder = return TxWitness
@@ -143,7 +143,7 @@ instance Encodable TxPayload where
         BSR.concat [
             e version,
             
-            if flag == 0 then BSR.pack [] else e flag,
+            if flag == 0 then BSR.empty else e flag,
 
             e (VInt $ fromIntegral $ length tx_in),
             e tx_in,
@@ -394,7 +394,7 @@ encodeTxPayload net wif in_lst out_lst = do
 --                     (dehex "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48")
 --                     0,
 
---             sig_script = BSR.pack [],
+--             sig_script = BSR.empty,
 --             seqn = -1
 --         }
 --     ],
@@ -402,7 +402,7 @@ encodeTxPayload net wif in_lst out_lst = do
 --     tx_out = [
 --         TxOutput {
 --             value = 123,
---             pk_script = BSR.pack []
+--             pk_script = BSR.empty
 --         }
 --     ],
 

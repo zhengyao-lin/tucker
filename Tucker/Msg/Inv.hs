@@ -121,4 +121,4 @@ encodeGetblocksPayload locator stop_hash =
 encodeGetheadersPayload = encodeGetblocksPayload
 
 encodeMempoolPayload :: IO ByteString
-encodeMempoolPayload = return $ BSR.pack []
+encodeMempoolPayload = return $ BSR.empty

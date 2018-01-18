@@ -259,26 +259,6 @@ trimnull bs =
     else
         (chr $ fromIntegral $ BSR.head bs) : (trimnull $ BSR.tail bs)
 
-ip42ip6 :: ByteString -> ByteString
-ip42ip6 addrv4 =
-    BSR.append (BSR.pack pref) addrv4
-    where
-        pref = [ 0x00, 0x00, 0x00, 0x00,
-                 0x00, 0x00, 0x00, 0x00,
-                 0x00, 0x00, 0xff, 0xff ]
-
-ip42netaddr :: String -> Word16 -> BTCServiceType -> IO NetAddr
-ip42netaddr addr port serv = do
-    time <- unixTimestamp
-    enc <- inet_addr addr
-    let addrv6 = ip42ip6 $ encodeBE enc
-    pure $ NetAddr {
-        time = time,
-        net_serv = serv,
-        ipv6o4 = addrv6,
-        port = port
-    }
-
 encodeMsg :: BTCNetwork -> Command -> IO ByteString -> IO ByteString
 encodeMsg net cmd mpayload = do
     payload <- mpayload

@@ -68,7 +68,7 @@ bchar = BSR.singleton . fromIntegral
 
 -- VInt > 0
 encodeVInt :: Endian -> Integer -> Either TCKRError ByteString
-encodeVInt _ 0 = Right $ BSR.pack []
+encodeVInt _ 0 = Right $ BSR.empty
 encodeVInt end num = do
     if num < 0 then
         Left $ TCKRError "encoding negative variable length ineteger"
@@ -84,7 +84,7 @@ encodeVInt end num = do
             Right $ BSR.append rest_enc (bchar m)
 
 encodeInt :: Integral t => Int -> Endian -> t -> ByteString
-encodeInt 0 _ _ = BSR.pack []
+encodeInt 0 _ _ = BSR.empty
 encodeInt nbyte end num =
     let
         (rest, m) = (fromIntegral num :: Integer) `divMod` 0x100
@@ -231,7 +231,7 @@ appendD :: ByteString -> Decoder ()
 appendD bs = Decoder $ \_ orig -> (Right (), BSR.append bs orig)
 
 allD :: Decoder ByteString
-allD = Decoder $ \_ bs -> (Right bs, BSR.pack [])
+allD = Decoder $ \_ bs -> (Right bs, BSR.empty)
 
 instance Decodable Bool where
     decoder = do

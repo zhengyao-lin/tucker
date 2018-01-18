@@ -25,3 +25,4 @@ upload.log
 
 *.nogit
 
+.old/

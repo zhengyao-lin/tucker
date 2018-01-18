@@ -94,20 +94,20 @@ instance Decodable VersionPayload where
             relay = relay
         }
 
-buildVersionPayload :: BTCNetwork -> IO VersionPayload
-buildVersionPayload net = do
+buildVersionPayload :: BTCNetwork -> NetAddr -> IO VersionPayload
+buildVersionPayload net addr = do
     timestamp <- unixTimestamp
     nonce <- getStdRandom (randomR (0, maxBound :: Word64))
 
-    addr1 <- ip42netaddr "127.0.0.1" (listenPort net) btc_cli_service
+    -- ip4ToNetAddr "127.0.0.1" (listenPort net) btc_cli_service
 
     return $ VersionPayload {
         vers = btc_version,
         vers_serv = btc_cli_service,
         timestamp = timestamp,
 
-        addr_recv = addr1,
-        addr_from = addr1,
+        addr_recv = addr,
+        addr_from = addr,
 
         nonce = nonce,
 
@@ -116,9 +116,9 @@ buildVersionPayload net = do
         relay = False
     }
 
-encodeVersionPayload :: BTCNetwork -> IO ByteString
-encodeVersionPayload net =
-    buildVersionPayload net >>= (pure . encodeLE)
+encodeVersionPayload :: BTCNetwork -> NetAddr -> IO ByteString
+encodeVersionPayload net addr =
+    buildVersionPayload net addr >>= (pure . encodeLE)
 
 encodeVerackPayload :: IO ByteString
-encodeVerackPayload = return $ BSR.pack []
+encodeVerackPayload = return $ BSR.empty
