@@ -8,6 +8,7 @@ import Control.Concurrent.Thread.Delay
 import Tucker.Std
 import Tucker.Conf
 import Tucker.Atom
+
 import Tucker.P2P.Node
 import Tucker.P2P.Util
 import Tucker.P2P.Server
@@ -22,18 +23,17 @@ gcLoop env =
     whileM_ (pure True) $ do
         cur_list <- getA $ node_list env
 
-        mark <- forM cur_list $ \node -> do
+        marked <- forM cur_list $ \node -> do
             alive <- getA $ alive node
             return (node, alive)
 
-        let new_list = map fst $ filter snd mark
+        let new_list = map fst $ filter snd marked
 
         setA (node_list env) new_list
 
-        envMsg env $
-            "gc: " ++
-            (show $ length cur_list - length new_list) ++
-            " dead node(s) collected"
+        envMsg env $ "gc: " ++
+                     (show $ length cur_list - length new_list) ++
+                     " dead node(s) collected"
         envMsg env $ "all nodes: " ++ (show new_list)
 
         delay $ gc_interv env

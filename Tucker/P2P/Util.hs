@@ -6,12 +6,15 @@ import Data.Word
 import qualified Data.ByteString as BSR
 
 import Network.Socket
+import System.Timeout
 
 import Tucker.Enc
 import Tucker.Msg
 import Tucker.Std
 import Tucker.Atom
 import Tucker.Conf
+import Tucker.Error
+
 import Tucker.P2P.Node
 
 ip4ToIP6 :: ByteString -> ByteString
@@ -154,13 +157,28 @@ decodePayload :: MsgPayload t
               => MainLoopEnv
               -> BTCNode
               -> ByteString
-              -> (t -> IO [RouterAction])
-              -> IO [RouterAction]
+              -> IO a
+              -> (t -> IO a)
+              -> IO a
 
-decodePayload env node payload proc = do
+decodePayload env node payload fail proc = do
     case decodeAllLE payload of
         Left err -> do
-            nodeMsg env node $ "uncrucial decoding error: " ++ (show err)
-            return []
+            nodeMsg env node $ "payload decoding error: " ++ (show err)
+            fail
 
         Right v -> proc v
+
+secondToMicrosecond :: (Integral a, Integral b) => a -> b
+secondToMicrosecond = fromIntegral . (* 1000000)
+
+timeoutS :: Int -> IO a -> IO (Maybe a)
+timeoutS sec = timeout (secondToMicrosecond sec)
+
+timeoutFailS :: Int -> IO a -> IO a
+timeoutFailS sec action = do
+    res <- timeoutS sec action
+
+    case res of
+        Nothing -> error "action timeout"
+        Just v -> return v

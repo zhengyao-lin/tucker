@@ -32,9 +32,16 @@ data RouterAction
     | DumpMe -- dump the current handler
     | UpdateMe NodeAction -- update to a new action
 
+instance Eq RouterAction where
+    StopProp == StopProp = True
+    DumpMe   == DumpMe   = True
+    _        == _        = False
+
 data NodeAction
-    = NormalAction { handler :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction] }
+    = NormalAction { handler :: ActionHandle }
     | NoAction
+
+type ActionHandle = MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
 
 data BTCNode =
     BTCNode {
