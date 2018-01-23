@@ -46,7 +46,7 @@ data InvVector = InvVector InvType Hash256 deriving (Show, Eq)
 
 instance Encodable InvVector where
     encode end (InvVector htype hash) =
-        BSR.append (encode end htype) (encode end hash)
+        encode end htype <> encode end hash
 
 instance Decodable InvVector where
     decoder = do
@@ -63,9 +63,8 @@ instance MsgPayload InvPayload
 
 instance Encodable InvPayload where
     encode end (InvPayload inv_vect) =
-        BSR.append
-            (encode end (VInt (fromIntegral $ length inv_vect)))
-            (encode end inv_vect)
+        encode end (VInt (fromIntegral $ length inv_vect))
+        <> encode end inv_vect
 
 instance Decodable InvPayload where
     decoder = do
@@ -90,7 +89,7 @@ instance MsgPayload GetblocksPayload
 
 instance Encodable GetblocksPayload where
     encode end (GetblocksPayload vers locator stop_hash) =
-        BSR.concat [
+        mconcat [
             encode end vers,
             encode end (VInt $ fromIntegral $ length locator),
             encode end locator,

@@ -1,5 +1,6 @@
 module Tucker.Msg.Common where
 
+import Data.Hex
 import Data.Bits
 import Data.Char
 import Data.Word
@@ -15,6 +16,8 @@ import Debug.Trace
 import Tucker.Enc
 import Tucker.Std
 import Tucker.Auth
+
+import Tucker.Msg.RPC
 
 serv_type = [ BTC_NODE_NETWORK, BTC_NODE_GETUTXO, BTC_NODE_BLOOM ]
 
@@ -74,8 +77,18 @@ data Command
     | BTC_CMD_REJECT
     | BTC_CMD_ALERT deriving (Show, Eq)
 
-data Hash256 = Hash256FromBS ByteString deriving (Show, Eq)
+data Hash256 = Hash256FromBS ByteString deriving (Eq, Ord)
 type RawScript = ByteString
+
+instance Show Hash256 where
+    -- display order is the reversed order of the internal format
+    show (Hash256FromBS hash) = encodeRPCHash hash
+
+instance Read Hash256 where
+    readsPrec _ str = [(Hash256FromBS $ decodeRPCHash str, "")]
+
+nullHash256 = Hash256FromBS $ BSR.pack [ 0 | _ <- [ 1 .. 32 ] ]
+hash256ToBS (Hash256FromBS bs) = bs
 
 data MsgHead
     = LackData -- lack data mark
@@ -100,9 +113,9 @@ instance Decodable Hash256 where
 instance Encodable VInt where
     encode end (VInt num)
         | num < 0xfd        = bchar num
-        | num <= 0xffff     = BSR.append (bchar 0xfd) (encode end (fromInteger num :: Word16))
-        | num <= 0xffffffff = BSR.append (bchar 0xfe) (encode end (fromInteger num :: Word32))
-        | otherwise         = BSR.append (bchar 0xff) (encode end (fromInteger num :: Word64))
+        | num <= 0xffff     = bchar 0xfd <> encode end (fromInteger num :: Word16)
+        | num <= 0xffffffff = bchar 0xfe <> encode end (fromInteger num :: Word32)
+        | otherwise         = bchar 0xff <> encode end (fromInteger num :: Word64)
 
 instance Decodable VInt where
     decoder = do
@@ -119,10 +132,10 @@ instance Decodable VInt where
 
 instance Encodable VStr where
     encode end (VStr str) =
-        BSR.append (encode end $ VInt $ fromIntegral $ length str) $ BS.pack str
+        encode end (VInt $ fromIntegral $ length str) <> BS.pack str
 
     encode end (VBStr bs) =
-        BSR.append (encode end $ VInt $ fromIntegral $ BSR.length bs) bs
+        encode end (VInt $ fromIntegral $ BSR.length bs) <> bs
 
 instance Decodable VStr where
     decoder = do
@@ -152,7 +165,7 @@ instance Encodable NetAddr where
         ipv6o4 = ipv6o4,
         port = port
     }) =
-        BSR.concat [
+        mconcat [
             e time,
             e net_serv,
             e ipv6o4,
@@ -197,7 +210,7 @@ instance Encodable MsgHead where
         command = command,
         payload = payload
     }) =
-        BSR.concat [
+        mconcat [
             e magicno,
             e command,
 
@@ -248,7 +261,7 @@ unixTimestamp = round `fmap` getPOSIXTime
 
 padnull :: Int -> String -> ByteString
 padnull full str =
-    BSR.append (BS.pack str) $ BSR.pack [ 0x00 | _ <- [ 1 .. (full - len) ] ]
+    BS.pack str <> BSR.pack [ 0x00 | _ <- [ 1 .. (full - len) ] ]
     where
         len = length str
 

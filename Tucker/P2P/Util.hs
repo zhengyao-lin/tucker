@@ -8,6 +8,8 @@ import qualified Data.ByteString as BSR
 import Network.Socket
 import System.Timeout
 
+import Control.Monad.Loops
+
 import Tucker.Enc
 import Tucker.Msg
 import Tucker.Std
@@ -182,3 +184,6 @@ timeoutFailS sec action = do
     case res of
         Nothing -> error "action timeout"
         Just v -> return v
+
+timeoutRetryS :: Int -> IO a -> IO a
+timeoutRetryS sec action = untilJust $ timeoutS sec action

@@ -8,6 +8,7 @@ import Data.Int
 import Data.Bits
 import Data.Word
 import Data.Char
+import qualified Data.Monoid as MND
 import qualified Data.ByteString as BSR
 
 import Control.Monad
@@ -15,6 +16,15 @@ import Control.Monad
 import Tucker.Error
 
 type ByteString = BSR.ByteString
+
+(<>) :: Monoid a => a -> a -> a
+(<>) = MND.mappend
+
+-- mconcat :: Monoid a => [a] -> a
+-- mconcat = MND.mconcat
+
+-- mempty :: Monoid a => a
+-- mempty = MND.mempty
 
 data Endian = LittleEndian | BigEndian deriving (Show, Read, Eq)
 

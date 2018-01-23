@@ -44,7 +44,7 @@ instance Encodable VersionPayload where
         start_height = start_height,
         relay = relay
     }) =
-        BSR.concat [
+        mconcat [
             e vers,
             e vers_serv,
             e timestamp,

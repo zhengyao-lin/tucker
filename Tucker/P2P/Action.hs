@@ -13,26 +13,36 @@ import Tucker.P2P.Msg
 import Tucker.P2P.Node
 import Tucker.P2P.Util
 
--- data CoroAction t = CoroAction { doAction :: MainLoopEnv -> BTCNode -> IO (t, [RouterAction]) }
+-- data CoroAction msg = CoroAction { doAction :: MainLoopEnv -> BTCNode -> msg -> IO [RouterAction] }
 
--- instance Functor CoroAction where
---     f `fmap` (CoroAction c) =
---         CoroAction $ \env node -> c env node >>= \(a, b) -> pure (f a, b)
+-- instance Funtor CoroAction where
+--     f `fmap` c = 
 
--- instance Applicative CoroAction where
---     cf <*> c =
---         CoroAction $ \env node -> do
---             (f, a) <- doAction cf env node
---             (v, b) <- doAction c env node
---             return (f v, a ++ b)
+recvM :: MsgPayload t => Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
+recvM cmd proc =
+    return [ UpdateMe $ NormalAction handle ]
+    where
+        handle env node LackData = return []
+        handle env node (MsgHead {
+            command = command,
+            payload = payload
+        }) = do
+            if command == cmd then
+                decodePayload env node payload (pure []) proc
+            else do
+                nodeMsg env node "command not match, skipping"
+                return []
 
---     pure v = return v
+fetchBlock :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
+fetchBlock env node msg = do
+    let net = btc_network env
+        trans = conn_trans node
 
--- instance Monad CoroAction where
---     c >>= fc =
---         CoroAction $ \env node -> do
---             (v, a) <- doAction c env node
+    getblocks <- encodeMsg net BTC_CMD_GETBLOCKS $ encodeGetblocksPayload [] nullHash256
+    timeoutRetryS (timeout_s env) $ tSend trans getblocks
 
-            
-
---     return v = CoroAction $ \env node -> return (v, [])
+    recvM BTC_CMD_INV $ \(InvPayload {
+        inv_vect = inv_vect
+    }) -> do
+        nodeMsg env node $ "inv received: " ++ show inv_vect
+        return [ DumpMe, StopProp ]

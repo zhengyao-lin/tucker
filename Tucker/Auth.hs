@@ -75,7 +75,7 @@ base58dec enc = do
     res <- base58dec' (0 :: Integer) rest
     res_enc <- vint2bsLE res
 
-    return $ BS.append (BS.pack pref) (BS.reverse res_enc)
+    return $ BS.pack pref <> BS.reverse res_enc
     where
         str = BS.unpack enc
         numz = length $ takeWhile (== '1') str
@@ -84,7 +84,7 @@ base58dec enc = do
 
 base58encCheck :: ByteString -> ByteString
 base58encCheck raw =
-    base58enc (BS.append raw (BS.take 4 digest))
+    base58enc $ raw <> BS.take 4 digest
     where
         digest = ba2bs $ sha256 $ sha256 raw
 

@@ -18,7 +18,7 @@ import qualified Data.ByteString.Char8 as BS
 
 import Debug.Trace
 
-data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show)
+data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show, Read)
 
 type Value = Int64
 
@@ -27,15 +27,15 @@ data TxInput =
         prev_out        :: OutPoint,
         sig_script      :: RawScript,
         seqn            :: Int32 -- sequence, currently not used
-    } deriving (Eq, Show)
+    } deriving (Eq, Show, Read)
 
 data TxOutput =
     TxOutput {
         value           :: Value, -- in Satoshis, 10^-8 BTC
         pk_script       :: RawScript
-    } deriving (Eq, Show)
+    } deriving (Eq, Show, Read)
 
-data TxWitness = TxWitness deriving (Eq, Show)
+data TxWitness = TxWitness deriving (Eq, Show, Read)
     
 data TxPayload =
     TxPayload {
@@ -49,7 +49,7 @@ data TxPayload =
         lock_time   :: Int32 -- the earliest time the tx can be used
                              -- if lock_time < 500,000,000, treat it as a block height
                              -- if lock_time >= 500,000,000, treat it as an unix timestamp
-    } deriving (Eq, Show)
+    } deriving (Eq, Show, Read)
 
 data Wallet =
     Wallet {
@@ -60,7 +60,7 @@ data Wallet =
 
 instance Encodable OutPoint where
     encode end (OutPoint hash index) =
-        BSR.append (encode end hash) (encode end index)
+        encode end hash <> encode end index
 
 instance Decodable OutPoint where
     decoder = do
@@ -74,7 +74,7 @@ instance Encodable TxInput where
         sig_script = sig_script,
         seqn = seqn
     }) =
-        BSR.concat [
+        mconcat [
             e prev_out,
             e (VInt $ fromIntegral $ BSR.length sig_script),
             e sig_script,
@@ -102,7 +102,7 @@ instance Encodable TxOutput where
         value = value,
         pk_script = pk_script
     }) =
-        BSR.concat [
+        mconcat [
             e value,
             e (VInt $ fromIntegral $ BSR.length pk_script),
             e pk_script
@@ -140,7 +140,7 @@ instance Encodable TxPayload where
 
         lock_time = lock_time
     }) =
-        BSR.concat [
+        mconcat [
             e version,
             
             if flag == 0 then BSR.empty else e flag,
@@ -251,7 +251,7 @@ signRawTx pair tx = do
     let
         raw = encodeLE tx
         -- the first sha256 performed here
-        hash_raw = ba2bs $ sha256 $ BS.append raw $ BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
+        hash_raw = ba2bs $ sha256 $ raw <> BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
 
     -- another sha256 is performed here
     seq (trace (show $ sha256 $ sha256 raw) 0) $ signSHA256DER pair hash_raw
@@ -259,7 +259,7 @@ signRawTx pair tx = do
 stdSigScript :: ECCKeyPair -> ByteString -> ByteString
 stdSigScript pair sign =
     encodeLE [
-        OP_PUSHDATA $ BSR.append sign $ bchar 0x01,
+        OP_PUSHDATA $ sign <> bchar 0x01,
         OP_PUSHDATA $ pair2pubenc pair
     ]
 

@@ -14,6 +14,7 @@ import Tucker.Msg.Common
 data BlockHeader =
     BlockHeader {
         vers        :: Int32,
+        
         prev_block  :: Hash256,
         merkle_root :: Hash256,
 
@@ -37,9 +38,8 @@ instance MsgPayload HeadersPayload
 
 instance Encodable HeadersPayload where
     encode end (HeadersPayload headers) =
-        BSR.append
-            (encode end (VInt $ fromIntegral $ length headers))
-            (encode end headers)
+        encode end (VInt $ fromIntegral $ length headers)
+        <> encode end headers
 
 instance Decodable HeadersPayload where
     decoder = do
@@ -59,7 +59,7 @@ instance Encodable BlockHeader where
 
         txn_count = txn_count
     }) =
-        BSR.concat [
+        mconcat [
             e vers,
             e prev_block,
             e merkle_root,
@@ -103,7 +103,7 @@ instance Encodable BlockPayload where
         header = header,
         txns = txns
     }) =
-        BSR.append (e header) (e txns)
+        e header <> e txns
         where
             e :: Encodable t => t -> ByteString
             e = encode end

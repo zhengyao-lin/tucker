@@ -92,6 +92,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 nodeDefaultAction = NormalAction nodeDefaultActionHandler
 
 nodeDefaultActionList = [
+        NormalAction fetchBlock,
         nodeDefaultAction
     ]
 
