@@ -95,8 +95,14 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
 nodeDefaultAction = NormalAction nodeDefaultActionHandler
 
+-- NOTE:
+-- when trying to sync block chain,
+-- exec fetchBlock on at least <a> nodes
+-- then wait until a certain span(or the tree has reached a certain height)
+-- then re-exec the fetchBlock on other <a> nodes
+
 nodeDefaultActionList = [
-        NormalAction initFetchBlock,
+        NormalAction fetchBlock, -- for test
         nodeDefaultAction
     ]
 

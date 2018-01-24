@@ -18,7 +18,10 @@ data TCKRConf =
 
         tckr_max_block_task  :: Int,
 
-        tckr_node_alive_span :: Word64
+        tckr_node_alive_span :: Word64,
+
+        tckr_known_inv_count :: Int
+        -- max number of hashes to send when trying to sync witht the network
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -42,7 +45,9 @@ tucker_default_conf =
         tckr_max_block_task = 64,
 
         -- in sec
-        tckr_node_alive_span = 90 * 60 -- 90 min
+        tckr_node_alive_span = 90 * 60, -- 90 min
+        
+        tckr_known_inv_count = 8
     }
 
     where

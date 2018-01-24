@@ -25,7 +25,7 @@ bootstrap env hostnames = do
     addrs <- (mapM (seedLookup $ btc_network env) hostnames) >>= (pure . concat)
     probe env addrs
 
--- collect blocks
+-- collect idle blocks
 blockLoop :: MainLoopEnv -> IO ()
 blockLoop env =
     whileM_ (pure True) $ do

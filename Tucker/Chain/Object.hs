@@ -117,6 +117,7 @@ fixTree (BlockTree layers) =
 isValidBlock :: Block -> Bool
 isValidBlock block =
     hashBlock block == block_hash block
+    -- TODO: add more here
 
 -- in reversed order, i.e., last chain == genesis block
 isValidChain' :: [Block] -> Bool
@@ -238,3 +239,7 @@ emptyChain = BlockChain []
 
 treeHeight :: BlockTree -> Int
 treeHeight (BlockTree layers) = length layers
+
+treeLatest :: BlockTree -> [Block]
+treeLatest (BlockTree layers) =
+    if null layers then [] else last layers

@@ -29,9 +29,9 @@ import Tucker.Chain.Object
 -- instance Funtor CoroAction where
 --     f `fmap` c = 
 
-recvM :: MsgPayload t => Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
-recvM cmd proc =
-    return [ StopProp, UpdateMe $ NormalAction handle ]
+recvM :: MsgPayload t => [RouterAction] -> Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
+recvM r_act cmd proc =
+    return $ r_act ++ [ UpdateMe $ NormalAction handle ]
     where
         handle env node LackData = return []
         handle env node (MsgHead {
@@ -101,43 +101,59 @@ addNewBlock env node payload@(BlockPayload {
             return () -- already fetched, do nothing
 
         Nothing -> do
-            nodeMsg env node $ "block received: " ++ (show hash) ++ " " ++ (show payload)
+            nodeMsg env node $ "block received: " ++ (show hash) -- ++ " " ++ (show payload)
 
             -- add to the set
             appA (SET.insert hash) (fetched_block env)
 
-            -- lock tree
-            LK.acquire (tree_lock env)
+            appA (SET.insert bph) (idle_block env)
 
-            tree <- getA (block_tree env)
+            -- -- lock tree
+            -- LK.acquire (tree_lock env)
 
-            case insertToTree tree bph of
-                Left err -> do
-                    nodeMsg env node $ "failed to insert new block " ++ show hash ++ ": " ++ show err
-                    appA (SET.insert bph) (idle_block env)
+            -- tree <- getA (block_tree env)
 
-                Right new_tree -> do
-                    nodeMsg env node $ "!!!!!!!!! block " ++ show hash ++ " added to tree, new height: " ++ show (treeHeight new_tree)
-                    setA (block_tree env) new_tree
+            -- case insertToTree tree bph of
+            --     Left err -> do
+            --         nodeMsg env node $ "failed to insert new block " ++ show hash ++ ": " ++ show err
+            --         appA (SET.insert bph) (idle_block env)
 
-            LK.release (tree_lock env)
+            --     Right new_tree -> do
+            --         nodeMsg env node $ "!!!!!!!!! block " ++ show hash ++ " added to tree, new height: " ++ show (treeHeight new_tree)
+            --         setA (block_tree env) new_tree
+
+            -- LK.release (tree_lock env)
 
     return []
 
+-- hashes of the latest blocks
+latestBlock :: MainLoopEnv -> IO [Hash256]
+latestBlock env = do
+    tree <- getA $ block_tree env
+    return $ map block_hash $ treeLatest tree -- last layer of known tree
+
+    -- let known = map block_hash $ treeLatest tree
+    -- -- latest with known heights
+
+    -- maxn <- getEnvConf env tckr_known_inv_count
+    -- let less = maxn - length known
+
+    -- idle <- getA $ idle_block env
+    -- let idle_hash = map (\(BlockPayloadHashed hash _) -> hash) $ SET.toList idle
 
 -- find out the inventory
-initFetchBlock :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
-initFetchBlock env node msg = do
+fetchBlock :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
+fetchBlock env node msg = do
     let net = btc_network env
         trans = conn_trans node
 
     fetched <- getA (fetched_block env)
 
-    let invs = SET.toList fetched
-    getblocks <- encodeMsg net BTC_CMD_GETBLOCKS $ encodeGetblocksPayload invs nullHash256
+    latest <- latestBlock env
+    getblocks <- encodeMsg net BTC_CMD_GETBLOCKS $ encodeGetblocksPayload latest nullHash256
     timeoutRetryS (timeout_s env) $ tSend trans getblocks
 
-    recvM BTC_CMD_INV $ \(InvPayload {
+    recvM [] BTC_CMD_INV $ \(InvPayload {
         inv_vect = inv_vect
     }) -> do
         nodeMsg env node $ "inv received with " ++ (show $ length inv_vect) ++ " item(s)" -- ++ show inv_vect
@@ -196,7 +212,7 @@ doFetchBlock task env node msg = do
     -- check_list :: Atom [(Hash256, Maybe BlockPayload)]
     check_list <- newA $ fetch_block task
 
-    recvM BTC_CMD_BLOCK $ \payload@(BlockPayload {
+    recvM [] BTC_CMD_BLOCK $ \payload@(BlockPayload {
         header = header,
         txns = txns
     }) -> do
