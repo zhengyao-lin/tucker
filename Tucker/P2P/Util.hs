@@ -8,15 +8,19 @@ import qualified Data.ByteString as BSR
 import Network.Socket
 import System.Timeout
 
+import Control.Exception
 import Control.Monad.Loops
 
 import Tucker.Enc
 import Tucker.Msg
 import Tucker.Std
+import Tucker.Util
 import Tucker.Atom
 import Tucker.Conf
 import Tucker.Error
+import Tucker.Transport
 
+import Tucker.P2P.Msg
 import Tucker.P2P.Node
 
 ip4ToIP6 :: ByteString -> ByteString
@@ -182,8 +186,49 @@ timeoutFailS sec action = do
     res <- timeoutS sec action
 
     case res of
-        Nothing -> error "action timeout"
+        Nothing -> throw $ TCKRError "action timeout"
         Just v -> return v
 
 timeoutRetryS :: Int -> IO a -> IO a
 timeoutRetryS sec action = untilJust $ timeoutS sec action
+
+nodeRecvOneMsg :: MainLoopEnv
+               -> BTCNode
+               -> (Transport -> ByteString -> IO (Either TCKRError MsgHead, ByteString))
+               -> IO MsgHead
+               -> IO MsgHead
+nodeRecvOneMsg env node recv_proc timeout_proc = do
+    buf         <- getA $ recv_buf node
+    (msg, buf)  <- recv_proc (conn_trans node) buf
+
+    case msg of
+        Right msg@(MsgHead {}) ->
+            if magicno msg /= magicNo (btc_network env) then
+                throw $ TCKRError "network magic number not match"
+            else do
+                updateBuf buf
+                appA (msg:) (msg_list node)
+
+                timestamp <- unixTimestamp
+                setA (last_seen node) timestamp
+
+                return msg
+
+        Right LackData -> updateBuf buf >> timeout_proc
+        Left err -> throw err
+
+    where
+        updateBuf = setA (recv_buf node)
+
+nodeRecvOneMsgTimeout :: MainLoopEnv -> BTCNode -> IO MsgHead -> IO MsgHead
+nodeRecvOneMsgTimeout env node timeout_proc = do
+    nodeRecvOneMsg env node ((flip tRecvOneMsg) (timeout_s env)) timeout_proc
+
+nodeRecvOneMsgNonBlocking :: MainLoopEnv -> BTCNode -> IO MsgHead
+nodeRecvOneMsgNonBlocking env node = do
+    nodeRecvOneMsg env node tRecvOneMsgNonBlocking (return LackData)
+
+-- throw an exception when timeout
+nodeExpectOneMsg :: MainLoopEnv -> BTCNode -> IO MsgHead
+nodeExpectOneMsg env node =
+    nodeRecvOneMsgTimeout env node (throw $ TCKRError "recv timeout")

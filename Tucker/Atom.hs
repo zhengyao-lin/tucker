@@ -3,6 +3,8 @@ module Tucker.Atom where
 import Control.Concurrent
 import Control.Concurrent.STM
 
+import qualified System.IO.Strict as SIO
+
 type Atom t = TVar t
 
 newA :: t -> IO (Atom t)
@@ -15,14 +17,11 @@ setA :: Atom t -> t -> IO ()
 setA v = atomically . writeTVar v
 
 appA :: (t -> t) -> Atom t -> IO ()
-appA f x = atomically $ readTVar x >>= writeTVar x . f
+appA f x = atomically $ modifyTVar' x f
 
--- putStr' :: String -> IO ()
--- putStr' str =
---     str `lseq` putStr str
---     where
---         lseq :: [a] -> b -> b
---         lseq []     w = w
---         lseq (x:xs) w = x `seq` lseq xs w
+lseq :: [a] -> b -> b
+lseq []     w = w
+lseq (x:xs) w = x `seq` lseq xs w
 
--- putStrLn' = putStr' . (++ "\n")
+putStr' = SIO.run . SIO.putStr
+putStrLn' = SIO.run . SIO.putStrLn

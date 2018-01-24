@@ -1,19 +1,24 @@
 module Tucker.Conf where
 
+import Data.Word
 import Network.Socket
 
 data TCKRConf =
     TCKRConf {
-        tckr_trans_timeout :: Int, -- in sec
-        tckr_bootstrap_host :: [String],
+        tckr_trans_timeout   :: Int, -- in sec
+        tckr_bootstrap_host  :: [String],
 
-        tckr_seek_min       :: Int,
-        tckr_seek_max       :: Int,
-        tckr_max_node       :: Int,
+        tckr_seek_min        :: Int,
+        tckr_seek_max        :: Int,
+        tckr_max_node        :: Int,
 
-        tckr_node_blacklist :: [SockAddr],
+        tckr_node_blacklist  :: [SockAddr],
 
-        tckr_gc_interval    :: Integer
+        tckr_gc_interval     :: Integer,
+
+        tckr_max_block_task  :: Int,
+
+        tckr_node_alive_span :: Word64
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -32,7 +37,12 @@ tucker_default_conf =
                 ip4 (0, 0, 0, 0)
             ],
     
-        tckr_gc_interval = 30 * 1000 * 1000 -- 30 sec
+        tckr_gc_interval = 30 * 1000 * 1000, -- 30 sec
+        
+        tckr_max_block_task = 64,
+
+        -- in sec
+        tckr_node_alive_span = 90 * 60 -- 90 min
     }
 
     where

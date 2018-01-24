@@ -5,7 +5,6 @@ import Data.Bits
 import Data.Char
 import Data.Word
 import Data.List
-import Data.Time.Clock.POSIX
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -15,6 +14,7 @@ import Debug.Trace
 
 import Tucker.Enc
 import Tucker.Std
+import Tucker.Util
 import Tucker.Auth
 
 import Tucker.Msg.RPC
@@ -255,9 +255,6 @@ instance Decodable MsgHead where
 
 payloadCheck :: ByteString -> ByteString
 payloadCheck = BS.take 4 . ba2bs . sha256 . sha256
-
-unixTimestamp :: Integral a => IO a
-unixTimestamp = round `fmap` getPOSIXTime
 
 padnull :: Int -> String -> ByteString
 padnull full str =

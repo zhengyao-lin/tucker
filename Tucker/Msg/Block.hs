@@ -7,6 +7,7 @@ import Data.Word
 import qualified Data.ByteString as BSR
 
 import Tucker.Enc
+import Tucker.Auth
 import Tucker.Msg.Tx
 import Tucker.Msg.Inv
 import Tucker.Msg.Common
@@ -30,6 +31,16 @@ data BlockPayload =
         header      :: BlockHeader,
         txns        :: [TxPayload]
     } deriving (Show, Eq)
+
+data BlockPayloadHashed = BlockPayloadHashed Hash256 BlockPayload deriving (Show)
+
+instance Eq BlockPayloadHashed where
+    (BlockPayloadHashed h1 _) == (BlockPayloadHashed h2 _)
+        = h1 == h2
+
+instance Ord BlockPayloadHashed where
+    (BlockPayloadHashed h1 _) `compare` (BlockPayloadHashed h2 _)
+        = h1 `compare` h2
 
 data HeadersPayload = HeadersPayload [BlockHeader] deriving (Show, Eq)
 
@@ -125,3 +136,23 @@ encodeHeadersPayload :: [BlockHeader] -> IO ByteString -- HeadersPayload
 encodeHeadersPayload = return . encodeLE . HeadersPayload
 
 -- encodeBlockPayload
+
+hashBlockHeader :: BlockHeader -> Hash256
+hashBlockHeader (BlockHeader {
+    vers = vers,
+    prev_block = prev_block,
+    merkle_root = merkle_root,
+    timestamp = timestamp,
+    diff_bits = bits,
+    nonce = nonce
+}) =
+    -- sha256^2(vers + prev_block + merkle_root + time + diff + nonce)
+    Hash256FromBS . ba2bs . sha256 . sha256 $ mconcat [
+        encodeLE vers,
+        hash256ToBS prev_block,
+        hash256ToBS merkle_root,
+
+        encodeLE timestamp,
+        encodeLE bits,
+        encodeLE nonce
+    ]

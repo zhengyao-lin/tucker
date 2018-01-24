@@ -4,13 +4,14 @@
 
 module Tucker.Chain.Object where
 
-import Data.Int
-import Data.Set hiding (map, findIndex, null)
+import Data.Int -- hiding (map, findIndex, null)
 import Data.Word
 import Data.List hiding (map)
+import qualified Data.Set as SET
 
 import Tucker.Msg
 import Tucker.Enc
+import Tucker.Util
 import Tucker.Auth
 import Tucker.Error
 
@@ -86,7 +87,7 @@ hashBlock block@(Block {
 -- organize them into the block chain
 
 unique :: Ord a => [a] -> [a]
-unique lst = toList (fromList lst)
+unique lst = SET.toList (SET.fromList lst)
 
 zipLayers :: [[[Block]]] -> [[Block]]
 zipLayers = map (unique . concat) . transpose
@@ -134,9 +135,20 @@ isValidChain (BlockChain chain) = isValidChain' $ reverse chain
 -- -> (updated_previous_block, new_block)
 -- return Nothing if the previous block does not match
 
+layerAt' :: [[Block]] -> Int -> [Block]
+layerAt' layers i =
+    if i >= length layers || i < 0 then []
+    else layers !! i
+
+rootsOf' :: [[Block]] -> [Block]
+rootsOf' layers = layerAt' layers 0
+
+rootsOf :: BlockTree -> [Block]
+rootsOf (BlockTree layers) = rootsOf' layers
+
 -- assuming the given previous block is valid
-linkToBlock :: Hash256 -> BlockPayload -> Maybe Block -> Maybe (Maybe Block, Block)
-linkToBlock hash (BlockPayload {
+linkToBlock :: BlockPayloadHashed -> Maybe Block -> Maybe (Maybe Block, Block)
+linkToBlock (BlockPayloadHashed hash (BlockPayload {
     header = BlockHeader {
         vers = vers,
 
@@ -146,7 +158,7 @@ linkToBlock hash (BlockPayload {
         nonce = nonce
     },
     txns = txns
-}) prev =
+})) prev =
     let
         new_block = Block {
             block_hash = hash,
@@ -175,39 +187,54 @@ linkToBlock hash (BlockPayload {
         else
             Nothing
 
-replace pos new list = take pos list ++ new:drop (pos + 1) list
+isBlockInTree :: BlockTree -> Hash256 -> Bool
+isBlockInTree (BlockTree layers) hash =
+    findIndex ((== hash) . block_hash) (reverse $ concat layers) /= Nothing
 
 -- try to find right place for the new block payload
 -- return Just block to return new block if succeeds
 -- return Nothing if no suitable prev_block is found
-insertToTree :: BlockTree -> Hash256 -> BlockPayload -> Either TCKRError BlockTree
-insertToTree (BlockTree layers) hash payload =
+insertToTree :: BlockTree -> BlockPayloadHashed -> Either TCKRError BlockTree
+insertToTree tree@(BlockTree layers) bph@(BlockPayloadHashed hash payload) =
     let -- layers = rootsToLayers roots
         prev = Tucker.Msg.prev_block $ header payload
         rlayers = reverse layers
         found = dropWhile (not . elem prev . map block_hash) $ rlayers
         found_i = length layers - length found
     in
-        if null found then
+        if isBlockInTree tree hash then
+            Left $ TCKRError "blcok exists"
+        else if null found then
             -- try using it as a genesis
-            let res = linkToBlock hash payload Nothing in
+            let res = linkToBlock bph Nothing in
 
             case res of
-                Nothing -> Left $ TCKRError "illegal block"
+                Nothing -> Left $ TCKRError "parent not found"
                 Just (Nothing, new) ->
-                    Right $ BlockTree $ (head layers ++ [new]) : drop 1 layers
+                    Right $ BlockTree $ (rootsOf' layers ++ [new]) : drop 1 layers
 
         else let
-                layer = head found
-                Just i = findIndex ((== prev) . block_hash) layer
-                res = linkToBlock hash payload (Just $ layer !! i)
-            in case res of
-                Nothing -> Left $ TCKRError "illegal block"
-                Just (Just new_prev_block, new) ->
-                    Right $ BlockTree $  reverse $
-                    take (found_i - 1) rlayers ++ -- layers above (found - 1) layer
-                    [ rlayers !! (found_i - 1) ++ [new] ] ++ -- the new layer inserting to
-                    [ replace i new_prev_block layer ] ++ -- the prev layer updating
-                    drop 1 found -- layers below the found later
+            layer = head found
+            Just i = findIndex ((== prev) . block_hash) layer
+            res = linkToBlock bph (Just $ layer !! i)
+        in case res of
+            Nothing -> Left $ TCKRError "illegal block"
+            Just (Just new_prev_block, new) ->
+                Right $ BlockTree $ reverse $ concat [
+                    take (found_i - 1) rlayers,                  -- layers above (found - 1) layer
+                    [ layerAt' rlayers (found_i - 1) ++ [new] ], -- the new layer inserting to
+                    [ replace i new_prev_block layer ],          -- the prev layer updating
+                    drop 1 found                                 -- layers below the found later
+                ]
 
+treeToSet :: BlockTree -> SET.Set Hash256
+treeToSet (BlockTree layers) = SET.map block_hash $ SET.fromList $ concat layers
 
+chainToSet :: BlockChain -> SET.Set Hash256
+chainToSet (BlockChain chain) = SET.map block_hash $ SET.fromList chain
+
+emptyTree = BlockTree []
+emptyChain = BlockChain []
+
+treeHeight :: BlockTree -> Int
+treeHeight (BlockTree layers) = length layers

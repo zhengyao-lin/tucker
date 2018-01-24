@@ -16,6 +16,7 @@ import Tucker.Std
 import Tucker.Msg
 import Tucker.Enc
 import Tucker.Conf
+import Tucker.Util
 import Tucker.Atom
 import Tucker.Error
 import Tucker.Transport
@@ -85,6 +86,9 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
                     return []
 
+            h BTC_CMD_BLOCK = do
+                d $ \msg -> addNewBlock env node msg
+
             h _ = do
                 nodeMsg env node $ "unhandled message: " ++ (show command)
                 return []
@@ -92,7 +96,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 nodeDefaultAction = NormalAction nodeDefaultActionHandler
 
 nodeDefaultActionList = [
-        NormalAction fetchBlock,
+        NormalAction initFetchBlock,
         nodeDefaultAction
     ]
 
@@ -160,43 +164,6 @@ nodeFinal env node res = do
     setA (alive node) False
     tClose $ conn_trans node
 
-nodeRecvOneMsg :: MainLoopEnv
-               -> BTCNode
-               -> (Transport -> ByteString -> IO (Either TCKRError MsgHead, ByteString))
-               -> IO MsgHead
-               -> IO MsgHead
-nodeRecvOneMsg env node recv_proc timeout_proc = do
-    buf         <- getA $ recv_buf node
-    (msg, buf)  <- recv_proc (conn_trans node) buf
-
-    case msg of
-        Right msg@(MsgHead {}) ->
-            if magicno msg /= magicNo (btc_network env) then
-                throw $ TCKRError "network magic number not match"
-            else do
-                updateBuf buf
-                appA (msg:) (msg_list node)
-                return msg
-
-        Right LackData -> updateBuf buf >> timeout_proc
-        Left err -> throw err
-
-    where
-        updateBuf = setA (recv_buf node)
-
-nodeRecvOneMsgTimeout :: MainLoopEnv -> BTCNode -> IO MsgHead -> IO MsgHead
-nodeRecvOneMsgTimeout env node timeout_proc = do
-    nodeRecvOneMsg env node ((flip tRecvOneMsg) (timeout_s env)) timeout_proc
-
-nodeRecvOneMsgNonBlocking :: MainLoopEnv -> BTCNode -> IO MsgHead
-nodeRecvOneMsgNonBlocking env node = do
-    nodeRecvOneMsg env node tRecvOneMsgNonBlocking (return LackData)
-
--- throw an exception when timeout
-nodeExpectOneMsg :: MainLoopEnv -> BTCNode -> IO MsgHead
-nodeExpectOneMsg env node =
-    nodeRecvOneMsgTimeout env node (throw $ TCKRError "recv timeout")
-
 handshake :: MainLoopEnv -> BTCNode -> IO ()
 handshake env node = do
     let net = btc_network env
@@ -246,16 +213,19 @@ probe :: MainLoopEnv -> [AddrInfo] -> IO ()
 probe env addrs = do
     let net = btc_network env
 
-    res <- (flip mapM) addrs $ \addr -> do
+    res <- (flip mapM) addrs $ \addr -> (try $ do
         envMsg env ("probing " ++ (show $ addrAddress addr))
 
         sock         <- buildSocketTo addr
         res          <- timeoutFailS (timeout_s env) $ connect sock (addrAddress addr)
         
+        timestamp    <- unixTimestamp
+
         vers_payload <- newA VersionPending -- version placeholder
         trans        <- tFromSocket sock
         recv_buf     <- newA $ BSR.empty
         msg_list     <- newA []
+        last_seen    <- newA timestamp
         thread_id    <- myThreadId >>= newA
         action_list  <- newA nodeDefaultActionList
         new_action   <- newA []
@@ -270,6 +240,7 @@ probe env addrs = do
 
             recv_buf     = recv_buf,
             msg_list     = msg_list,
+            last_seen    = last_seen,
             thread_id    = thread_id,
             action_list  = action_list,
             new_action   = new_action,
@@ -280,6 +251,8 @@ probe env addrs = do
 
         appA (++ [node]) (node_list env)
 
-        return $ Just node
+        -- return $ Just node
+
+        return ()) :: IO (Either SomeException ())
 
     return ()

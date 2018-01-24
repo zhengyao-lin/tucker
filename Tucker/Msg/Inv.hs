@@ -44,6 +44,8 @@ instance Decodable InvType where
 -- type and hash
 data InvVector = InvVector InvType Hash256 deriving (Show, Eq)
 
+invToHash256 (InvVector _ hash) = hash
+
 instance Encodable InvVector where
     encode end (InvVector htype hash) =
         encode end htype <> encode end hash

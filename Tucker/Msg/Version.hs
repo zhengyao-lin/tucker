@@ -9,6 +9,7 @@ import System.Random
 
 import Tucker.Enc
 import Tucker.Std
+import Tucker.Util
 
 import Tucker.Msg.Common
 
