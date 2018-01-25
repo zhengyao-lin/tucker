@@ -45,7 +45,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
             h BTC_CMD_PING = do
                 d $ \ping@(PingPongPayload {}) -> do
                     pong <- encodeMsg net BTC_CMD_PONG $ pure $ encodeLE ping
-                    nodeMsg env node $ "pinging back: " ++ (show pong)
+                    -- nodeMsg env node $ "pinging back: " ++ (show pong)
                     timeoutS (timeout_s env) $ tSend trans pong
                     return []
 
@@ -54,7 +54,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                 netaddrs    <- forM nodes nodeToNetAddr
                 addr        <- encodeMsg net BTC_CMD_ADDR $ encodeAddrPayload [ v | Just v <- netaddrs ]
 
-                nodeMsg env node $ "return addresses"
+                -- nodeMsg env node $ "return addresses"
 
                 timeoutS (timeout_s env) $ tSend trans addr
 
@@ -67,7 +67,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                     nodes       <- getA $ node_list env
                     seek_max    <- getEnvConf env tckr_seek_max
 
-                    nodeMsg env node (show addrmsg)
+                    -- nodeMsg env node (show addrmsg)
 
                     if length nodes < seek_max then do
                         new_list <- forM netaddrs netAddrToAddrInfo
@@ -87,7 +87,9 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                     return []
 
             h BTC_CMD_BLOCK = do
-                d $ \msg -> addNewBlock env node msg
+                d $ \msg -> do
+                    envAddIdleBlock env node msg
+                    return []
 
             h _ = do
                 nodeMsg env node $ "unhandled message: " ++ (show command)
@@ -102,7 +104,7 @@ nodeDefaultAction = NormalAction nodeDefaultActionHandler
 -- then re-exec the fetchBlock on other <a> nodes
 
 nodeDefaultActionList = [
-        NormalAction fetchBlock, -- for test
+        -- NormalAction fetchBlock, -- for test
         nodeDefaultAction
     ]
 
@@ -112,6 +114,7 @@ nodeProcMsg :: MainLoopEnv -> BTCNode -> MsgHead -> IO ()
 nodeProcMsg env node msg = do
     -- prepend new actions
     new_alist <- getA $ new_action node
+    setA (new_action node) []
     appA (new_alist ++) (action_list node)
     
     current_alist <- getA $ action_list node

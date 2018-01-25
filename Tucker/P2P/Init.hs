@@ -38,7 +38,7 @@ blockLoop env =
 
             case insertToTree tree bph of
                 Left err -> do
-                    envMsg env $ "failed to collect idle block " ++ show hash ++ ": " ++ show err
+                    -- envMsg env $ "failed to collect idle block " ++ show hash ++ ": " ++ show err
                     -- appA ((hash, payload):) (idle_block env)
                     LK.release (tree_lock env)
 
@@ -51,12 +51,17 @@ blockLoop env =
 
                     return (True, bph)
 
-        let new_idle = map snd $ filter fst res
+        let collected_idle = map snd $ filter fst res
 
         -- update idle blocks
-        appA (SET.union $ SET.fromList new_idle) (idle_block env)
+        appA (SET.\\ SET.fromList collected_idle) (idle_block env)
         
-        delay 100000
+        if null collected_idle then
+            -- no new block collected
+            -- wait for 10 sec
+            delay $ 10 * 1000 * 1000
+        else -- try again immediately
+            return ()
 
 gcLoop :: MainLoopEnv -> IO ()
 gcLoop env = 
@@ -68,6 +73,7 @@ gcLoop env =
         marked <- forM cur_list $ \node -> do
             alive <- getA $ alive node
 
+            -- check if the node has not been responding for a long time
             last_seen <- nodeLastSeen node
             alive_span <- getEnvConf env tckr_node_alive_span
             let kill = timestamp - last_seen > alive_span

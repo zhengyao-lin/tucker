@@ -51,13 +51,20 @@ data BlockFetchTask =
         fetch_block :: [(Hash256, Maybe BlockPayload)]
     }
 
+instance Monoid BlockFetchTask where
+    mempty = BlockFetchTask []
+    mappend (BlockFetchTask t1) (BlockFetchTask t2)
+        = BlockFetchTask $ t1 ++ t2
+
+instance NodeTask BlockFetchTask
+
 splitTask :: Int -> [InvVector] -> [BlockFetchTask]
 splitTask maxt invs =
     [
         BlockFetchTask {
-            fetch_block = map (\h -> (h, Nothing)) $ take maxt hashes
+            fetch_block = map (\h -> (h, Nothing)) $ take maxt $ drop (i * maxt) hashes
         }
-        | _ <- [ 1 .. taskn ]
+        | i <- [ 0 .. taskn - 1 ]
     ]
     where
         taskn = ceiling $ (fromIntegral $ length invs) / fromIntegral maxt
@@ -69,62 +76,9 @@ taskToInv (BlockFetchTask { fetch_block = fetch_block })
 
 -- spread out fetch tasks to different nodes
 -- return rest tasks
-spreadFetchTasks :: MainLoopEnv -> [BlockFetchTask] -> IO [BlockFetchTask]
-spreadFetchTasks env tasks = do
-    nodes <- getA (node_list env)
-    alive_nodes <- filterM (getA . alive) nodes
-
-    let rest = length tasks - length alive_nodes
-
-    -- no enough nodes
-    forM (zip alive_nodes tasks) $ \(node, task) -> do
-        appA ((NormalAction $ doFetchBlock task):) (new_action node)
-
-    return $ drop (length tasks - rest) tasks
-
-addNewBlock :: MainLoopEnv -> BTCNode -> BlockPayload -> IO [RouterAction]
-addNewBlock env node payload@(BlockPayload {
-    header = header,
-    txns = txns
-}) = do
-    let hash = hashBlockHeader header
-        bph = BlockPayloadHashed hash payload
-
-    -- 1. try to insert to the tree
-    -- 2. if cannot, push it to the idle block
-
-    fetched <- getA (fetched_block env)
-
-    case SET.lookupIndex hash fetched of
-        Just _ -> do
-            nodeMsg env node $ "block received again: " ++ (show hash)
-            return () -- already fetched, do nothing
-
-        Nothing -> do
-            nodeMsg env node $ "block received: " ++ (show hash) -- ++ " " ++ (show payload)
-
-            -- add to the set
-            appA (SET.insert hash) (fetched_block env)
-
-            appA (SET.insert bph) (idle_block env)
-
-            -- -- lock tree
-            -- LK.acquire (tree_lock env)
-
-            -- tree <- getA (block_tree env)
-
-            -- case insertToTree tree bph of
-            --     Left err -> do
-            --         nodeMsg env node $ "failed to insert new block " ++ show hash ++ ": " ++ show err
-            --         appA (SET.insert bph) (idle_block env)
-
-            --     Right new_tree -> do
-            --         nodeMsg env node $ "!!!!!!!!! block " ++ show hash ++ " added to tree, new height: " ++ show (treeHeight new_tree)
-            --         setA (block_tree env) new_tree
-
-            -- LK.release (tree_lock env)
-
-    return []
+spreadFetchTask :: MainLoopEnv -> [BlockFetchTask] -> IO ()
+spreadFetchTask env tasks =
+    envSpreadAction env ((:[]) . NormalAction . doFetchBlock) tasks
 
 -- hashes of the latest blocks
 latestBlock :: MainLoopEnv -> IO [Hash256]
@@ -132,20 +86,13 @@ latestBlock env = do
     tree <- getA $ block_tree env
     return $ map block_hash $ treeLatest tree -- last layer of known tree
 
-    -- let known = map block_hash $ treeLatest tree
-    -- -- latest with known heights
-
-    -- maxn <- getEnvConf env tckr_known_inv_count
-    -- let less = maxn - length known
-
-    -- idle <- getA $ idle_block env
-    -- let idle_hash = map (\(BlockPayloadHashed hash _) -> hash) $ SET.toList idle
-
 -- find out the inventory
 fetchBlock :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
 fetchBlock env node msg = do
     let net = btc_network env
         trans = conn_trans node
+
+    nodeMsg env node $ "start fetching blocks"
 
     fetched <- getA (fetched_block env)
 
@@ -158,38 +105,11 @@ fetchBlock env node msg = do
     }) -> do
         nodeMsg env node $ "inv received with " ++ (show $ length inv_vect) ++ " item(s)" -- ++ show inv_vect
 
-        -- getdata
-        getdata <- encodeMsg net BTC_CMD_GETDATA $ encodeGetdataPayload inv_vect
-        timeoutRetryS (timeout_s env) $ tSend trans getdata
+        maxt <- getEnvConf env tckr_max_block_task
+        let tasks = splitTask maxt inv_vect
+        rest <- spreadFetchTask env tasks
 
-        -- request sent, leave the rest to addNewBlock
         return [ DumpMe ]
-
-        -- recvM BTC_CMD_BLOCK $ \payload@(BlockPayload {
-        --     header = header,
-        --     txns = txns
-        -- }) -> addBlock 
-
-            -- r_check_list <- getA check_list
-
-            -- case findIndex (== (hash, Nothing)) r_check_list of
-            --     Nothing -> return [] -- pass along
-            --     Just i -> do
-            --         appA (replace i (hash, Just payload)) check_list
-            --         envAddFetchedBlock env hash
-
-            --         -- save block
-
-            --         return [ StopProp ]
-
-        -- maxt <- getEnvConf env tckr_max_block_task
-        -- let tasks = splitTask maxt inv_vect
-        -- rest <- spreadFetchTasks env tasks
-        
-        -- if not $ null rest then
-        --     nodeMsg env node "extra tasks not handled"
-        -- else
-        --     nodeMsg env node "all tasks broadcasted"
 
 doFetchBlock :: BlockFetchTask -> MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
 doFetchBlock task env node msg = do
@@ -199,39 +119,9 @@ doFetchBlock task env node msg = do
     let net = btc_network env
         trans = conn_trans node
 
-    -- getblocks <- encodeMsg net BTC_CMD_GETBLOCKS $ encodeGetblocksPayload [] nullHash256
-    -- timeoutRetryS (timeout_s env) $ tSend trans getblocks
-
-    -- nodeMsg env node "!!! waiting for inv"
-    -- recvM BTC_CMD_INV $ \(InvPayload {}) -> do
-    -- nodeMsg env node "!!! inv received"
-
     getdata <- encodeMsg net BTC_CMD_GETDATA $ encodeGetdataPayload (taskToInv task)
     timeoutRetryS (timeout_s env) $ tSend trans getdata
 
-    -- check_list :: Atom [(Hash256, Maybe BlockPayload)]
-    check_list <- newA $ fetch_block task
+    nodeMsg env node "getdata sent"
 
-    recvM [] BTC_CMD_BLOCK $ \payload@(BlockPayload {
-        header = header,
-        txns = txns
-    }) -> do
-        nodeMsg env node "!!! block received"
-
-        let hash = hashBlockHeader header
-        
-        nodeMsg env node $ "block received: " ++ (show hash) ++ " " ++ (show payload)
-
-        r_check_list <- getA check_list
-
-        case findIndex (== (hash, Nothing)) r_check_list of
-            Nothing -> return [] -- pass along
-            Just i -> do
-                appA (replace i (hash, Just payload)) check_list
-                envAddFetchedBlock env hash
-
-                -- save block
-
-                return [ StopProp ]
-
-    -- nodeRecvOneMsg env node 
+    return [ DumpMe ]
