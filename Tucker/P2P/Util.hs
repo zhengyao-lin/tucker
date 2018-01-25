@@ -130,18 +130,18 @@ netAddrToAddrInfo netaddr = do
 
         is_ip4 = ip4ToIP6 h4 == ip
 
-nodeToNetAddr :: BTCNode -> IO (Maybe NetAddr)
-nodeToNetAddr node = do
-    let sockaddr = addrAddress $ addr node
-    vers <- getA $ vers_payload node
-    alive <- getA $ alive node
+-- nodeNetAddr :: BTCNode -> IO (Maybe NetAddr)
+-- nodeNetAddr node = do
+--     let sockaddr = addrAddress $ addr node
+--     vers <- getA $ vers_payload node
+--     alive <- getA $ alive node
 
-    if vers == VersionPending || not alive then
-        -- error "version not ready(no handshake?)"
-        return Nothing
-    else do
-        netaddr <- sockAddrToNetAddr sockaddr (vers_serv vers)
-        return $ Just $ netaddr
+--     if vers == VersionPending || not alive then
+--         -- error "version not ready(no handshake?)"
+--         return Nothing
+--     else do
+--         netaddr <- sockAddrToNetAddr sockaddr (vers_serv vers)
+--         return $ Just $ netaddr
 
 isSameIP :: SockAddr -> SockAddr -> Bool
 isSameIP (SockAddrInet _ h1) (SockAddrInet _ h2) = h1 == h2
@@ -154,7 +154,7 @@ filterProbingList env new_list = do
 
     bl <- getEnvConf env tckr_node_blacklist
 
-    let exist_sockaddr = map (addrAddress . addr) nodes
+    let exist_sockaddr = map sock_addr nodes
         blacklist = exist_sockaddr ++ bl
 
     return $ filter (\a -> all (not . isSameIP (addrAddress a)) blacklist) new_list

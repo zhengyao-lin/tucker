@@ -51,8 +51,8 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
             h BTC_CMD_GETADDR = do
                 nodes       <- getA (node_list env)
-                netaddrs    <- forM nodes nodeToNetAddr
-                addr        <- encodeMsg net BTC_CMD_ADDR $ encodeAddrPayload [ v | Just v <- netaddrs ]
+                net_addrs    <- forM nodes nodeNetAddr
+                addr        <- encodeMsg net BTC_CMD_ADDR $ encodeAddrPayload net_addrs
 
                 -- nodeMsg env node $ "return addresses"
 
@@ -62,7 +62,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
             h BTC_CMD_ADDR = do
                 d $ \addrmsg@(AddrPayload {
-                    addrs = netaddrs
+                    addrs = net_addrs
                 }) -> do
                     nodes       <- getA $ node_list env
                     seek_max    <- getEnvConf env tckr_seek_max
@@ -70,7 +70,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                     -- nodeMsg env node (show addrmsg)
 
                     if length nodes < seek_max then do
-                        new_list <- forM netaddrs netAddrToAddrInfo
+                        new_list <- forM net_addrs netAddrToAddrInfo
                         filted   <- filterProbingList env new_list
 
                         -- nodeMsg env node $ "filted: " ++ (show $ map addrAddress filted)
@@ -153,13 +153,23 @@ nodeProcMsg env node msg = do
     return ()
 
 nodeExec :: MainLoopEnv -> BTCNode -> IO ()
-nodeExec env node = do
-    myThreadId >>= setA (thread_id node)
+nodeExec env unready_node = do
+    nodeMsg env unready_node "spawn"
 
-    nodeMsg env node "forked"
+    -- update thread id
+    tid <- myThreadId
+    let node = unready_node { thread_id = tid }
+    
+    -- update after handshake
+    node <- timeoutFailS (timeout_s env) $ handshake env node
 
-    timeoutFailS (timeout_s env) $ handshake env node
+    -- set default action
+    nodePrependAction node nodeDefaultActionList
 
+    -- officially inserting the node
+    envAppendNode env node
+
+    -- enter event loop
     whileM_ (pure True) $
         nodeRecvOneMsgNonBlocking env node >>=
         nodeProcMsg env node
@@ -173,14 +183,14 @@ nodeFinal env node res = do
     setA (alive node) False
     tClose $ conn_trans node
 
-handshake :: MainLoopEnv -> BTCNode -> IO ()
+handshake :: MainLoopEnv -> BTCNode -> IO BTCNode
 handshake env node = do
     let net = btc_network env
         trans = conn_trans node
 
-    netaddr <- ip4ToNetAddr "127.0.0.1" (listenPort net) btc_cli_service
+    net_addr <- ip4ToNetAddr "127.0.0.1" (listenPort net) btc_cli_service
     version <- encodeMsg net BTC_CMD_VERSION $
-               encodeVersionPayload net netaddr
+               encodeVersionPayload net net_addr
 
     -- send version
     tSend trans version
@@ -192,29 +202,41 @@ handshake env node = do
     } <- nodeExpectOneMsg env node
     
     -- decode peer's version and check
-    decodePayload env node payload
-        (throw $ TCKRError "version decode failed") $
-        \vp@(VersionPayload {
+
+    let decode = doDecode (decoder :: Decoder VersionPayload) LittleEndian
+
+    case decode payload of
+        (Left err, _) ->
+            throw $ TCKRError $ "version decode failed: " ++ show err
+
+        (Right vp@(VersionPayload {
             vers = vers,
-            user_agent = VStr user_agent
-        }) -> do
+            user_agent = VStr user_agent,
+            vers_serv = vers_serv
+        }), _) -> do
             nodeMsg env node $ "version received: " ++ (show vers) ++ user_agent
-            setA (vers_payload node) vp
 
-    -- Left err -> throw $ TCKRError $ "version decode failed: " ++ (show err)
+            net_addr <- sockAddrToNetAddr (sock_addr node) vers_serv
 
-    -- send verack
-    ack <- encodeMsg net BTC_CMD_VERACK $ encodeVerackPayload
-    tSend trans ack
-    
-    -- receive verack
-    MsgHead {
-        command = BTC_CMD_VERACK
-    } <- nodeExpectOneMsg env node
+            -- update vp
+            let new_node = node {
+                vers_payload = vp,
+                net_addr = net_addr
+            }
 
-    -- handshake finished
-    
-    nodeMsg env node "handshaking succeeded"
+            -- send verack
+            ack <- encodeMsg net BTC_CMD_VERACK $ encodeVerackPayload
+            tSend trans ack
+            
+            -- receive verack
+            MsgHead {
+                command = BTC_CMD_VERACK
+            } <- nodeExpectOneMsg env new_node
+
+            -- handshake finished
+            nodeMsg env node "handshaking succeeded"
+
+            return new_node
 
 -- return alive address
 -- timeout in seconds
@@ -223,43 +245,19 @@ probe env addrs = do
     let net = btc_network env
 
     res <- (flip mapM) addrs $ \addr -> (try $ do
-        envMsg env ("probing " ++ (show $ addrAddress addr))
+        let sock_addr = addrAddress addr
+
+        envMsg env ("probing " ++ show sock_addr)
 
         sock         <- buildSocketTo addr
-        res          <- timeoutFailS (timeout_s env) $ connect sock (addrAddress addr)
-        
-        timestamp    <- unixTimestamp
+        _            <- timeoutFailS (timeout_s env) $ connect sock sock_addr
 
-        vers_payload <- newA VersionPending -- version placeholder
-        trans        <- tFromSocket sock
-        recv_buf     <- newA $ BSR.empty
-        msg_list     <- newA []
-        last_seen    <- newA timestamp
-        thread_id    <- myThreadId >>= newA
-        action_list  <- newA nodeDefaultActionList
-        new_action   <- newA []
-        alive        <- newA True
-
-        let node = BTCNode {
-            conn_trans   = trans,
-            addr         = addr,
-            incoming     = False,
-
-            vers_payload = vers_payload,
-
-            recv_buf     = recv_buf,
-            msg_list     = msg_list,
-            last_seen    = last_seen,
-            thread_id    = thread_id,
-            action_list  = action_list,
-            new_action   = new_action,
-            alive        = alive
-        }
+        trans <- tFromSocket sock
+        node <- initNode sock_addr trans
 
         forkFinally (nodeExec env node) (nodeFinal env node)
 
-        appA (++ [node]) (node_list env)
-
+        -- appA (++ [node]) (node_list env)
         -- return $ Just node
 
         return ()) :: IO (Either SomeException ())

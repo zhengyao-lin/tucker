@@ -27,7 +27,7 @@ data VersionPayload =
         user_agent   :: VStr,
         start_height :: Int32,
         relay        :: Bool
-    } | VersionPending deriving (Show, Eq)
+    } deriving (Show, Eq)
 
 instance MsgPayload VersionPayload
 

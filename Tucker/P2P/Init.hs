@@ -25,6 +25,24 @@ bootstrap env hostnames = do
     addrs <- (mapM (seedLookup $ btc_network env) hostnames) >>= (pure . concat)
     probe env addrs
 
+    
+{-
+
+some ideas about block chain storage
+when the tree has reached a certain height(e.g. 10240)
+we want to dump part of it into the disk
+
+1. what do we dump, tree or chain
+    tree(so that we can save the branchings and act more quickly at the next boot)
+
+2. how do we store the chain
+    we can transform our chain to a encodable and decodable type BlockTreePart
+    and write it to a file
+
+3. 
+
+-}
+
 -- collect idle blocks
 blockLoop :: MainLoopEnv -> IO ()
 blockLoop env =
@@ -80,9 +98,9 @@ gcLoop env =
 
             if kill then do
                 nodeMsg env node "timeout and quit"
-                tid <- getA (thread_id node)
-                killThread tid
-            else return ()
+                killThread $ thread_id node
+            else
+                return ()
 
             return (node, alive && not kill)
 

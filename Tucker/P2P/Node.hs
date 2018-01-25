@@ -16,6 +16,7 @@ import Tucker.Enc
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Atom
+import Tucker.Util
 import Tucker.Transport
 
 import Tucker.Chain.Object
@@ -60,16 +61,16 @@ type ActionHandle = MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
 data BTCNode =
     BTCNode {
         conn_trans     :: Transport,
-        addr           :: AddrInfo,
         incoming       :: Bool,
 
-        vers_payload   :: Atom VersionPayload,
+        thread_id      :: ThreadId,
+        sock_addr      :: SockAddr,
+        net_addr       :: NetAddr,
+        vers_payload   :: VersionPayload,
 
         recv_buf       :: Atom ByteString,
         msg_list       :: Atom [MsgHead], -- prepend
         last_seen      :: Atom Word64,
-
-        thread_id      :: Atom ThreadId,
 
         action_list    :: Atom [NodeAction],
         new_action     :: Atom [NodeAction],
@@ -79,7 +80,7 @@ data BTCNode =
 
 instance Show BTCNode where
     show node =
-        "node on " ++ (show $ addrAddress $ addr node)
+        "node on " ++ show (sock_addr node)
 
 -- used in spreading actions
 -- a task can be anything specified for a action
@@ -172,6 +173,35 @@ initEnv net conf = do
         idle_block = idle_block
     }
 
+initNode :: SockAddr -> Transport -> IO BTCNode
+initNode sock_addr trans = do
+    timestamp    <- unixTimestamp
+
+    -- vers_payload <- newA VersionPending -- version placeholder
+    recv_buf     <- newA $ BSR.empty
+    msg_list     <- newA []
+    last_seen    <- newA timestamp
+    action_list  <- newA [] -- nodeDefaultActionList
+    new_action   <- newA []
+    alive        <- newA True
+
+    return $ BTCNode {
+        conn_trans   = trans,
+        incoming     = False,
+
+        thread_id    = undefined,
+        sock_addr    = sock_addr,
+        net_addr     = undefined,
+        vers_payload = undefined,
+
+        recv_buf     = recv_buf,
+        msg_list     = msg_list,
+        last_seen    = last_seen,
+        action_list  = action_list,
+        new_action   = new_action,
+        alive        = alive
+    }
+
 getEnvConf :: MainLoopEnv -> (TCKRConf -> t) -> IO t
 getEnvConf env field = do
     return $ field $ global_conf env
@@ -231,6 +261,13 @@ nodeMsg env node msg = do
 nodeLastSeen :: BTCNode -> IO Word64
 nodeLastSeen = getA . last_seen
 
+nodePrependAction :: BTCNode -> [NodeAction] -> IO ()
+nodePrependAction node new_actions =
+    appA (new_actions ++) (new_action node)
+
+nodeNetAddr :: BTCNode -> IO NetAddr
+nodeNetAddr = return . net_addr
+
 -- spread actions to nodes
 envSpreadAction :: NodeTask t => MainLoopEnv -> (t -> [NodeAction]) -> [t] -> IO ()
 envSpreadAction env gen_action tasks = do
@@ -255,15 +292,14 @@ envSpreadAction env gen_action tasks = do
         nodeMsg env node $ "prepending new action(s)"
 
         -- append new actions to each node
-        appA (gen_action task ++) (new_action node)
-
-    -- if length target_nodes < n then
-    --     envMsg env $ "warning: no enough nodes(expected " ++ show n ++ ")"
-    -- else
-    --     envMsg env $ "actions spreaded"
+        nodePrependAction node (gen_action task)
         
     return ()
 
 envSpreadSimpleAction :: MainLoopEnv -> NodeAction -> Int -> IO ()
 envSpreadSimpleAction env action n =
     envSpreadAction env (const [action]) [ NullTask | _ <- [ 1 .. n ] ]
+
+envAppendNode :: MainLoopEnv -> BTCNode -> IO ()
+envAppendNode env node =
+    appA (++ [node]) (node_list env)
