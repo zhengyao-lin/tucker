@@ -253,6 +253,16 @@ instance Decodable MsgHead where
                 else
                     fail "payload check failed"
 
+-- vint + list
+vlistD :: Decoder t -> Decoder [t]
+vlistD elemD = do
+    VInt len <- decoder
+    listD (fromInteger len) elemD
+
+encodeVList :: Encodable t => Endian -> [t] -> ByteString
+encodeVList end list =
+    encode end (VInt $ fromIntegral $ length list) <> encode end list
+
 payloadCheck :: ByteString -> ByteString
 payloadCheck = BS.take 4 . ba2bs . sha256 . sha256
 

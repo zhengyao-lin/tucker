@@ -64,15 +64,10 @@ data InvPayload =
 instance MsgPayload InvPayload
 
 instance Encodable InvPayload where
-    encode end (InvPayload inv_vect) =
-        encode end (VInt (fromIntegral $ length inv_vect))
-        <> encode end inv_vect
+    encode end (InvPayload inv_vect) = encodeVList end inv_vect
 
 instance Decodable InvPayload where
-    decoder = do
-        (VInt count) <- decoder
-        inv_vect <- listD (fromInteger count) decoder
-        return $ InvPayload inv_vect
+    decoder = vlistD decoder >>= (return . InvPayload)
 
 encodeInvPayload :: [InvVector] -> IO ByteString
 encodeInvPayload = return . encodeLE . InvPayload
@@ -93,16 +88,14 @@ instance Encodable GetblocksPayload where
     encode end (GetblocksPayload vers locator stop_hash) =
         mconcat [
             encode end vers,
-            encode end (VInt $ fromIntegral $ length locator),
-            encode end locator,
+            encodeVList end locator,
             encode end stop_hash
         ]
 
 instance Decodable GetblocksPayload where
     decoder = do
         vers <- decoder
-        (VInt count) <- decoder
-        locator <- listD (fromIntegral count) decoder
+        locator <- vlistD decoder
         stop_hash <- decoder
 
         return $ GetblocksPayload {

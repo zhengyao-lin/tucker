@@ -42,21 +42,26 @@ instance Ord BlockPayloadHashed where
     (BlockPayloadHashed h1 _) `compare` (BlockPayloadHashed h2 _)
         = h1 `compare` h2
 
+instance Encodable BlockPayloadHashed where
+    encode end (BlockPayloadHashed hash payload) =
+        encode end hash <> encode end payload
+
+instance Decodable BlockPayloadHashed where
+    decoder = do
+        hash <- decoder
+        payload <- decoder
+        return $ BlockPayloadHashed hash payload
+
 data HeadersPayload = HeadersPayload [BlockHeader] deriving (Show, Eq)
 
 instance MsgPayload BlockPayload
 instance MsgPayload HeadersPayload
 
 instance Encodable HeadersPayload where
-    encode end (HeadersPayload headers) =
-        encode end (VInt $ fromIntegral $ length headers)
-        <> encode end headers
+    encode end (HeadersPayload headers) = encodeVList end headers
 
 instance Decodable HeadersPayload where
-    decoder = do
-        (VInt count) <- decoder
-        headers <- listD (fromIntegral count) decoder
-        return $ HeadersPayload headers
+    decoder = vlistD decoder >>= (return . HeadersPayload)
 
 instance Encodable BlockHeader where
     encode end (BlockHeader {

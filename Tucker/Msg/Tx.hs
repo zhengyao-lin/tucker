@@ -145,11 +145,8 @@ instance Encodable TxPayload where
             
             if flag == 0 then BSR.empty else e flag,
 
-            e (VInt $ fromIntegral $ length tx_in),
-            e tx_in,
-            
-            e (VInt $ fromIntegral $ length tx_out),
-            e tx_out,
+            encodeVList end tx_in,
+            encodeVList end tx_out,
             
             e tx_witness,
             
@@ -163,13 +160,10 @@ instance Decodable TxPayload where
     decoder = do
         version <- decoder
 
-        -- TODO: ignoring flag here
+        -- TODO: ignoring flags here
 
-        (VInt len) <- decoder
-        tx_in <- listD (fromIntegral len) decoder
-
-        (VInt len) <- decoder
-        tx_out <- listD (fromIntegral len) decoder
+        tx_in <- vlistD decoder
+        tx_out <- vlistD decoder
 
         lock_time <- decoder
 
