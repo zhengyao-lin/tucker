@@ -1,9 +1,22 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+
 module Tucker.Test where
 
+import Network.Socket hiding (send, recv)
+import Network.Socket.ByteString
+import System.Random
+
+import Test.HUnit
+
+import Control.Monad
+
+import Tucker.Enc
 import Tucker.Std
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Atom
+import Tucker.Util
+import Tucker.Error
 
 import Tucker.P2P.Init
 import Tucker.P2P.Util
@@ -12,8 +25,130 @@ import Tucker.P2P.Action
 
 import Tucker.Chain.Object
 
-import Network.Socket hiding (send, recv)
-import Network.Socket.ByteString
+simpleBPH :: Hash256 -> IO BlockPayloadHashed
+simpleBPH prev_block = do
+    nonce <- randomIO
+    timestamp <- unixTimestamp
+
+    return $ blockPayloadToBPH $ BlockPayload {
+        header = BlockHeader {
+            vers = 1,
+            prev_block = prev_block,
+            merkle_root = nullHash256,
+
+            timestamp = timestamp,
+            diff_bits = 1,
+            nonce = nonce,
+
+            txn_count = VInt 0
+        },
+
+        txns = []
+    }
+
+assertEitherRight :: Either TCKRError t -> IO t
+assertEitherRight (Right v) = return v
+assertEitherRight (Left err) = assertFailure $ show err
+
+assertEitherLeft :: Either TCKRError t -> IO ()
+assertEitherLeft (Right _) = assertFailure "expecting error"
+assertEitherLeft (Left err) = return ()
+
+assertInsertTree tree blocks =
+    foldM (\t b -> assertEitherRight $ insertToTree t b) tree blocks
+
+assertFailInsertTree tree blocks =
+    forM blocks (assertEitherLeft . insertToTree tree)
+
+blockBasicTest = TestCase $ do
+    b1 <- simpleBPH nullHash256
+    b2 <- simpleBPH $ bph_hash b1
+    b3 <- simpleBPH $ bph_hash b1
+    b4 <- simpleBPH $ bph_hash b2
+    b5 <- simpleBPH $ bph_hash b3
+    b6 <- simpleBPH $ bph_hash b3
+    b7 <- simpleBPH $ bph_hash b5
+
+    {-
+    
+    the tree1 looks like this:
+    1
+    -- 2
+       -- 4
+    -- 3
+       -- 5
+          -- 7
+       -- 6
+
+    the tree2 should looks like this:
+    1
+    -- 3
+       -- 5
+          -- 7
+    -}
+
+    assertEqual "empty tree should have height 0" 0 (treeHeight emptyTree)
+    assertBool "should not be in tree" (not $ isBlockInTree emptyTree $ bph_hash b1)
+
+    -- inserting non-genesis block should fail
+    assertFailInsertTree emptyTree [ b2, b3, b4, b5, b6, b7 ]
+
+    tree1 <- assertInsertTree emptyTree [ b1, b2, b3, b4, b5, b6, b7 ]
+    tree2 <- assertInsertTree emptyTree [ b1, b3, b5, b7 ]
+
+    assertBool "should all be in tree" $ all (isBlockInTree tree1) $
+        map (bph_hash) [ b1, b2, b3, b4, b5, b6, b7 ]
+
+    assertBool "should be tree" (isValidTree tree1)
+    assertBool "should be tree" (isValidTree tree2)
+
+    assertEqual "wrong tree height" 4 (treeHeight tree1)
+    assertEqual "wrong tree height" 4 (treeHeight tree2)
+
+    -- re-inserting should fail
+    assertFailInsertTree tree1 [ b1, b2, b3, b4, b5, b6, b7 ]
+
+    let chain = fixTree tree1
+
+    assertEqual "should only be 1 chain" 1 (length chain)
+    assertEqual "wrong fixed chain" tree2 (chainToTree $ head chain)
+
+blockTreePartTest = TestCase $ do
+    b1 <- simpleBPH nullHash256
+    b2 <- simpleBPH $ bph_hash b1
+    b3 <- simpleBPH $ bph_hash b1
+    b4 <- simpleBPH $ bph_hash b2
+    b5 <- simpleBPH $ bph_hash b3
+    b6 <- simpleBPH $ bph_hash b3
+    b7 <- simpleBPH $ bph_hash b5
+
+    -- see the structure in the test above
+
+    tree1 <- assertInsertTree emptyTree [ b1, b2, b3, b4, b5, b6, b7 ]
+
+    let tp1 = treeToTreePart tree1
+        (tp2, tp3) = splitTreePart 2 tp1
+        (tp4, tp5) = splitTreePart 100 tp2
+        (tp6, tp7) = splitTreePart 1 tp3
+
+    assertEqual "should be equal when converted back" (Just tree1) (treePartToTree tp1)
+    assertBool "should be fail converting" $
+        all ((== Nothing) . treePartToTree) [ tp3, tp5, tp6, tp7 ]
+
+    assertEqual "split on exceeding length should yield the same result" tp2 tp4
+    -- assertEqual "should be empty" mempty tp5
+
+    assertEqual "should be the same tree part" tp1 (tp2 <> tp3)
+    assertEqual "should be the same tree part" tp2 (tp4 <> tp5)
+    assertEqual "should be the same tree part" tp3 (tp6 <> tp7)
+    assertEqual "should be the same tree part" tp1 (mconcat [ tp4, tp5, tp6, tp7 ])
+
+    assertEqual "should obey associativity" ((tp2 <> tp6) <> tp7) (tp2 <> (tp6 <> tp7))
+
+blockTest = TestList [
+        TestLabel "block tree/chain basic" blockBasicTest,
+        TestLabel "block tree part" blockTreePartTest
+    ]
 
 {-
 

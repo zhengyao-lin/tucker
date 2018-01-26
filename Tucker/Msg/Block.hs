@@ -32,7 +32,13 @@ data BlockPayload =
         txns        :: [TxPayload]
     } deriving (Show, Eq)
 
-data BlockPayloadHashed = BlockPayloadHashed Hash256 BlockPayload deriving (Show)
+data BlockPayloadHashed =
+    BlockPayloadHashed {
+        bph_hash    :: Hash256,
+        bph_payload :: BlockPayload
+    } deriving (Show)
+
+type BPH = BlockPayloadHashed
 
 instance Eq BlockPayloadHashed where
     (BlockPayloadHashed h1 _) == (BlockPayloadHashed h2 _)
@@ -161,3 +167,11 @@ hashBlockHeader (BlockHeader {
         encodeLE bits,
         encodeLE nonce
     ]
+
+blockPayloadToBlockPayloadHash :: BlockPayload -> BlockPayloadHashed
+blockPayloadToBlockPayloadHash payload =
+    BlockPayloadHashed
+        (hashBlockHeader $ header payload)
+        payload
+
+blockPayloadToBPH = blockPayloadToBlockPayloadHash

@@ -14,23 +14,25 @@ import Control.Monad.Loops
 
 import Control.Exception
 
+import Debug.Trace
+
 import Tucker.Msg
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Auth
 import Tucker.Error
 
-data BlockTree = BlockTree [[Block]] deriving (Eq, Show, Read) -- possible multiple roots
-data BlockChain = BlockChain [Block] deriving (Eq, Show, Read)
+data BlockTree = BlockTree [[Block]] deriving (Eq, Show) -- possible multiple roots
+data BlockChain = BlockChain [Block] deriving (Eq, Show)
 
 -- BlockTreePart prev_hash 
 data BlockTreePart = BlockTreePart {
         prev_hashes :: [Hash256], -- if prev_hashes == [], the layers starts from genesis
         layers      :: [[Block]]
-    }
+    } deriving (Eq, Show)
 
 instance Monoid BlockTreePart where
-    mempty = BlockTreePart [] []
+    mempty = emptyTreePart
     mappend a b =
         case linkTreePart a b of
             -- hopefully somebody will catch it
@@ -62,18 +64,14 @@ instance Decodable BlockTreePart where
 
         let all_blocks = concat layers
             init_part = BlockTreePart hashes []
-            -- consume one head and try to insert into the part
-            -- do_iterate :: ([BPH], TreePart) -> Either Error ([BPH], TreePart)
-            do_iterate = \(blocks, part) -> do
-                new_part <- insertToTreePart part (head blocks)
-                return $ (tail blocks, new_part)
 
         if null all_blocks then
             return init_part
         else
-            case iterateUntilM (not . null . fst) do_iterate (all_blocks, init_part) of
+            -- foldM insertToTreePart init_part all_blocks
+            case foldM insertToTreePart init_part all_blocks of
                 Left err -> fail $ "inserting failed: " ++ show err
-                Right (_, new_part) -> return new_part
+                Right new_part -> return new_part
 
 data Block =
     Block {
@@ -91,32 +89,12 @@ data Block =
         nonce       :: Word32,
 
         txns        :: [TxPayload]
-    } deriving (Show, Read)
-
--- instance Decodable Block where
---     decoder = do
---         block_hash <- decoder
---         payload <- blockToBlockPayload
-
---         return $ Block {
---             block_hash = block_hash,
---             vers = vers,
-            
---             prev_hash = prev_hash,
---             prev_block = Nothing,
---             next_block = [],
-            
---             timestamp = timestamp,
---             difficulty = difficulty,
---             nonce = nonce,
---             txns = txns
---         }
-
--- instance Encodable Block where
---     encode end block =
---         encode end $ blockToBlockPayloadHashed block
+    }
 
 self_prev_block = Tucker.Chain.Object.prev_block
+
+instance Show Block where
+    show (Block { block_hash = hash }) = "Block " ++ show hash
 
 instance Eq Block where
     (Block { block_hash = h1 }) == (Block { block_hash = h2 })
@@ -135,6 +113,7 @@ merkleParents (l:r:leaves) =
     (Hash256FromBS . ba2bs . sha256 . sha256 $ hash256ToBS l <> hash256ToBS r):merkleParents leaves
 
 merkleRoot' :: [Hash256] -> [Hash256]
+merkleRoot' [] = [nullHash256]
 merkleRoot' [single] = [single]
 merkleRoot' leaves = merkleRoot' $ merkleParents leaves
 
@@ -297,7 +276,7 @@ linkTreePart (BlockTreePart h1 l1) (BlockTreePart h2 l2) =
             init l1 ++
             [ map (\b -> b {
                     next_block = filter ((== block_hash b) . prev_hash) head_l2_hash
-                }) (last l1) ]
+                }) (last l1) ] ++ l2
 
 -- blockPayloadToBlock payload previous_block hash
 -- -> (updated_previous_block, new_block)
@@ -384,15 +363,15 @@ linkToBlock bph mprev =
             Nothing -> nullHash256
             Just prev -> block_hash prev
 
-        new_block = blockPaylodHashedToBlock bph mprev prev_hash
-
-        new_prev = mprev >>= \prev@(Block { next_block = prev_next_block }) ->
+        new_mprev = mprev >>= \prev@(Block { next_block = prev_next_block }) ->
             return $ prev {
                 next_block = prev_next_block ++ [new_block]
             }
+
+        new_block = blockPaylodHashedToBlock bph new_mprev prev_hash
     in
         if isValidBlock new_block then
-            Just (new_prev, new_block)
+            Just (new_mprev, new_block)
         else
             Nothing
 
@@ -422,9 +401,9 @@ insertToTree' layers bph@(BlockPayloadHashed hash payload) mroots =
         else if null found then
             -- try using it as a genesis/first layer of a tree part
 
-            let
-                insertToRoot layers new =
+            let insertToRoot layers new =
                     (rootsOf' layers ++ [new]) : drop 1 layers
+
             in case mroots of
                 -- if mroots is given, search mroots to see if prev exists
                 Just roots ->
@@ -447,16 +426,16 @@ insertToTree' layers bph@(BlockPayloadHashed hash payload) mroots =
 
         else -- previous block found
             let
-                layer = head found
-                Just i = findIndex ((== prev) . block_hash) layer
-                res = linkToBlock bph (Just $ layer !! i)
+                prev_layer = head found
+                Just i = findIndex ((== prev) . block_hash) prev_layer
+                res = linkToBlock bph (Just $ prev_layer !! i)
             in case res of
                 Nothing -> Left $ TCKRError "illegal block"
                 Just (Just new_prev_block, new) ->
                     Right $ BlockTree $ reverse $ concat [
                         take (found_i - 1) rlayers,                  -- layers above (found - 1) layer
                         [ layerAt' rlayers (found_i - 1) ++ [new] ], -- the new layer inserting to
-                        [ replace i new_prev_block layer ],          -- the prev layer updating
+                        [ replace i new_prev_block prev_layer ],     -- the prev layer updating
                         drop 1 found                                 -- layers below the found later
                     ]
 
@@ -476,6 +455,7 @@ chainToSet (BlockChain chain) = SET.map block_hash $ SET.fromList chain
 
 emptyTree = BlockTree []
 emptyChain = BlockChain []
+emptyTreePart = BlockTreePart [] []
 
 treeHeight :: BlockTree -> Int
 treeHeight (BlockTree layers) = length layers
@@ -483,3 +463,13 @@ treeHeight (BlockTree layers) = length layers
 treeLatest :: BlockTree -> [Block]
 treeLatest (BlockTree layers) =
     if null layers then [] else last layers
+
+chainHeight :: BlockChain -> Int
+chainHeight (BlockChain chain) = length chain
+
+chainToTree :: BlockChain -> BlockTree
+chainToTree (BlockChain chain) = BlockTree $ map (:[]) chain
+
+treePartToTree :: BlockTreePart -> Maybe BlockTree
+treePartToTree (BlockTreePart [] layers) = Just $ BlockTree layers
+treePartToTree _ = Nothing -- previous roots not empty

@@ -51,7 +51,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
             h BTC_CMD_GETADDR = do
                 nodes       <- getA (node_list env)
-                net_addrs    <- forM nodes nodeNetAddr
+                net_addrs   <- forM nodes nodeNetAddr
                 addr        <- encodeMsg net BTC_CMD_ADDR $ encodeAddrPayload net_addrs
 
                 -- nodeMsg env node $ "return addresses"
