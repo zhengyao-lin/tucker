@@ -76,7 +76,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                         -- nodeMsg env node $ "filted: " ++ (show $ map addrAddress filted)
 
                         if not $ null filted then do
-                            nodeMsg env node $ "probing " ++ (show $ length filted) ++ " new nodes"
+                            nodeMsg env node $ "probing " ++ (show $ length filted) ++ " new node(s)"
                             forkIO $ probe env filted
                             return ()
                         else

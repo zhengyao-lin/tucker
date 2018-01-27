@@ -23,6 +23,7 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 
 import Tucker.Chain.Object
+import Tucker.Chain.Cached
 
 -- data CoroAction msg = CoroAction { doAction :: MainLoopEnv -> BTCNode -> msg -> IO [RouterAction] }
 
@@ -84,7 +85,7 @@ spreadFetchTask env tasks =
 latestBlock :: MainLoopEnv -> IO [Hash256]
 latestBlock env = do
     tree <- getA $ block_tree env
-    return $ map block_hash $ treeLatest tree -- last layer of known tree
+    treeCachedLatestHash tree
 
 -- find out the inventory
 fetchBlock :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]

@@ -1,7 +1,10 @@
 module Tucker.P2P.Node where
 
 import Data.Word
+import Data.Foldable as FD
 import qualified Data.Set as SET
+import qualified Data.Set.Ordered as OSET
+
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -10,6 +13,8 @@ import Control.Concurrent
 import qualified Control.Concurrent.Lock as LK
 
 import Network.Socket
+
+import Debug.Trace
 
 import Tucker.Std
 import Tucker.Enc
@@ -20,6 +25,7 @@ import Tucker.Util
 import Tucker.Transport
 
 import Tucker.Chain.Object
+import Tucker.Chain.Cached
 
 -- an environment shared among a main loop
 data MainLoopEnv =
@@ -38,8 +44,8 @@ data MainLoopEnv =
         io_buf        :: Atom [String],
 
         tree_lock     :: LK.Lock,
-        block_tree    :: Atom BlockTree,
-        idle_block    :: Atom (SET.Set BlockPayloadHashed)
+        block_tree    :: Atom BlockTreeCached,
+        idle_block    :: Atom (OSET.OSet BlockPayloadHashed)
     }
 
 data RouterAction
@@ -107,12 +113,12 @@ instance Monoid NullTask where
 instance NodeTask NullTask
 
 envCurrentTreeHeight :: MainLoopEnv -> IO Int
-envCurrentTreeHeight env = getA (block_tree env) >>= (return . treeHeight)
+envCurrentTreeHeight env = getA (block_tree env) >>= treeCachedHeight
 
 envDumpIdleBlock :: MainLoopEnv -> IO [Hash256]
 envDumpIdleBlock env =
     getA (idle_block env) >>=
-    (return . map (\(BlockPayloadHashed hash _) -> hash) . SET.toList)
+    (return . map (\(BlockPayloadHashed hash _) -> hash) . FD.toList)
 
 envDumpReceivedBlock :: MainLoopEnv -> IO [Hash256]
 envDumpReceivedBlock env =
@@ -130,16 +136,8 @@ envMsg env msg = do
     -- appA (++ [ "env: " ++ msg ]) (io_buf env)
     -- putStrLn' $ "env: " ++ msg
 
-initEnv :: BTCNetwork -> TCKRConf -> IO MainLoopEnv
-initEnv net conf = do
-    node_list <- newA []
-    io_lock <- LK.new
-    io_buf <- newA []
-    fetched <- newA SET.empty
-    tree_lock <- LK.new
-    block_tree <- newA emptyTree
-    idle_block <- newA SET.empty
-
+genesisBlock :: BTCNetwork -> BlockPayloadHashed
+genesisBlock net =
     let genesis@(BlockPayload {
             header = header
         }) = case decodeLE (genesisRaw net) of
@@ -147,14 +145,33 @@ initEnv net conf = do
                 error $ "fatal: genesis block decoding error: " ++ show err
             (Right gen, _) -> gen
 
-        bph = BlockPayloadHashed (hashBlockHeader header) genesis
+    in BlockPayloadHashed (hashBlockHeader header) genesis
 
-    case insertToTree emptyTree bph of
-        Left err ->
-            error $ "fatal: illegal genesis block: " ++ show err
-        
-        Right new_tree ->
-            setA block_tree new_tree
+initEnv :: BTCNetwork -> TCKRConf -> IO MainLoopEnv
+initEnv net conf = do
+    node_list <- newA []
+    io_lock <- LK.new
+    io_buf <- newA []
+    fetched <- newA SET.empty
+    tree_lock <- LK.new
+
+    idle_block <- newA OSET.empty
+
+    block_tree <- treeCachedFromDirectory (tckr_block_tree_path conf)
+    cur_height <- treeCachedHeight block_tree
+
+    if cur_height == 0 then do
+        -- if it's an empty tree, insert genesis
+        res <- insertToTreeCached 0 block_tree $ genesisBlock net
+        case res of
+            Left err ->
+                error $ "fatal: illegal genesis block: " ++ show err
+            Right _ -> return ()
+
+        -- cur_height <- treeCachedHeight block_tree
+    else return ()
+
+    block_tree_atom <- newA block_tree
 
     return $ MainLoopEnv {
         btc_network = net,
@@ -169,7 +186,7 @@ initEnv net conf = do
 
         fetched_block = fetched,
         tree_lock = tree_lock,
-        block_tree = block_tree,
+        block_tree = block_tree_atom,
         idle_block = idle_block
     }
 
@@ -238,7 +255,7 @@ envAddIdleBlock env node payload@(BlockPayload {
             
         -- add to the set
         appA (SET.insert hash) (fetched_block env)
-        appA (SET.insert bph) (idle_block env)
+        appA (OSET.|> bph) (idle_block env)
 
 insertAction :: MainLoopEnv -> NodeAction -> IO ()
 insertAction env action = do

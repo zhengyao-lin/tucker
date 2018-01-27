@@ -25,6 +25,13 @@ import Tucker.Error
 data BlockTree = BlockTree [[Block]] deriving (Eq, Show) -- possible multiple roots
 data BlockChain = BlockChain [Block] deriving (Eq, Show)
 
+type TreeHeight = Int
+
+data BlockTreePartInfo =
+    BlockTreePartInfo {
+        tree_height :: TreeHeight
+    }
+
 -- BlockTreePart prev_hash 
 data BlockTreePart = BlockTreePart {
         prev_hashes :: [Hash256], -- if prev_hashes == [], the layers starts from genesis
@@ -58,8 +65,8 @@ instance Encodable BlockTreePart where
 instance Decodable BlockTreePart where
     decoder = do
         hashes <- vlistD decoder
-        VInt layer_count <- decoder
 
+        VInt layer_count <- decoder
         layers <- forM [ 1 .. layer_count ] $ const $ vlistD decoder
 
         let all_blocks = concat layers
@@ -409,7 +416,8 @@ insertToTree' layers bph@(BlockPayloadHashed hash payload) mroots =
                 Just roots ->
                     let prev_hash = Tucker.Msg.prev_block (header payload) in
 
-                    if prev_hash `elem` roots then
+                    if (prev_hash == nullHash256 && null roots) ||
+                        prev_hash `elem` roots then
                         let new = blockPaylodHashedToBlock bph Nothing prev_hash in
                         Right $ BlockTree (insertToRoot layers new)
                     else
@@ -457,15 +465,15 @@ emptyTree = BlockTree []
 emptyChain = BlockChain []
 emptyTreePart = BlockTreePart [] []
 
-treeHeight :: BlockTree -> Int
-treeHeight (BlockTree layers) = length layers
+treeHeight :: BlockTree -> TreeHeight
+treeHeight (BlockTree layers) = fromIntegral $ length layers
 
 treeLatest :: BlockTree -> [Block]
 treeLatest (BlockTree layers) =
     if null layers then [] else last layers
 
-chainHeight :: BlockChain -> Int
-chainHeight (BlockChain chain) = length chain
+chainHeight :: BlockChain -> TreeHeight
+chainHeight (BlockChain chain) = fromIntegral $ length chain
 
 chainToTree :: BlockChain -> BlockTree
 chainToTree (BlockChain chain) = BlockTree $ map (:[]) chain
@@ -473,3 +481,17 @@ chainToTree (BlockChain chain) = BlockTree $ map (:[]) chain
 treePartToTree :: BlockTreePart -> Maybe BlockTree
 treePartToTree (BlockTreePart [] layers) = Just $ BlockTree layers
 treePartToTree _ = Nothing -- previous roots not empty
+
+treePartHeight :: BlockTreePart -> TreeHeight
+treePartHeight (BlockTreePart _ layers) = fromIntegral $ length layers
+
+treePartInfo :: BlockTreePart -> BlockTreePartInfo
+treePartInfo part =
+    BlockTreePartInfo {
+        tree_height = treePartHeight part
+    }
+
+treePartLatestHash :: BlockTreePart -> [Hash256]
+treePartLatestHash (BlockTreePart prev_hashes layers) =
+    if null layers then prev_hashes
+    else map (block_hash) $ last layers

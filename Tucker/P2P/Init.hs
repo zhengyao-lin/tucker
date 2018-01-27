@@ -1,6 +1,8 @@
 module Tucker.P2P.Init where
-    
+
+import Data.Foldable as FD
 import qualified Data.Set as SET
+import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
 import Control.Concurrent
@@ -19,6 +21,7 @@ import Tucker.P2P.Util
 import Tucker.P2P.Server
 
 import Tucker.Chain.Object
+import Tucker.Chain.Cached
 
 bootstrap :: MainLoopEnv -> [String] -> IO ()
 bootstrap env hostnames = do
@@ -43,36 +46,63 @@ we want to dump part of it into the disk
 
 -}
 
+-- NOTE: need to acquire the lock first
+trySealTreeCached :: MainLoopEnv -> IO ()
+trySealTreeCached env = do
+    LK.acquire (tree_lock env)
+
+    tree <- getA (block_tree env)
+
+    v1 <- getEnvConf env tckr_max_block_per_chunk
+    v2 <- getEnvConf env tckr_max_tree_insert_depth
+
+    top_height <- treeCachedTopChunkHeight tree
+
+    if top_height > v1 + v2 then do
+        new_tree <- sealTreeCached v1 tree
+        setA (block_tree env) new_tree
+    else
+        return ()
+
+    LK.release (tree_lock env)
+
 -- collect idle blocks
 blockLoop :: MainLoopEnv -> IO ()
 blockLoop env =
     whileM_ (pure True) $ do
         idle <- getA $ idle_block env
 
-        res <- forM (SET.toList idle) $ \bph@(BlockPayloadHashed hash payload) -> do
+        max_depth <- getEnvConf env tckr_max_tree_insert_depth
+
+        res <- forM (FD.toList idle) $ \bph@(BlockPayloadHashed hash payload) -> do
             LK.acquire (tree_lock env)
 
             tree <- getA (block_tree env)
+            res <- insertToTreeCached max_depth tree bph
 
-            case insertToTree tree bph of
+            -- envMsg env $ "!!!!!!!!!!!!!!!!!!!!!!!!!"
+
+            case res of
                 Left err -> do
-                    -- envMsg env $ "failed to collect idle block " ++ show hash ++ ": " ++ show err
+                    -- envMsg env $ "!!!!! failed to collect idle block " ++ show hash ++ ": " ++ show err
                     -- appA ((hash, payload):) (idle_block env)
                     LK.release (tree_lock env)
 
                     return (False, bph)
 
-                Right new_tree -> do
-                    envMsg env $ "!!!!!!!!! idle block " ++ show hash ++ " collected"
-                    setA (block_tree env) new_tree
+                Right _ -> do
+                    envMsg env $ "idle block " ++ show hash ++ " confirmed"
                     LK.release (tree_lock env)
+
+                    -- try to seal the top chunk
+                    trySealTreeCached env
 
                     return (True, bph)
 
         let collected_idle = map snd $ filter fst res
 
         -- update idle blocks
-        appA (SET.\\ SET.fromList collected_idle) (idle_block env)
+        appA (OSET.\\ OSET.fromList collected_idle) (idle_block env)
         
         if null collected_idle then
             -- no new block collected

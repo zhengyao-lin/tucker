@@ -2,8 +2,12 @@
 
 module Tucker.Test where
 
+import qualified Data.ByteString as BSR
+    
 import Network.Socket hiding (send, recv)
 import Network.Socket.ByteString
+
+import System.IO
 import System.Random
 
 import Test.HUnit
@@ -24,6 +28,7 @@ import Tucker.P2P.Node
 import Tucker.P2P.Action
 
 import Tucker.Chain.Object
+import Tucker.Chain.Cached
 
 simpleBPH :: Hash256 -> IO BlockPayloadHashed
 simpleBPH prev_block = do
@@ -145,10 +150,40 @@ blockTreePartTest = TestCase $ do
 
     assertEqual "should obey associativity" ((tp2 <> tp6) <> tp7) (tp2 <> (tp6 <> tp7))
 
+    -- forM (zip [ 1 .. ] [ tp4, tp5, tp6, tp7 ]) $ \(i, tp) -> do
+    --     withBinaryFile ("/home/rodlin/tucker-btp/btp." ++ show i) WriteMode $ \handle -> do
+    --         BSR.hPut handle (encodeLE tp)
+
+    return ()
+
 blockTest = TestList [
         TestLabel "block tree/chain basic" blockBasicTest,
         TestLabel "block tree part" blockTreePartTest
     ]
+
+{-
+
+to collect blocks
+
+env <- mainLoop btc_testnet3 tucker_default_conf
+envSpreadSimpleAction env (NormalAction fetchBlock) 1
+
+then, to get status:
+
+number of idle blocks:
+    envDumpIdleBlock env >>= (return . length)
+
+tree height:
+    envCurrentTreeHeight env
+
+number of total received blocks:
+    envDumpReceivedBlock env >>= (return . length)
+
+(getA $ block_tree env) >>= (getTreeChunk . (!!0) . chunks)
+(getA $ block_tree env) >>= (flushTreeChunk . (!!0) . chunks)
+(getA $ block_tree env) >>= flushTreeCached
+
+-}
 
 {-
 
