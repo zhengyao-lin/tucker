@@ -18,6 +18,7 @@ import Tucker.Atom
 
 import Tucker.P2P.Node
 import Tucker.P2P.Util
+import Tucker.P2P.Action
 import Tucker.P2P.Server
 
 import Tucker.Chain.Object
@@ -27,7 +28,6 @@ bootstrap :: MainLoopEnv -> [String] -> IO ()
 bootstrap env hostnames = do
     addrs <- (mapM (seedLookup $ btc_network env) hostnames) >>= (pure . concat)
     probe env addrs
-
     
 {-
 
@@ -45,6 +45,26 @@ we want to dump part of it into the disk
 3. 
 
 -}
+
+-- measure the availability & responding time
+-- of each node(every 20 * 1000 * 1000 ms)
+pingLoop :: MainLoopEnv -> IO ()
+pingLoop env =
+    forever $ do
+        reping_time <- getEnvConf env tckr_reping_time
+        delay $ fromIntegral $ reping_time * 1000 * 1000
+
+        cur_list <- getA $ node_list env
+        now <- unixTimestamp
+
+        forM cur_list $ \node -> do
+            alive <- getA $ alive node
+            last_seen <- getA $ last_seen node
+
+            if alive && now - last_seen > reping_time then
+                nodePrependAction node [ NormalAction pingDelay ]
+            else
+                return ()
 
 -- NOTE: need to acquire the lock first
 trySealTreeCached :: MainLoopEnv -> IO ()
@@ -66,10 +86,27 @@ trySealTreeCached env = do
 
     LK.release (tree_lock env)
 
+blockSyncLoop :: MainLoopEnv -> IO ()
+blockSyncLoop env =
+    forever $ do
+        time <- unixTimestamp
+        orig_height <- envCurrentTreeHeight env
+
+        envMsg env $ "re-sync block tree"
+        envSpreadSimpleAction env (NormalAction fetchBlock) 1
+
+        untilM_ (pure ()) $ do
+            now <- unixTimestamp
+            cur_height <- envCurrentTreeHeight env
+            
+            return $
+                cur_height - orig_height >= 450 ||
+                now - time >= 20
+
 -- collect idle blocks
-blockLoop :: MainLoopEnv -> IO ()
-blockLoop env =
-    whileM_ (pure True) $ do
+blockCollectLoop :: MainLoopEnv -> IO ()
+blockCollectLoop env =
+    forever $ do
         idle <- getA $ idle_block env
 
         max_depth <- getEnvConf env tckr_max_tree_insert_depth
@@ -104,16 +141,27 @@ blockLoop env =
         -- update idle blocks
         appA (OSET.\\ OSET.fromList collected_idle) (idle_block env)
         
-        if null collected_idle then
+        if null collected_idle then do
             -- no new block collected
-            -- wait for 10 sec
-            delay $ 10 * 1000 * 1000
+            -- wait for 1 sec
+            orig_count <- envDumpIdleBlock env >>= (return . length)
+            
+            delay $ 2 * 1000 * 1000
+
+            untilM_ (pure ()) $ do
+                new_count <- envDumpIdleBlock env >>= (return . length)
+                if new_count == orig_count then do
+                    envMsg env "block collector waiting"
+                    delay $ 10 * 1000 * 1000
+                    return False
+                else
+                    return True
         else -- try again immediately
             return ()
 
 gcLoop :: MainLoopEnv -> IO ()
 gcLoop env = 
-    whileM_ (pure True) $ do
+    forever $ do
         cur_list <- getA $ node_list env
 
         timestamp <- unixTimestamp
@@ -160,7 +208,7 @@ mainLoop net conf = do
     -- 5. blockLoop: collect idling blocks
 
     forkIO $ gcLoop env
-    forkIO $ blockLoop env
+    forkIO $ blockCollectLoop env
     -- forkIO $ ioLoop env
 
     return env

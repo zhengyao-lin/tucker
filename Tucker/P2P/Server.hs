@@ -60,6 +60,12 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
                 return []
 
+            h BTC_CMD_GETHEADERS = do
+                return []
+            
+            h BTC_CMD_ALERT = do
+                return []
+
             h BTC_CMD_ADDR = do
                 d $ \addrmsg@(AddrPayload {
                     addrs = net_addrs
@@ -76,13 +82,14 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                         -- nodeMsg env node $ "filted: " ++ (show $ map addrAddress filted)
 
                         if not $ null filted then do
-                            nodeMsg env node $ "probing " ++ (show $ length filted) ++ " new node(s)"
+                            -- nodeMsg env node $ "probing " ++ (show $ length filted) ++ " new node(s)"
                             forkIO $ probe env filted
                             return ()
                         else
                             return ()
                     else
-                        nodeMsg env node "max number of nodes reached, no more probing"
+                        -- nodeMsg env node "max number of nodes reached, no more probing"
+                        return ()
 
                     return []
 
@@ -105,6 +112,7 @@ nodeDefaultAction = NormalAction nodeDefaultActionHandler
 
 nodeDefaultActionList = [
         -- NormalAction fetchBlock, -- for test
+        NormalAction pingDelay, -- measure delay
         nodeDefaultAction
     ]
 
@@ -128,7 +136,7 @@ nodeProcMsg env node msg = do
                     res <- handler env node msg
 
                     let update = [ a | UpdateMe a <- res ]
-                        continue = StopProp `elem` res
+                        continue = StopProp `notElem` res
                         new_action =
                             if DumpMe `elem` res then
                                 Nothing
@@ -234,7 +242,7 @@ handshake env node = do
             } <- nodeExpectOneMsg env new_node
 
             -- handshake finished
-            nodeMsg env node "handshaking succeeded"
+            -- nodeMsg env node "handshaking succeeded"
 
             return new_node
 

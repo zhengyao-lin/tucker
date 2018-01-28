@@ -13,6 +13,10 @@ import System.Random
 import Test.HUnit
 
 import Control.Monad
+import Control.Monad.Loops
+
+import Control.Concurrent
+import Control.Concurrent.Thread.Delay
 
 import Tucker.Enc
 import Tucker.Std
@@ -163,10 +167,26 @@ blockTest = TestList [
 
 {-
 
+13:50 4958
+13:55 9319
+14:01 12545 stop
+
+14:09 12572
+14:21 24043
+14:32 32821
+
 to collect blocks
 
+:l Tucker.Test
 env <- mainLoop btc_testnet3 tucker_default_conf
+idle = envDumpIdleBlock env >>= (return . length)
+fetched = envDumpReceivedBlock env >>= (return . length)
+height = envCurrentTreeHeight env
 envSpreadSimpleAction env (NormalAction fetchBlock) 1
+
+sync <- forkIO $ blockSyncLoop env
+
+whileM (pure True) $ do; envSpreadSimpleAction env (NormalAction fetchBlock) 1; delay $ 20 * 1000 * 1000
 
 then, to get status:
 
@@ -179,9 +199,13 @@ tree height:
 number of total received blocks:
     envDumpReceivedBlock env >>= (return . length)
 
+envHasFetchedBlock env (read "0000000005618907cb6a234fd732fd16cb230cfe726137e281aa467165029ffb")
+
 (getA $ block_tree env) >>= (getTreeChunk . (!!0) . chunks)
 (getA $ block_tree env) >>= (flushTreeChunk . (!!0) . chunks)
 (getA $ block_tree env) >>= flushTreeCached
+
+(getA $ node_list env) >>= mapM nodeNetDelay
 
 -}
 

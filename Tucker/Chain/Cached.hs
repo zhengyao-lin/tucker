@@ -112,8 +112,12 @@ treeChunkFromFile :: ChunkNumber -> FilePath -> IO BlockTreeChunk
 treeChunkFromFile chunk_no file_path = do
     part <- BSR.readFile file_path >>= decodeTreePart
 
+    let info = treePartInfo part
+
     altered <- newA False
-    cache_part <- newA (Left $ treePartInfo part)
+    cache_part <- newA (Left info)
+
+    putStrLn $ "finished parsing " ++ file_path ++ ": " ++ show info
 
     return $ BlockTreeChunk {
         chunk_no = chunk_no,

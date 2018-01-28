@@ -9,6 +9,8 @@ import qualified Data.ByteString as BSR
 import Control.Monad
 import qualified Control.Concurrent.Lock as LK
 
+import System.Random
+
 import Tucker.Std
 import Tucker.Msg
 import Tucker.Enc
@@ -30,6 +32,8 @@ import Tucker.Chain.Cached
 -- instance Funtor CoroAction where
 --     f `fmap` c = 
 
+-- 172.104.120.91
+
 recvM :: MsgPayload t => [RouterAction] -> Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
 recvM r_act cmd proc =
     return $ r_act ++ [ UpdateMe $ NormalAction handle ]
@@ -44,7 +48,7 @@ recvM r_act cmd proc =
                     nodeMsg env node $ "decode failed on command " ++ (show command)
                     return []) proc
             else do
-                nodeMsg env node $ "command not match, skipping(" ++ (show command) ++ ")"
+                -- nodeMsg env node $ "command not match, skipping(" ++ (show command) ++ ")"
                 return []
 
 data BlockFetchTask =
@@ -78,8 +82,21 @@ taskToInv (BlockFetchTask { fetch_block = fetch_block })
 -- spread out fetch tasks to different nodes
 -- return rest tasks
 spreadFetchTask :: MainLoopEnv -> [BlockFetchTask] -> IO ()
-spreadFetchTask env tasks =
-    envSpreadAction env ((:[]) . NormalAction . doFetchBlock) tasks
+spreadFetchTask env tasks = do
+    dup_node     <- getEnvConf env tckr_fetch_dup_node
+    max_dup_task <- getEnvConf env tckr_fetch_dup_max_task
+    len          <- envAllNode env >>= (return . length)
+
+    envMsg env $ "!!! task: " ++ show (length tasks)
+
+    final_tasks  <-
+        if length tasks < max_dup_task then do
+            envMsg env $ "!!! duplicate tasks to fetch"
+            return $ dupFill tasks dup_node len
+        else
+            return tasks
+
+    envSpreadAction env ((:[]) . NormalAction . doFetchBlock) final_tasks
 
 -- hashes of the latest blocks
 latestBlock :: MainLoopEnv -> IO [Hash256]
@@ -107,10 +124,14 @@ fetchBlock env node msg = do
         nodeMsg env node $ "inv received with " ++ (show $ length inv_vect) ++ " item(s)" -- ++ show inv_vect
 
         maxt <- getEnvConf env tckr_max_block_task
-        let tasks = splitTask maxt inv_vect
+
+        hashes <- envFilterFetchedBlock env (map invToHash256 inv_vect)
+        let new_inv_vect = map (InvVector INV_TYPE_BLOCK) hashes
+            tasks = splitTask maxt new_inv_vect
+
         rest <- spreadFetchTask env tasks
 
-        return [ DumpMe ]
+        return [ StopProp, DumpMe ]
 
 doFetchBlock :: BlockFetchTask -> MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
 doFetchBlock task env node msg = do
@@ -126,3 +147,23 @@ doFetchBlock task env node msg = do
     nodeMsg env node "getdata sent"
 
     return [ DumpMe ]
+
+pingDelay :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
+pingDelay env node msg = do
+    let net = btc_network env
+        trans = conn_trans node
+
+    nonce <- randomIO
+    ping <- encodeMsg net BTC_CMD_PING $ pure $ encodeLE (PingPongPayload nonce)
+
+    -- setA (ping_delay node) maxBound -- set a maximum in case the node doesn't reply
+    start <- msCPUTime
+    timeoutRetryS (timeout_s env) $ tSend trans ping
+
+    recvM [] BTC_CMD_PONG $ \(PingPongPayload back_nonce) -> do
+        if back_nonce == nonce then do
+            end <- msCPUTime
+            setA (ping_delay node) (end - start)
+            return [ StopProp, DumpMe ]
+        else
+            return [] -- skip

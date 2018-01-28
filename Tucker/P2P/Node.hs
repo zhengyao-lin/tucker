@@ -1,5 +1,6 @@
 module Tucker.P2P.Node where
 
+import Data.List
 import Data.Word
 import Data.Foldable as FD
 import qualified Data.Set as SET
@@ -80,6 +81,8 @@ data BTCNode =
 
         action_list    :: Atom [NodeAction],
         new_action     :: Atom [NodeAction],
+
+        ping_delay     :: Atom Word, -- in ms
 
         alive          :: Atom Bool
     }
@@ -200,6 +203,7 @@ initNode sock_addr trans = do
     last_seen    <- newA timestamp
     action_list  <- newA [] -- nodeDefaultActionList
     new_action   <- newA []
+    ping_delay   <- newA maxBound -- max time in case the node doesn't reply
     alive        <- newA True
 
     return $ BTCNode {
@@ -216,6 +220,9 @@ initNode sock_addr trans = do
         last_seen    = last_seen,
         action_list  = action_list,
         new_action   = new_action,
+
+        ping_delay   = ping_delay,
+
         alive        = alive
     }
 
@@ -230,10 +237,15 @@ envAddFetchedBlock env hash = do
 envHasFetchedBlock :: MainLoopEnv -> Hash256 -> IO Bool
 envHasFetchedBlock env hash = do
     fetched <- getA (fetched_block env)
+    return $ SET.member hash fetched
 
-    return $ case SET.lookupIndex hash fetched of
-        Just _ -> True
-        Nothing -> False
+envFilterFetchedBlock :: MainLoopEnv -> [Hash256] -> IO [Hash256]
+envFilterFetchedBlock env hashes = do
+    fetched <- getA (fetched_block env)
+    return $ filter (`SET.notMember` fetched) hashes
+
+envAllNode :: MainLoopEnv -> IO [BTCNode]
+envAllNode = getA . node_list
 
 envAddIdleBlock :: MainLoopEnv -> BTCNode -> BlockPayload -> IO ()
 envAddIdleBlock env node payload@(BlockPayload {
@@ -285,24 +297,36 @@ nodePrependAction node new_actions =
 nodeNetAddr :: BTCNode -> IO NetAddr
 nodeNetAddr = return . net_addr
 
+nodeNetDelay :: BTCNode -> IO Word
+nodeNetDelay = getA . ping_delay
+
 -- spread actions to nodes
 envSpreadAction :: NodeTask t => MainLoopEnv -> (t -> [NodeAction]) -> [t] -> IO ()
 envSpreadAction env gen_action tasks = do
     nodes <- getA (node_list env)
+
     alive_nodes <- filterM (getA . alive) nodes
     -- filter out dead nodes
 
-    let taskn = length tasks
-        noden = length alive_nodes
+    delays <- mapM nodeNetDelay nodes
+
+    let sorted = sortBy (\(d1, _) (d2, _) -> compare d1 d2)
+                        (zip delays alive_nodes)
+        sorted_nodes = map snd sorted
+
+        taskn = length tasks
+        noden = length sorted_nodes
+
+    envMsg env $ show sorted
 
     let (target_nodes, new_tasks) =
             if noden < taskn then
                 -- no enough node
-                (alive_nodes, taskFold tasks noden)
+                (sorted_nodes, taskFold tasks noden)
             else
                 -- great, we have enough nodes
                 -- simply take n nodes
-                (take taskn alive_nodes, tasks)
+                (take taskn sorted_nodes, tasks)
 
     -- assume length target_nodes == length new_tasks
     forM (zip target_nodes new_tasks) $ \(node, task) -> do

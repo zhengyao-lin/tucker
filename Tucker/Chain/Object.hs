@@ -30,7 +30,7 @@ type TreeHeight = Int
 data BlockTreePartInfo =
     BlockTreePartInfo {
         tree_height :: TreeHeight
-    }
+    } deriving (Show)
 
 -- BlockTreePart prev_hash 
 data BlockTreePart = BlockTreePart {
