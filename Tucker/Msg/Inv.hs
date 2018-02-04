@@ -6,8 +6,9 @@ import Data.Word
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
-import Tucker.Std
 import Tucker.Enc
+import Tucker.Conf
+import Tucker.Util
 import Tucker.Msg.Common
 
 data InvType
@@ -104,10 +105,10 @@ instance Decodable GetblocksPayload where
             stop_hash = stop_hash
         }
 
-encodeGetblocksPayload :: [Hash256] -> Hash256 -> IO ByteString
-encodeGetblocksPayload locator stop_hash =
+encodeGetblocksPayload :: TCKRConf -> [Hash256] -> Hash256 -> IO ByteString
+encodeGetblocksPayload conf locator stop_hash =
     return $ encodeLE $ GetblocksPayload {
-        vers = btc_version,
+        vers = fi $ tckr_net_version conf,
         locator = locator,
         stop_hash = stop_hash
     }

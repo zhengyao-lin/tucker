@@ -57,5 +57,5 @@ tRecvOneMsgNonBlocking trans buf = do
             (err, nbuf) -- decoding error, return
 
 -- -- n for node
--- nodeSend :: MainLoopEnv -> BTCNode -> ByteString -> IO Int
+-- nodeSend :: MainLoopEnv -> Node -> ByteString -> IO Int
 -- nodeSend env node = timeoutFailS (timeout_s env) $ tSend (conn_trans node)

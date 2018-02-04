@@ -38,3 +38,10 @@ dupFill :: [a] -> Int -> Int -> [a]
 dupFill lst times max =
     if length lst >= max then lst
     else take max $ concat [ lst | _ <- [ 1 .. times ] ]
+
+maybeToEither :: a -> Maybe b -> Either a b
+maybeToEither a (Just b) = Right b
+maybeToEither a Nothing = Left a
+
+fi :: (Integral a, Integral b) => a -> b
+fi = fromIntegral

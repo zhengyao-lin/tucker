@@ -32,7 +32,7 @@ import Debug.Trace
 import Control.Monad.Loops
 
 import Tucker.Enc
-import Tucker.Std
+import Tucker.Conf
 import Tucker.Error
 
 sha256 :: BA.ByteArrayAccess a => a -> Digest SHA256
@@ -111,18 +111,18 @@ data ECCKeyPair = ECCKeyPair Integer Point deriving (Show, Read, Eq)
 -- prefix in wif2priv and prev2wif
 -- prefix in pub2addr
 
-priv2wif :: BTCNetwork -> Integer -> Either TCKRError WIF
-priv2wif net num = do
+priv2wif :: TCKRConf -> Integer -> Either TCKRError WIF
+priv2wif conf num = do
     priv_raw <- vint2bsBE num
-    let priv_proc = BSR.cons (wifPref net) priv_raw
+    let priv_proc = BSR.cons (tckr_wif_pref conf) priv_raw
 
     return $ BS.unpack $ base58encCheck priv_proc
 
-wif2priv :: BTCNetwork -> WIF -> Either TCKRError Integer
-wif2priv net wif = do
+wif2priv :: TCKRConf -> WIF -> Either TCKRError Integer
+wif2priv conf wif = do
     priv_proc <- base58decCheck $ BS.pack wif
     
-    if BSR.head priv_proc /= (wifPref net) then
+    if BSR.head priv_proc /= (tckr_wif_pref conf) then
         Left $ TCKRError "illegal WIF"
     else do
         let priv_raw = BSR.drop 1 priv_proc
@@ -147,19 +147,19 @@ enc2pub str =
 
         return $ Point x y
         
-pub2addr :: BTCNetwork -> Point -> Address
-pub2addr net pt =
+pub2addr :: TCKRConf -> Point -> Address
+pub2addr conf pt =
     BS.unpack $ base58encCheck pub_hash
     where
         pub_raw = pub2enc pt
-                         -- main BTCNetwork byte
-        pub_hash = BSR.cons (pubPref net) $ ba2bs $ ripemd160 $ sha256 pub_raw
+                         -- main TCKRConf byte
+        pub_hash = BSR.cons (tckr_pub_pref conf) $ ba2bs $ ripemd160 $ sha256 pub_raw
 
-addr2pubhash :: BTCNetwork -> Address -> Either TCKRError (Word8, ByteString)
-addr2pubhash net addr = do
+addr2pubhash :: TCKRConf -> Address -> Either TCKRError (Word8, ByteString)
+addr2pubhash conf addr = do
     pub_hash_raw <- base58decCheck $ BS.pack addr
 
-    if BSR.head pub_hash_raw /= pubPref net then
+    if BSR.head pub_hash_raw /= tckr_pub_pref conf then
         Left $ TCKRError "illegal address"
     else do
         let
@@ -169,45 +169,45 @@ addr2pubhash net addr = do
         return (pub_type, pub_hash)
 
 priv2pub :: Integer -> Point
-priv2pub = generateQ btc_curve
+priv2pub = generateQ tucker_curve
 
-wif2addr :: BTCNetwork -> WIF -> Either TCKRError Address
-wif2addr net wif = do
-    priv <- wif2priv net wif
-    return $ pub2addr net $ priv2pub priv
+wif2addr :: TCKRConf -> WIF -> Either TCKRError Address
+wif2addr conf wif = do
+    priv <- wif2priv conf wif
+    return $ pub2addr conf $ priv2pub priv
 
-wif2pair :: BTCNetwork -> WIF -> Either TCKRError ECCKeyPair
-wif2pair net wif = do
-    priv <- wif2priv net wif
+wif2pair :: TCKRConf -> WIF -> Either TCKRError ECCKeyPair
+wif2pair conf wif = do
+    priv <- wif2priv conf wif
     return $ ECCKeyPair priv (priv2pub priv)
 
 pair2pubenc :: ECCKeyPair -> ByteString
 pair2pubenc (ECCKeyPair _ pub) = pub2enc pub
 
-pair2addr :: BTCNetwork -> ECCKeyPair -> Address
-pair2addr net (ECCKeyPair _ pub) = pub2addr net pub
+pair2addr :: TCKRConf -> ECCKeyPair -> Address
+pair2addr conf (ECCKeyPair _ pub) = pub2addr conf pub
 
 genRaw :: IO (PublicKey, PrivateKey)
-genRaw = generate btc_curve
+genRaw = generate tucker_curve
 
-gen :: BTCNetwork -> IO (Either TCKRError (WIF, Address))
-gen net = do
+gen :: TCKRConf -> IO (Either TCKRError (WIF, Address))
+gen conf = do
     (PublicKey _ pt, PrivateKey _ num) <- genRaw
 
     return (do
-        let addr = pub2addr net pt
-        wif <- priv2wif net num
+        let addr = pub2addr conf pt
+        wif <- priv2wif conf num
         return (wif, addr))
 
 -- generate with condition on the (wif, address)
-genCond :: BTCNetwork
+genCond :: TCKRConf
         -> ((WIF, Address) -> Bool)
         -> IO (Either TCKRError (WIF, Address))
-genCond net cond =
+genCond conf cond =
     iterateUntil (\res ->
         case res of
             Right ans -> cond ans
-            other -> True) (gen net)
+            other -> True) (gen conf)
 
 -- encode a signature using ASN1 by the following structure
 -- SEQUENCE { r INTEGER, s INTEGER }
@@ -227,12 +227,12 @@ signdec str =
 signSHA256 :: ECCKeyPair -> ByteString -> IO Signature
 signSHA256 (ECCKeyPair priv _) =
     sign privk SHA256
-    where privk = PrivateKey btc_curve priv
+    where privk = PrivateKey tucker_curve priv
 
 verifySHA256 :: ECCKeyPair -> ByteString -> Signature -> Bool
 verifySHA256 (ECCKeyPair _ pub) msg sign =
     verify SHA256 pubk sign msg
-    where pubk = PublicKey btc_curve pub
+    where pubk = PublicKey tucker_curve pub
 
 signSHA256DER :: ECCKeyPair -> ByteString -> IO ByteString
 signSHA256DER pair msg = do

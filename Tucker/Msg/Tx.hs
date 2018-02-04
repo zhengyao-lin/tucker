@@ -3,7 +3,7 @@
 module Tucker.Msg.Tx where
 
 import Tucker.Enc
-import Tucker.Std
+import Tucker.Conf
 import Tucker.Auth
 import Tucker.Error
 import Tucker.Msg.Script
@@ -226,11 +226,11 @@ instance Decodable TxPayload where
 -- 5. note that in a tx_in, previous hash is the DOUBLE-sha256 of the previous transaction
 
 -- generate a standard public key script
-stdPkScript :: BTCNetwork
+stdPkScript :: TCKRConf
             -> Address {- alas String, base58check encoded -}
             -> Either TCKRError ByteString
-stdPkScript net addr = do
-    (_, pub_hash) <- addr2pubhash net addr
+stdPkScript conf addr = do
+    (_, pub_hash) <- addr2pubhash conf addr
     return $ encodeLE [
             OP_DUP,
             OP_HASH160,
@@ -260,14 +260,14 @@ stdSigScript pair sign =
 -- create a standard transaction using the key pair, input, and output given
 -- assuming the previous transaction is also standard, so we can generate the
 -- pk_script without pulling it from elsewhere
-stdTx :: BTCNetwork -> ECCKeyPair -> [OutPoint] -> [(Value, Address)] -> Either TCKRError (IO TxPayload)
-stdTx net pair input output = do
+stdTx :: TCKRConf -> ECCKeyPair -> [OutPoint] -> [(Value, Address)] -> Either TCKRError (IO TxPayload)
+stdTx conf pair input output = do
     let
-        self_addr = pair2addr net pair
+        self_addr = pair2addr conf pair
 
     in_lst <- mapM (\outp -> do
         -- assuming the output point has a standard script
-        script <- stdPkScript net self_addr
+        script <- stdPkScript conf self_addr
         return TxInput {
             prev_out = outp,
             sig_script = script,
@@ -275,7 +275,7 @@ stdTx net pair input output = do
         }) input
 
     out_lst <- mapM (\(v, a) -> do
-        script <- stdPkScript net a
+        script <- stdPkScript conf a
         return TxOutput {
             value = v,
             pk_script = script
@@ -314,14 +314,14 @@ unpackEither :: Either TCKRError a -> a
 unpackEither (Right v) = v
 unpackEither (Left err) = error $ show err
 
-buildTxPayload :: BTCNetwork -> WIF -> [OutPoint] -> [(Value, Address)] -> IO TxPayload
-buildTxPayload net wif in_lst out_lst =
-    unpackEither $ stdTx net pair in_lst out_lst
-    where pair = unpackEither $ wif2pair net wif
+buildTxPayload :: TCKRConf -> WIF -> [OutPoint] -> [(Value, Address)] -> IO TxPayload
+buildTxPayload conf wif in_lst out_lst =
+    unpackEither $ stdTx conf pair in_lst out_lst
+    where pair = unpackEither $ wif2pair conf wif
 
-encodeTxPayload :: BTCNetwork -> WIF -> [OutPoint] -> [(Value, Address)] -> IO ByteString
-encodeTxPayload net wif in_lst out_lst = do
-    tx <- buildTxPayload net wif in_lst out_lst
+encodeTxPayload :: TCKRConf -> WIF -> [OutPoint] -> [(Value, Address)] -> IO ByteString
+encodeTxPayload conf wif in_lst out_lst = do
+    tx <- buildTxPayload conf wif in_lst out_lst
     return $ encodeLE tx
 
 -- testBuildTx "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9" [ OutPoint "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48" 0 ] [ (10, "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9") ]

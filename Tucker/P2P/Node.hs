@@ -17,7 +17,6 @@ import Network.Socket
 
 import Debug.Trace
 
-import Tucker.Std
 import Tucker.Enc
 import Tucker.Msg
 import Tucker.Conf
@@ -26,27 +25,28 @@ import Tucker.Util
 import Tucker.Transport
 
 import Tucker.Chain.Object
-import Tucker.Chain.Cached
+
+-- two parts
+-- 1. main old tree, most common chain for all blocks
+-- 2. side chains, side chains rooted from main tree
 
 -- an environment shared among a main loop
 data MainLoopEnv =
     MainLoopEnv {
-        btc_network   :: BTCNetwork,
-        timeout_s     :: Int, -- timeout in sec
-        node_list     :: Atom [BTCNode],
-
-        gc_interv     :: Integer, -- in ms
-    
         global_conf   :: TCKRConf,
 
-        fetched_block :: Atom (SET.Set Hash256),
+        timeout_s     :: Int, -- timeout in sec
+        node_list     :: Atom [Node],
+
+        gc_interv     :: Integer, -- in ms
 
         io_lock       :: LK.Lock,
-        io_buf        :: Atom [String],
+        io_buf        :: Atom [String]
 
-        tree_lock     :: LK.Lock,
-        block_tree    :: Atom BlockTreeCached,
-        idle_block    :: Atom (OSET.OSet BlockPayloadHashed)
+        -- fetched_block :: Atom (SET.Set Hash256),
+        -- tree_lock     :: LK.Lock,
+        -- block_tree    :: Atom BlockTreeCached,
+        -- idle_block    :: Atom (OSET.OSet BlockPayloadHashed)
     }
 
 data RouterAction
@@ -63,10 +63,10 @@ data NodeAction
     = NormalAction { handler :: ActionHandle }
     | NoAction
 
-type ActionHandle = MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
+type ActionHandle = MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 
-data BTCNode =
-    BTCNode {
+data Node =
+    Node {
         conn_trans     :: Transport,
         incoming       :: Bool,
 
@@ -87,7 +87,7 @@ data BTCNode =
         alive          :: Atom Bool
     }
 
-instance Show BTCNode where
+instance Show Node where
     show node =
         "node on " ++ show (sock_addr node)
 
@@ -115,17 +115,17 @@ instance Monoid NullTask where
 
 instance NodeTask NullTask
 
-envCurrentTreeHeight :: MainLoopEnv -> IO Int
-envCurrentTreeHeight env = getA (block_tree env) >>= treeCachedHeight
+-- envCurrentTreeHeight :: MainLoopEnv -> IO Int
+-- envCurrentTreeHeight env = getA (block_tree env) >>= treeCachedHeight
 
-envDumpIdleBlock :: MainLoopEnv -> IO [Hash256]
-envDumpIdleBlock env =
-    getA (idle_block env) >>=
-    (return . map (\(BlockPayloadHashed hash _) -> hash) . FD.toList)
+-- envDumpIdleBlock :: MainLoopEnv -> IO [Hash256]
+-- envDumpIdleBlock env =
+--     getA (idle_block env) >>=
+--     (return . map (\(BlockPayloadHashed hash _) -> hash) . FD.toList)
 
-envDumpReceivedBlock :: MainLoopEnv -> IO [Hash256]
-envDumpReceivedBlock env =
-    getA (fetched_block env) >>= (return . SET.toList)
+-- envDumpReceivedBlock :: MainLoopEnv -> IO [Hash256]
+-- envDumpReceivedBlock env =
+--     getA (fetched_block env) >>= (return . SET.toList)
 
 envMsg :: MainLoopEnv -> String -> IO ()
 envMsg env msg = do
@@ -139,61 +139,61 @@ envMsg env msg = do
     -- appA (++ [ "env: " ++ msg ]) (io_buf env)
     -- putStrLn' $ "env: " ++ msg
 
-genesisBlock :: BTCNetwork -> BlockPayloadHashed
-genesisBlock net =
-    let genesis@(BlockPayload {
-            header = header
-        }) = case decodeLE (genesisRaw net) of
-            (Left err, _) ->
-                error $ "fatal: genesis block decoding error: " ++ show err
-            (Right gen, _) -> gen
+-- genesisBlock :: TCKRConf -> Block
+-- genesisBlock conf =
+--     let genesis@(Block {
+--             header = header
+--         }) = case decodeLE (genesisRaw conf) of
+--             (Left err, _) ->
+--                 error $ "fatal: genesis block decoding error: " ++ show err
+--             (Right gen, _) -> gen
 
-    in BlockPayloadHashed (hashBlockHeader header) genesis
+--     in genesis
 
-initEnv :: BTCNetwork -> TCKRConf -> IO MainLoopEnv
-initEnv net conf = do
+initEnv :: TCKRConf -> IO MainLoopEnv
+initEnv conf = do
     node_list <- newA []
     io_lock <- LK.new
     io_buf <- newA []
-    fetched <- newA SET.empty
-    tree_lock <- LK.new
 
-    idle_block <- newA OSET.empty
+    -- fetched <- newA SET.empty
+    -- tree_lock <- LK.new
 
-    block_tree <- treeCachedFromDirectory (tckr_block_tree_path conf)
-    cur_height <- treeCachedHeight block_tree
+    -- idle_block <- newA OSET.empty
 
-    if cur_height == 0 then do
-        -- if it's an empty tree, insert genesis
-        res <- insertToTreeCached 0 block_tree $ genesisBlock net
-        case res of
-            Left err ->
-                error $ "fatal: illegal genesis block: " ++ show err
-            Right _ -> return ()
+    -- block_tree <- treeCachedFromDirectory (tckr_block_tree_path conf)
+    -- cur_height <- treeCachedHeight block_tree
 
-        -- cur_height <- treeCachedHeight block_tree
-    else return ()
+    -- if cur_height == 0 then do
+    --     -- if it's an empty tree, insert genesis
+    --     res <- insertToTreeCached 0 block_tree $ genesisBlock net
+    --     case res of
+    --         Left err ->
+    --             error $ "fatal: illegal genesis block: " ++ show err
+    --         Right _ -> return ()
 
-    block_tree_atom <- newA block_tree
+    --     -- cur_height <- treeCachedHeight block_tree
+    -- else return ()
+
+    -- block_tree_atom <- newA block_tree
 
     return $ MainLoopEnv {
-        btc_network = net,
+        global_conf = conf,
+
         timeout_s = tckr_trans_timeout conf,
         node_list = node_list,
         gc_interv = tckr_gc_interval conf,
 
-        global_conf = conf,
-
         io_lock = io_lock,
-        io_buf = io_buf,
+        io_buf = io_buf
 
-        fetched_block = fetched,
-        tree_lock = tree_lock,
-        block_tree = block_tree_atom,
-        idle_block = idle_block
+        -- fetched_block = fetched,
+        -- tree_lock = tree_lock,
+        -- block_tree = block_tree_atom,
+        -- idle_block = idle_block
     }
 
-initNode :: SockAddr -> Transport -> IO BTCNode
+initNode :: SockAddr -> Transport -> IO Node
 initNode sock_addr trans = do
     timestamp    <- unixTimestamp
 
@@ -206,7 +206,7 @@ initNode sock_addr trans = do
     ping_delay   <- newA maxBound -- max time in case the node doesn't reply
     alive        <- newA True
 
-    return $ BTCNode {
+    return $ Node {
         conn_trans   = trans,
         incoming     = False,
 
@@ -226,48 +226,47 @@ initNode sock_addr trans = do
         alive        = alive
     }
 
-getEnvConf :: MainLoopEnv -> (TCKRConf -> t) -> IO t
-getEnvConf env field = do
-    return $ field $ global_conf env
+envConf :: MainLoopEnv -> (TCKRConf -> t) -> t
+envConf env field = field $ global_conf env
 
-envAddFetchedBlock :: MainLoopEnv -> Hash256 -> IO ()
-envAddFetchedBlock env hash = do
-    appA (SET.insert hash) (fetched_block env)
+-- envAddFetchedBlock :: MainLoopEnv -> Hash256 -> IO ()
+-- envAddFetchedBlock env hash = do
+--     appA (SET.insert hash) (fetched_block env)
 
-envHasFetchedBlock :: MainLoopEnv -> Hash256 -> IO Bool
-envHasFetchedBlock env hash = do
-    fetched <- getA (fetched_block env)
-    return $ SET.member hash fetched
+-- envHasFetchedBlock :: MainLoopEnv -> Hash256 -> IO Bool
+-- envHasFetchedBlock env hash = do
+--     fetched <- getA (fetched_block env)
+--     return $ SET.member hash fetched
 
-envFilterFetchedBlock :: MainLoopEnv -> [Hash256] -> IO [Hash256]
-envFilterFetchedBlock env hashes = do
-    fetched <- getA (fetched_block env)
-    return $ filter (`SET.notMember` fetched) hashes
+-- envFilterFetchedBlock :: MainLoopEnv -> [Hash256] -> IO [Hash256]
+-- envFilterFetchedBlock env hashes = do
+--     fetched <- getA (fetched_block env)
+--     return $ filter (`SET.notMember` fetched) hashes
 
-envAllNode :: MainLoopEnv -> IO [BTCNode]
+envAllNode :: MainLoopEnv -> IO [Node]
 envAllNode = getA . node_list
 
-envAddIdleBlock :: MainLoopEnv -> BTCNode -> BlockPayload -> IO ()
-envAddIdleBlock env node payload@(BlockPayload {
-    header = header,
-    Tucker.Msg.txns = txns
-}) = do
-    let hash = hashBlockHeader header
-        bph = BlockPayloadHashed hash payload
+-- envAddIdleBlock :: MainLoopEnv -> Node -> BlockPayload -> IO ()
+-- envAddIdleBlock env node payload@(BlockPayload {
+--     header = header,
+--     Tucker.Msg.txns = txns
+-- }) = do
+--     let hash = hashBlockHeader header
+--         bph = BlockPayloadHashed hash payload
 
-    -- 1. try to insert to the tree
-    -- 2. if cannot, push it to the idle block
+--     -- 1. try to insert to the tree
+--     -- 2. if cannot, push it to the idle block
 
-    has_fetched <- envHasFetchedBlock env hash
+--     has_fetched <- envHasFetchedBlock env hash
 
-    if has_fetched then
-        nodeMsg env node $ "block received again: " ++ (show hash)
-    else do
-        nodeMsg env node $ "block received: " ++ (show hash) -- ++ " " ++ (show payload)
+--     if has_fetched then
+--         nodeMsg env node $ "block received again: " ++ (show hash)
+--     else do
+--         nodeMsg env node $ "block received: " ++ (show hash) -- ++ " " ++ (show payload)
             
-        -- add to the set
-        appA (SET.insert hash) (fetched_block env)
-        appA (OSET.|> bph) (idle_block env)
+--         -- add to the set
+--         appA (SET.insert hash) (fetched_block env)
+--         appA (OSET.|> bph) (idle_block env)
 
 insertAction :: MainLoopEnv -> NodeAction -> IO ()
 insertAction env action = do
@@ -282,22 +281,22 @@ insertAction env action = do
 
     return ()
 
-nodeMsg :: MainLoopEnv -> BTCNode -> String -> IO ()
+nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
 nodeMsg env node msg = do
     envMsg env $ (show node) ++ ": " ++ msg
     return ()
 
-nodeLastSeen :: BTCNode -> IO Word64
+nodeLastSeen :: Node -> IO Word64
 nodeLastSeen = getA . last_seen
 
-nodePrependAction :: BTCNode -> [NodeAction] -> IO ()
+nodePrependAction :: Node -> [NodeAction] -> IO ()
 nodePrependAction node new_actions =
     appA (new_actions ++) (new_action node)
 
-nodeNetAddr :: BTCNode -> IO NetAddr
+nodeNetAddr :: Node -> IO NetAddr
 nodeNetAddr = return . net_addr
 
-nodeNetDelay :: BTCNode -> IO Word
+nodeNetDelay :: Node -> IO Word
 nodeNetDelay = getA . ping_delay
 
 -- spread actions to nodes
@@ -341,6 +340,6 @@ envSpreadSimpleAction :: MainLoopEnv -> NodeAction -> Int -> IO ()
 envSpreadSimpleAction env action n =
     envSpreadAction env (const [action]) [ NullTask | _ <- [ 1 .. n ] ]
 
-envAppendNode :: MainLoopEnv -> BTCNode -> IO ()
+envAppendNode :: MainLoopEnv -> Node -> IO ()
 envAppendNode env node =
     appA (++ [node]) (node_list env)

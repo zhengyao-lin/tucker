@@ -12,85 +12,70 @@ import Tucker.Msg.Tx
 import Tucker.Msg.Inv
 import Tucker.Msg.Common
 
-data BlockHeader =
-    BlockHeader {
+data Block =
+    Block {
+        block_hash  :: Hash256,
+
         vers        :: Int32,
         
-        prev_block  :: Hash256,
+        prev_hash   :: Hash256,
         merkle_root :: Hash256,
 
         timestamp   :: Word32,
         diff_bits   :: Word32,
         nonce       :: Word32,
 
-        txn_count   :: VInt
-    } deriving (Show, Eq)
-
-data BlockPayload =
-    BlockPayload {
-        header      :: BlockHeader,
         txns        :: [TxPayload]
-    } deriving (Show, Eq)
+    }
 
-data BlockPayloadHashed =
-    BlockPayloadHashed {
-        bph_hash    :: Hash256,
-        bph_payload :: BlockPayload
-    } deriving (Show)
-
-type BPH = BlockPayloadHashed
-
-instance Eq BlockPayloadHashed where
-    (BlockPayloadHashed h1 _) == (BlockPayloadHashed h2 _)
+instance Eq Block where
+    (Block { block_hash = h1 }) == (Block { block_hash = h2 })
         = h1 == h2
 
-instance Ord BlockPayloadHashed where
-    (BlockPayloadHashed h1 _) `compare` (BlockPayloadHashed h2 _)
+instance Ord Block where
+    (Block { block_hash = h1 }) `compare` (Block { block_hash = h2 })
         = h1 `compare` h2
 
-instance Encodable BlockPayloadHashed where
-    encode end (BlockPayloadHashed hash payload) =
-        encode end hash <> encode end payload
+instance Show Block where
+    show (Block { block_hash = hash }) = "Block " ++ show hash
 
-instance Decodable BlockPayloadHashed where
-    decoder = do
-        hash <- decoder
-        payload <- decoder
-        return $ BlockPayloadHashed hash payload
+data BlockPayload = BlockPayload Block deriving (Eq, Show)
+data BlockHeader = BlockHeader Block deriving (Eq, Show)
 
 data HeadersPayload = HeadersPayload [BlockHeader] deriving (Show, Eq)
 
-instance MsgPayload BlockPayload
+instance MsgPayload Block
 instance MsgPayload HeadersPayload
 
 instance Encodable HeadersPayload where
-    encode end (HeadersPayload headers) = encodeVList end headers
+    encode end (HeadersPayload headers) =
+        encodeVList end headers
 
 instance Decodable HeadersPayload where
     decoder = vlistD decoder >>= (return . HeadersPayload)
 
 instance Encodable BlockHeader where
-    encode end (BlockHeader {
+    encode end (BlockHeader (Block {
         vers = vers,
-        prev_block = prev_block,
+        prev_hash = prev_hash,
         merkle_root = merkle_root,
 
         timestamp = timestamp,
         diff_bits = diff_bits,
         nonce = nonce,
 
-        txn_count = txn_count
-    }) =
+        txns = txns
+    })) =
         mconcat [
             e vers,
-            e prev_block,
+            e prev_hash,
             e merkle_root,
 
             e timestamp,
             e diff_bits,
             e nonce,
 
-            e txn_count
+            e $ VInt $ fromIntegral $ length txns
         ]
         where
             e :: Encodable t => t -> ByteString
@@ -99,79 +84,77 @@ instance Encodable BlockHeader where
 instance Decodable BlockHeader where
     decoder = do
         vers <- decoder
-        prev_block <- decoder
+        prev_hash <- decoder
         merkle_root <- decoder
 
         timestamp <- decoder
         diff_bits <- decoder
         nonce <- decoder
 
-        txn_count <- decoder
+        VInt txn_count <- decoder
 
-        return $ BlockHeader {
+        let tmp = Block {
+            block_hash = nullHash256,
+
             vers = vers,
-            prev_block = prev_block,
+            prev_hash = prev_hash,
             merkle_root = merkle_root,
-    
+
             timestamp = timestamp,
             diff_bits = diff_bits,
             nonce = nonce,
-    
-            txn_count = txn_count
+
+            -- fill with undefined
+            txns = [ undefined | _ <- [ 1 .. txn_count ] ]
         }
 
-instance Encodable BlockPayload where
-    encode end (BlockPayload {
-        header = header,
+        return $ BlockHeader $ tmp { block_hash = hashBlock tmp }
+
+instance Encodable Block where
+    encode end block@(Block {
         txns = txns
     }) =
-        e header <> e txns
-        where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+        encode end (BlockHeader block) <>
+        encode end txns
+
+instance Decodable Block where
+    decoder = do
+        (BlockHeader block@(Block {
+            txns = txns
+        })) <- decoder
+
+        -- read real txns
+        txns <- listD (length txns) decoder
+
+        return $ block { txns = txns }
+
+instance Encodable BlockPayload where
+    encode end (BlockPayload block) = encode end block
 
 instance Decodable BlockPayload where
-    decoder = do
-        header@(BlockHeader {
-            txn_count = (VInt count)
-        }) <- decoder
+    decoder = BlockPayload <$> decoder
 
-        txns <- listD (fromIntegral count) decoder
+-- encodeHeadersPayload :: [BlockHeader] -> IO ByteString -- HeadersPayload
+-- encodeHeadersPayload = return . encodeLE . HeadersPayload
 
-        return $ BlockPayload {
-            header = header,
-            txns = txns
-        }
+-- encodeBlock
 
-encodeHeadersPayload :: [BlockHeader] -> IO ByteString -- HeadersPayload
-encodeHeadersPayload = return . encodeLE . HeadersPayload
-
--- encodeBlockPayload
-
-hashBlockHeader :: BlockHeader -> Hash256
-hashBlockHeader (BlockHeader {
+hashBlock :: Block -> Hash256
+hashBlock (Block {
     vers = vers,
-    prev_block = prev_block,
+    prev_hash = prev_hash,
     merkle_root = merkle_root,
     timestamp = timestamp,
     diff_bits = bits,
     nonce = nonce
 }) =
-    -- sha256^2(vers + prev_block + merkle_root + time + diff + nonce)
+    -- sha256^2(vers + prev_hash + merkle_root + time + diff + nonce)
     Hash256FromBS . ba2bs . sha256 . sha256 $ mconcat [
         encodeLE vers,
-        hash256ToBS prev_block,
+        hash256ToBS prev_hash,
         hash256ToBS merkle_root,
 
         encodeLE timestamp,
         encodeLE bits,
         encodeLE nonce
     ]
-
-blockPayloadToBlockPayloadHash :: BlockPayload -> BlockPayloadHashed
-blockPayloadToBlockPayloadHash payload =
-    BlockPayloadHashed
-        (hashBlockHeader $ header payload)
-        payload
-
-blockPayloadToBPH = blockPayloadToBlockPayloadHash

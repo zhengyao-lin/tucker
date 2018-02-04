@@ -1,10 +1,33 @@
 module Tucker.Conf where
 
+import Data.Hex
 import Data.Word
+
+import qualified Data.ByteString as BSR
+import qualified Data.ByteString.Char8 as BS
+
 import Network.Socket
+import Crypto.PubKey.ECC.Types
+
+tucker_curve = getCurveByName SEC_p256k1
+
+data NodeServiceTypeSingle = TCKR_NODE_NETWORK | TCKR_NODE_GETUTXO | TCKR_NODE_BLOOM deriving (Show, Eq)
+data NodeServiceType = NodeServiceType [NodeServiceTypeSingle] deriving (Show, Eq)
 
 data TCKRConf =
     TCKRConf {
+        tckr_net_version     :: Integer,
+        tckr_node_service    :: NodeServiceType,
+
+        tckr_user_agent      :: String,
+
+        tckr_wif_pref        :: Word8,
+        tckr_pub_pref        :: Word8,
+        tckr_magic_no        :: BSR.ByteString,
+        tckr_listen_port     :: Word16,
+
+        tckr_genesis_raw     :: BSR.ByteString, -- genesis hash
+
         tckr_trans_timeout   :: Int, -- in sec
         tckr_bootstrap_host  :: [String],
 
@@ -42,8 +65,20 @@ tucker_btp_name_gen num = "btp." ++ show num
 
 -- tucker_cache_tree_chunk = 1
 
-tucker_default_conf =
+tucker_default_conf_mainnet =
     TCKRConf {
+        tckr_net_version = 60002,
+        tckr_node_service = NodeServiceType [ TCKR_NODE_NETWORK ],
+
+        tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
+
+        tckr_wif_pref = 0x80,
+        tckr_pub_pref = 0x00,
+        tckr_magic_no = BSR.pack [ 0xf9, 0xbe, 0xb4, 0xd9 ],
+        tckr_listen_port = 8333,
+
+        tckr_genesis_raw = BS.pack $ (!! 0) $ unhex "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4A29AB5F49FFFF001D1DAC2B7C0101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000",
+
         tckr_trans_timeout = 5, -- 5 sec
         tckr_bootstrap_host = [ "seed.tbtc.petertodd.org" ],
 
@@ -82,3 +117,13 @@ tucker_default_conf =
 
     where
         ip4 = SockAddrInet 0 . tupleToHostAddress
+
+tucker_default_conf_testnet3 =
+    tucker_default_conf_mainnet {
+        tckr_wif_pref = 0xef,
+        tckr_pub_pref = 0x6f,
+        tckr_magic_no = BSR.pack [ 0x0b, 0x11, 0x09, 0x07 ],
+        tckr_listen_port = 18333,
+
+        tckr_genesis_raw = BS.pack $ (!! 0) $ unhex "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4ADAE5494DFFFF001D1AA4AE180101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000"
+    }

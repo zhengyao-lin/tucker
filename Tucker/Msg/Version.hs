@@ -8,7 +8,7 @@ import Debug.Trace
 import System.Random
 
 import Tucker.Enc
-import Tucker.Std
+import Tucker.Conf
 import Tucker.Util
 
 import Tucker.Msg.Common
@@ -16,7 +16,7 @@ import Tucker.Msg.Common
 data VersionPayload =
     VersionPayload {
         vers         :: Int32, -- 60002 for modern protocol
-        vers_serv    :: BTCServiceType,
+        vers_serv    :: NodeServiceType,
         timestamp    :: Int64,
 
         addr_recv    :: NetAddr,
@@ -95,16 +95,16 @@ instance Decodable VersionPayload where
             relay = relay
         }
 
-buildVersionPayload :: BTCNetwork -> NetAddr -> IO VersionPayload
-buildVersionPayload net addr = do
+buildVersionPayload :: TCKRConf -> NetAddr -> IO VersionPayload
+buildVersionPayload conf addr = do
     timestamp <- unixTimestamp
     nonce <- getStdRandom (randomR (0, maxBound :: Word64))
 
-    -- ip4ToNetAddr "127.0.0.1" (listenPort net) btc_cli_service
+    -- ip4ToNetAddr "127.0.0.1" (tckr_listen_port conf) btc_cli_service
 
     return $ VersionPayload {
-        vers = btc_version,
-        vers_serv = btc_cli_service,
+        vers = fi $ tckr_net_version conf,
+        vers_serv = tckr_node_service conf,
         timestamp = timestamp,
 
         addr_recv = addr,
@@ -112,14 +112,14 @@ buildVersionPayload net addr = do
 
         nonce = nonce,
 
-        user_agent = VStr btc_user_agent,
+        user_agent = VStr $ tckr_user_agent conf,
         start_height = 0,
         relay = False
     }
 
-encodeVersionPayload :: BTCNetwork -> NetAddr -> IO ByteString
-encodeVersionPayload net addr =
-    buildVersionPayload net addr >>= (pure . encodeLE)
+encodeVersionPayload :: TCKRConf -> NetAddr -> IO ByteString
+encodeVersionPayload conf addr =
+    buildVersionPayload conf addr >>= (pure . encodeLE)
 
 encodeVerackPayload :: IO ByteString
 encodeVerackPayload = return $ BSR.empty

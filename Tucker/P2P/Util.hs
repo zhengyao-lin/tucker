@@ -13,7 +13,6 @@ import Control.Monad.Loops
 
 import Tucker.Enc
 import Tucker.Msg
-import Tucker.Std
 import Tucker.Util
 import Tucker.Atom
 import Tucker.Conf
@@ -31,7 +30,7 @@ ip4ToIP6 addrv4 =
                  0x00, 0x00, 0x00, 0x00,
                  0x00, 0x00, 0xff, 0xff ]
 
-ip4ToNetAddr :: String -> Word16 -> BTCServiceType -> IO NetAddr
+ip4ToNetAddr :: String -> Word16 -> NodeServiceType -> IO NetAddr
 ip4ToNetAddr addr port serv = do
     time <- unixTimestamp
     enc <- inet_addr addr
@@ -57,11 +56,11 @@ buildSocketTo addr =
     socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
 
 -- look up node seeds using a domain
-seedLookup :: BTCNetwork -> String -> IO [AddrInfo]
-seedLookup net host =
+seedLookup :: TCKRConf -> String -> IO [AddrInfo]
+seedLookup conf host =
     getAddrInfo (Just defaultHints {
         addrSocketType = Stream
-    }) (Just host) (Just $ show $ listenPort net)
+    }) (Just host) (Just $ show $ tckr_listen_port conf)
 
 -- try to trim a message from the received data
 -- if a complete message is found, return (Right MsgHead {}, rest of data)
@@ -70,7 +69,7 @@ seedLookup net host =
 -- trimMsg :: ByteString -> (Either TCKRError MsgHead, ByteString)
 -- trimMsg = decodeLE
 
-sockAddrToNetAddr :: SockAddr -> BTCServiceType -> IO NetAddr
+sockAddrToNetAddr :: SockAddr -> NodeServiceType -> IO NetAddr
 
 sockAddrToNetAddr (SockAddrInet port host) serv = do
     time <- unixTimestamp
@@ -130,7 +129,7 @@ netAddrToAddrInfo netaddr = do
 
         is_ip4 = ip4ToIP6 h4 == ip
 
--- nodeNetAddr :: BTCNode -> IO (Maybe NetAddr)
+-- nodeNetAddr :: Node -> IO (Maybe NetAddr)
 -- nodeNetAddr node = do
 --     let sockaddr = addrAddress $ addr node
 --     vers <- getA $ vers_payload node
@@ -152,16 +151,15 @@ filterProbingList :: MainLoopEnv -> [AddrInfo] -> IO [AddrInfo]
 filterProbingList env new_list = do
     nodes <- getA $ node_list env
 
-    bl <- getEnvConf env tckr_node_blacklist
-
-    let exist_sockaddr = map sock_addr nodes
+    let bl = envConf env tckr_node_blacklist
+        exist_sockaddr = map sock_addr nodes
         blacklist = exist_sockaddr ++ bl
 
     return $ filter (\a -> all (not . isSameIP (addrAddress a)) blacklist) new_list
 
 decodePayload :: MsgPayload t
               => MainLoopEnv
-              -> BTCNode
+              -> Node
               -> ByteString
               -> IO a
               -> (t -> IO a)
@@ -193,7 +191,7 @@ timeoutRetryS :: Int -> IO a -> IO a
 timeoutRetryS sec action = untilJust $ timeoutS sec action
 
 nodeRecvOneMsg :: MainLoopEnv
-               -> BTCNode
+               -> Node
                -> (Transport -> ByteString -> IO (Either TCKRError MsgHead, ByteString))
                -> IO MsgHead
                -> IO MsgHead
@@ -203,7 +201,7 @@ nodeRecvOneMsg env node recv_proc timeout_proc = do
 
     case msg of
         Right msg@(MsgHead {}) ->
-            if magicno msg /= magicNo (btc_network env) then
+            if magicno msg /= envConf env tckr_magic_no then
                 throw $ TCKRError "network magic number not match"
             else do
                 updateBuf buf
@@ -220,15 +218,15 @@ nodeRecvOneMsg env node recv_proc timeout_proc = do
     where
         updateBuf = setA (recv_buf node)
 
-nodeRecvOneMsgTimeout :: MainLoopEnv -> BTCNode -> IO MsgHead -> IO MsgHead
+nodeRecvOneMsgTimeout :: MainLoopEnv -> Node -> IO MsgHead -> IO MsgHead
 nodeRecvOneMsgTimeout env node timeout_proc = do
     nodeRecvOneMsg env node ((flip tRecvOneMsg) (timeout_s env)) timeout_proc
 
-nodeRecvOneMsgNonBlocking :: MainLoopEnv -> BTCNode -> IO MsgHead
+nodeRecvOneMsgNonBlocking :: MainLoopEnv -> Node -> IO MsgHead
 nodeRecvOneMsgNonBlocking env node = do
     nodeRecvOneMsg env node tRecvOneMsgNonBlocking (return LackData)
 
 -- throw an exception when timeout
-nodeExpectOneMsg :: MainLoopEnv -> BTCNode -> IO MsgHead
+nodeExpectOneMsg :: MainLoopEnv -> Node -> IO MsgHead
 nodeExpectOneMsg env node =
     nodeRecvOneMsgTimeout env node (throw $ TCKRError "recv timeout")

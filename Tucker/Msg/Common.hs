@@ -13,13 +13,13 @@ import Network.Socket
 import Debug.Trace
 
 import Tucker.Enc
-import Tucker.Std
+import Tucker.Conf
 import Tucker.Util
 import Tucker.Auth
 
 import Tucker.Msg.RPC
 
-serv_type = [ BTC_NODE_NETWORK, BTC_NODE_GETUTXO, BTC_NODE_BLOOM ]
+serv_type = [ TCKR_NODE_NETWORK, TCKR_NODE_GETUTXO, TCKR_NODE_BLOOM ]
 
 cmd_map = [
         (BTC_CMD_VERSION,       "version"),
@@ -52,7 +52,7 @@ data VStr = VStr String | VBStr ByteString deriving (Show, Eq)
 data NetAddr =
     NetAddr {
         time         :: Word32,
-        net_serv     :: BTCServiceType,
+        net_serv     :: NodeServiceType,
         ipv6o4       :: ByteString, -- 16 bytes 
         port         :: Word16
     } deriving (Show, Eq)
@@ -89,6 +89,9 @@ instance Read Hash256 where
 
 nullHash256 = Hash256FromBS $ BSR.pack [ 0 | _ <- [ 1 .. 32 ] ]
 hash256ToBS (Hash256FromBS bs) = bs
+
+stdHash256 :: ByteString -> Hash256
+stdHash256 = Hash256FromBS . ba2bs . sha256 . sha256
 
 data MsgHead
     = LackData -- lack data mark
@@ -143,20 +146,20 @@ instance Decodable VStr where
         bs <- bsD $ fromInteger len
         return $ VStr $ BS.unpack bs
 
-instance Encodable BTCServiceType where
-    encode end (BTCServiceType serv) =
+instance Encodable NodeServiceType where
+    encode end (NodeServiceType serv) =
         encode end $
         ((foldr (.|.) 0) $
         map (\s -> case findIndex (== s) serv_type of
             Just i -> 1 `shift` i
             _ -> error "impossible") serv :: Word64)
 
-instance Decodable BTCServiceType where
+instance Decodable NodeServiceType where
     decoder = do
         serv <- decoder :: Decoder Word64
-        return $ BTCServiceType
-                $ map snd
-                $ filter (\(i, _) -> serv .&. shift 1 i /= 0) (zip [0..] serv_type)
+        return $ NodeServiceType
+               $ map snd
+               $ filter (\(i, _) -> serv .&. shift 1 i /= 0) (zip [0..] serv_type)
 
 instance Encodable NetAddr where
     encode end (NetAddr {
@@ -279,12 +282,12 @@ trimnull bs =
     else
         (chr $ fromIntegral $ BSR.head bs) : (trimnull $ BSR.tail bs)
 
-encodeMsg :: BTCNetwork -> Command -> IO ByteString -> IO ByteString
-encodeMsg net cmd mpayload = do
+encodeMsg :: TCKRConf -> Command -> IO ByteString -> IO ByteString
+encodeMsg conf cmd mpayload = do
     payload <- mpayload
 
     return $ encodeLE $ MsgHead {
-        magicno = magicNo net,
+        magicno = tckr_magic_no conf,
         command = cmd,
         payload = payload
     }

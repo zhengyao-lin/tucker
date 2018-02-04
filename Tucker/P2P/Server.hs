@@ -12,7 +12,6 @@ import Control.Concurrent.Thread.Delay
 
 import Network.Socket
 
-import Tucker.Std
 import Tucker.Msg
 import Tucker.Enc
 import Tucker.Conf
@@ -26,7 +25,7 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 import Tucker.P2P.Action
 
-nodeDefaultActionHandler :: MainLoopEnv -> BTCNode -> MsgHead -> IO [RouterAction]
+nodeDefaultActionHandler :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 nodeDefaultActionHandler env node LackData = do
     delay 100000 -- 100ms
     return []
@@ -37,14 +36,14 @@ nodeDefaultActionHandler env node msg@(MsgHead {
     }) = do
         h command where
             trans = conn_trans node
-            net = btc_network env
+            conf = global_conf env
 
             d :: MsgPayload t => (t -> IO [RouterAction]) -> IO [RouterAction]
             d = decodePayload env node payload (pure [])
 
             h BTC_CMD_PING = do
                 d $ \ping@(PingPongPayload {}) -> do
-                    pong <- encodeMsg net BTC_CMD_PONG $ pure $ encodeLE ping
+                    pong <- encodeMsg conf BTC_CMD_PONG $ pure $ encodeLE ping
                     -- nodeMsg env node $ "pinging back: " ++ (show pong)
                     timeoutS (timeout_s env) $ tSend trans pong
                     return []
@@ -52,7 +51,7 @@ nodeDefaultActionHandler env node msg@(MsgHead {
             h BTC_CMD_GETADDR = do
                 nodes       <- getA (node_list env)
                 net_addrs   <- forM nodes nodeNetAddr
-                addr        <- encodeMsg net BTC_CMD_ADDR $ encodeAddrPayload net_addrs
+                addr        <- encodeMsg conf BTC_CMD_ADDR $ encodeAddrPayload net_addrs
 
                 -- nodeMsg env node $ "return addresses"
 
@@ -70,8 +69,9 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                 d $ \addrmsg@(AddrPayload {
                     addrs = net_addrs
                 }) -> do
-                    nodes       <- getA $ node_list env
-                    seek_max    <- getEnvConf env tckr_seek_max
+                    nodes <- getA $ node_list env
+
+                    let seek_max = envConf env tckr_seek_max
 
                     -- nodeMsg env node (show addrmsg)
 
@@ -93,10 +93,10 @@ nodeDefaultActionHandler env node msg@(MsgHead {
 
                     return []
 
-            h BTC_CMD_BLOCK = do
-                d $ \msg -> do
-                    envAddIdleBlock env node msg
-                    return []
+            -- h BTC_CMD_BLOCK = do
+            --     d $ \msg -> do
+            --         envAddIdleBlock env node msg
+            --         return []
 
             h _ = do
                 nodeMsg env node $ "unhandled message: " ++ (show command)
@@ -118,7 +118,7 @@ nodeDefaultActionList = [
 
 -- upon receiving a new message
 -- nodeProcMsg route the message through the action_list
-nodeProcMsg :: MainLoopEnv -> BTCNode -> MsgHead -> IO ()
+nodeProcMsg :: MainLoopEnv -> Node -> MsgHead -> IO ()
 nodeProcMsg env node msg = do
     -- prepend new actions
     new_alist <- getA $ new_action node
@@ -160,7 +160,7 @@ nodeProcMsg env node msg = do
 
     return ()
 
-nodeExec :: MainLoopEnv -> BTCNode -> IO ()
+nodeExec :: MainLoopEnv -> Node -> IO ()
 nodeExec env unready_node = do
     nodeMsg env unready_node "spawn"
 
@@ -182,7 +182,7 @@ nodeExec env unready_node = do
         nodeRecvOneMsgNonBlocking env node >>=
         nodeProcMsg env node
 
-nodeFinal :: MainLoopEnv -> BTCNode -> Either SomeException () -> IO ()
+nodeFinal :: MainLoopEnv -> Node -> Either SomeException () -> IO ()
 nodeFinal env node res = do
     case res of
         Right _ -> nodeMsg env node "exiting normally"
@@ -191,14 +191,16 @@ nodeFinal env node res = do
     setA (alive node) False
     tClose $ conn_trans node
 
-handshake :: MainLoopEnv -> BTCNode -> IO BTCNode
+handshake :: MainLoopEnv -> Node -> IO Node
 handshake env node = do
-    let net = btc_network env
+    let conf = global_conf env
         trans = conn_trans node
 
-    net_addr <- ip4ToNetAddr "127.0.0.1" (listenPort net) btc_cli_service
-    version <- encodeMsg net BTC_CMD_VERSION $
-               encodeVersionPayload net net_addr
+    net_addr <- ip4ToNetAddr "127.0.0.1"
+                (tckr_listen_port conf)
+                (tckr_node_service conf)
+    version <- encodeMsg conf BTC_CMD_VERSION $
+               encodeVersionPayload conf net_addr
 
     -- send version
     tSend trans version
@@ -233,7 +235,7 @@ handshake env node = do
             }
 
             -- send verack
-            ack <- encodeMsg net BTC_CMD_VERACK $ encodeVerackPayload
+            ack <- encodeMsg conf BTC_CMD_VERACK $ encodeVerackPayload
             tSend trans ack
             
             -- receive verack
@@ -250,8 +252,6 @@ handshake env node = do
 -- timeout in seconds
 probe :: MainLoopEnv -> [AddrInfo] -> IO ()
 probe env addrs = do
-    let net = btc_network env
-
     res <- (flip mapM) addrs $ \addr -> (try $ do
         let sock_addr = addrAddress addr
 

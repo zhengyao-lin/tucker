@@ -10,7 +10,6 @@ import Control.Monad.Loops
 import Control.Concurrent.Thread.Delay
 import qualified Control.Concurrent.Lock as LK
 
-import Tucker.Std
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Util
@@ -22,11 +21,10 @@ import Tucker.P2P.Action
 import Tucker.P2P.Server
 
 import Tucker.Chain.Object
-import Tucker.Chain.Cached
 
 bootstrap :: MainLoopEnv -> [String] -> IO ()
 bootstrap env hostnames = do
-    addrs <- (mapM (seedLookup $ btc_network env) hostnames) >>= (pure . concat)
+    addrs <- (mapM (seedLookup $ global_conf env) hostnames) >>= (pure . concat)
     probe env addrs
     
 {-
@@ -51,7 +49,8 @@ we want to dump part of it into the disk
 pingLoop :: MainLoopEnv -> IO ()
 pingLoop env =
     forever $ do
-        reping_time <- getEnvConf env tckr_reping_time
+        let reping_time = envConf env tckr_reping_time
+        
         delay $ fromIntegral $ reping_time * 1000 * 1000
 
         cur_list <- getA $ node_list env
@@ -67,97 +66,97 @@ pingLoop env =
                 return ()
 
 -- NOTE: need to acquire the lock first
-trySealTreeCached :: MainLoopEnv -> IO ()
-trySealTreeCached env = do
-    LK.acquire (tree_lock env)
+-- trySealTreeCached :: MainLoopEnv -> IO ()
+-- trySealTreeCached env = do
+--     LK.acquire (tree_lock env)
 
-    tree <- getA (block_tree env)
+--     tree <- getA (block_tree env)
 
-    v1 <- getEnvConf env tckr_max_block_per_chunk
-    v2 <- getEnvConf env tckr_max_tree_insert_depth
+--     v1 <- getEnvConf env tckr_max_block_per_chunk
+--     v2 <- getEnvConf env tckr_max_tree_insert_depth
 
-    top_height <- treeCachedTopChunkHeight tree
+--     top_height <- treeCachedTopChunkHeight tree
 
-    if top_height > v1 + v2 then do
-        new_tree <- sealTreeCached v1 tree
-        setA (block_tree env) new_tree
-    else
-        return ()
+--     if top_height > v1 + v2 then do
+--         new_tree <- sealTreeCached v1 tree
+--         setA (block_tree env) new_tree
+--     else
+--         return ()
 
-    LK.release (tree_lock env)
+--     LK.release (tree_lock env)
 
-blockSyncLoop :: MainLoopEnv -> IO ()
-blockSyncLoop env =
-    forever $ do
-        time <- unixTimestamp
-        orig_height <- envCurrentTreeHeight env
+-- blockSyncLoop :: MainLoopEnv -> IO ()
+-- blockSyncLoop env =
+--     forever $ do
+--         time <- unixTimestamp
+--         orig_height <- envCurrentTreeHeight env
 
-        envMsg env $ "re-sync block tree"
-        envSpreadSimpleAction env (NormalAction fetchBlock) 1
+--         envMsg env $ "re-sync block tree"
+--         envSpreadSimpleAction env (NormalAction fetchBlock) 1
 
-        untilM_ (pure ()) $ do
-            now <- unixTimestamp
-            cur_height <- envCurrentTreeHeight env
+--         untilM_ (pure ()) $ do
+--             now <- unixTimestamp
+--             cur_height <- envCurrentTreeHeight env
             
-            return $
-                cur_height - orig_height >= 450 ||
-                now - time >= 20
+--             return $
+--                 cur_height - orig_height >= 450 ||
+--                 now - time >= 20
 
--- collect idle blocks
-blockCollectLoop :: MainLoopEnv -> IO ()
-blockCollectLoop env =
-    forever $ do
-        idle <- getA $ idle_block env
+-- -- collect idle blocks
+-- blockCollectLoop :: MainLoopEnv -> IO ()
+-- blockCollectLoop env =
+--     forever $ do
+--         idle <- getA $ idle_block env
 
-        max_depth <- getEnvConf env tckr_max_tree_insert_depth
+--         max_depth <- getEnvConf env tckr_max_tree_insert_depth
 
-        res <- forM (FD.toList idle) $ \bph@(BlockPayloadHashed hash payload) -> do
-            LK.acquire (tree_lock env)
+--         res <- forM (FD.toList idle) $ \bph@(BlockPayloadHashed hash payload) -> do
+--             LK.acquire (tree_lock env)
 
-            tree <- getA (block_tree env)
-            res <- insertToTreeCached max_depth tree bph
+--             tree <- getA (block_tree env)
+--             res <- insertToTreeCached max_depth tree bph
 
-            -- envMsg env $ "!!!!!!!!!!!!!!!!!!!!!!!!!"
+--             -- envMsg env $ "!!!!!!!!!!!!!!!!!!!!!!!!!"
 
-            case res of
-                Left err -> do
-                    -- envMsg env $ "!!!!! failed to collect idle block " ++ show hash ++ ": " ++ show err
-                    -- appA ((hash, payload):) (idle_block env)
-                    LK.release (tree_lock env)
+--             case res of
+--                 Left err -> do
+--                     -- envMsg env $ "!!!!! failed to collect idle block " ++ show hash ++ ": " ++ show err
+--                     -- appA ((hash, payload):) (idle_block env)
+--                     LK.release (tree_lock env)
 
-                    return (False, bph)
+--                     return (False, bph)
 
-                Right _ -> do
-                    envMsg env $ "idle block " ++ show hash ++ " confirmed"
-                    LK.release (tree_lock env)
+--                 Right _ -> do
+--                     envMsg env $ "idle block " ++ show hash ++ " confirmed"
+--                     LK.release (tree_lock env)
 
-                    -- try to seal the top chunk
-                    trySealTreeCached env
+--                     -- try to seal the top chunk
+--                     trySealTreeCached env
 
-                    return (True, bph)
+--                     return (True, bph)
 
-        let collected_idle = map snd $ filter fst res
+--         let collected_idle = map snd $ filter fst res
 
-        -- update idle blocks
-        appA (OSET.\\ OSET.fromList collected_idle) (idle_block env)
+--         -- update idle blocks
+--         appA (OSET.\\ OSET.fromList collected_idle) (idle_block env)
         
-        if null collected_idle then do
-            -- no new block collected
-            -- wait for 1 sec
-            orig_count <- envDumpIdleBlock env >>= (return . length)
+--         if null collected_idle then do
+--             -- no new block collected
+--             -- wait for 1 sec
+--             orig_count <- envDumpIdleBlock env >>= (return . length)
             
-            delay $ 2 * 1000 * 1000
+--             delay $ 2 * 1000 * 1000
 
-            untilM_ (pure ()) $ do
-                new_count <- envDumpIdleBlock env >>= (return . length)
-                if new_count == orig_count then do
-                    envMsg env "block collector waiting"
-                    delay $ 10 * 1000 * 1000
-                    return False
-                else
-                    return True
-        else -- try again immediately
-            return ()
+--             untilM_ (pure ()) $ do
+--                 new_count <- envDumpIdleBlock env >>= (return . length)
+--                 if new_count == orig_count then do
+--                     envMsg env "block collector waiting"
+--                     delay $ 10 * 1000 * 1000
+--                     return False
+--                 else
+--                     return True
+--         else -- try again immediately
+--             return ()
 
 gcLoop :: MainLoopEnv -> IO ()
 gcLoop env = 
@@ -171,8 +170,8 @@ gcLoop env =
 
             -- check if the node has not been responding for a long time
             last_seen <- nodeLastSeen node
-            alive_span <- getEnvConf env tckr_node_alive_span
-            let kill = timestamp - last_seen > alive_span
+            let alive_span = envConf env tckr_node_alive_span
+                kill = timestamp - last_seen > alive_span
 
             if kill then do
                 nodeMsg env node "timeout and quit"
@@ -193,9 +192,9 @@ gcLoop env =
 
         delay $ gc_interv env
 
-mainLoop :: BTCNetwork -> TCKRConf -> IO MainLoopEnv
-mainLoop net conf = do
-    env <- initEnv net conf
+mainLoop :: TCKRConf -> IO MainLoopEnv
+mainLoop conf = do
+    env <- initEnv conf
 
     bootstrap env (tckr_bootstrap_host conf)
     -- setA (node_list env) init_nodes
@@ -208,7 +207,7 @@ mainLoop net conf = do
     -- 5. blockLoop: collect idling blocks
 
     forkIO $ gcLoop env
-    forkIO $ blockCollectLoop env
+    -- forkIO $ blockCollectLoop env
     -- forkIO $ ioLoop env
 
     return env
