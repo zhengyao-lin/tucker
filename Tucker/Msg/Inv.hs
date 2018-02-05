@@ -10,6 +10,7 @@ import Tucker.Enc
 import Tucker.Conf
 import Tucker.Util
 import Tucker.Msg.Common
+import Tucker.Msg.Hash256
 
 data InvType
     = INV_TYPE_ERROR

@@ -17,8 +17,6 @@ import Tucker.Conf
 import Tucker.Util
 import Tucker.Auth
 
-import Tucker.Msg.RPC
-
 serv_type = [ TCKR_NODE_NETWORK, TCKR_NODE_GETUTXO, TCKR_NODE_BLOOM ]
 
 cmd_map = [
@@ -49,6 +47,8 @@ class (Encodable p, Decodable p) => MsgPayload p where
 newtype VInt = VInt Integer deriving (Show, Eq)
 data VStr = VStr String | VBStr ByteString deriving (Show, Eq)
 
+type RawScript = ByteString
+
 data NetAddr =
     NetAddr {
         time         :: Word32,
@@ -77,22 +77,6 @@ data Command
     | BTC_CMD_REJECT
     | BTC_CMD_ALERT deriving (Show, Eq)
 
-data Hash256 = Hash256FromBS ByteString deriving (Eq, Ord)
-type RawScript = ByteString
-
-instance Show Hash256 where
-    -- display order is the reversed order of the internal format
-    show (Hash256FromBS hash) = encodeRPCHash hash
-
-instance Read Hash256 where
-    readsPrec _ str = [(Hash256FromBS $ decodeRPCHash str, "")]
-
-nullHash256 = Hash256FromBS $ BSR.pack [ 0 | _ <- [ 1 .. 32 ] ]
-hash256ToBS (Hash256FromBS bs) = bs
-
-stdHash256 :: ByteString -> Hash256
-stdHash256 = Hash256FromBS . ba2bs . sha256 . sha256
-
 data MsgHead
     = LackData -- lack data mark
     | MsgHead {
@@ -102,16 +86,6 @@ data MsgHead
         -- checksum :: Word32 -- first 4 bytes of double sha256 of payload
         payload :: ByteString
     } deriving (Show, Eq)
-
-instance Encodable Hash256 where
-    encode _ (Hash256FromBS bs) =
-        if BSR.length bs == 32 then
-            bs
-        else error "hash 256 length not correct"
-
-instance Decodable Hash256 where
-    decoder =
-        bsD 32 >>= pure . Hash256FromBS
 
 instance Encodable VInt where
     encode end (VInt num)

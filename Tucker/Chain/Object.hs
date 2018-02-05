@@ -26,7 +26,7 @@ import Tucker.Error
 -- data BlockTree = BlockTree [[Block]] deriving (Eq, Show)
 -- data Block
 
-type TreeHeight = Int
+-- type TreeHeight = Int
 
 -- simple in-mem representation of block chain
 -- Chain root blocks

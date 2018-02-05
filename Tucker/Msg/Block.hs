@@ -11,6 +11,7 @@ import Tucker.Auth
 import Tucker.Msg.Tx
 import Tucker.Msg.Inv
 import Tucker.Msg.Common
+import Tucker.Msg.Hash256
 
 data Block =
     Block {
@@ -22,7 +23,9 @@ data Block =
         merkle_root :: Hash256,
 
         timestamp   :: Word32,
-        diff_bits   :: Word32,
+        -- diff_bits   :: Word32,
+        hash_target :: Hash256,
+
         nonce       :: Word32,
 
         txns        :: [TxPayload]
@@ -61,7 +64,7 @@ instance Encodable BlockHeader where
         merkle_root = merkle_root,
 
         timestamp = timestamp,
-        diff_bits = diff_bits,
+        hash_target = hash_target,
         nonce = nonce,
 
         txns = txns
@@ -72,7 +75,7 @@ instance Encodable BlockHeader where
             e merkle_root,
 
             e timestamp,
-            e diff_bits,
+            e $ packHash256 hash_target,
             e nonce,
 
             e $ VInt $ fromIntegral $ length txns
@@ -88,7 +91,7 @@ instance Decodable BlockHeader where
         merkle_root <- decoder
 
         timestamp <- decoder
-        diff_bits <- decoder
+        packed_target <- decoder
         nonce <- decoder
 
         VInt txn_count <- decoder
@@ -101,7 +104,7 @@ instance Decodable BlockHeader where
             merkle_root = merkle_root,
 
             timestamp = timestamp,
-            diff_bits = diff_bits,
+            hash_target = unpackHash256 packed_target,
             nonce = nonce,
 
             -- fill with undefined
@@ -145,16 +148,18 @@ hashBlock (Block {
     prev_hash = prev_hash,
     merkle_root = merkle_root,
     timestamp = timestamp,
-    diff_bits = bits,
+    hash_target = hash_target,
     nonce = nonce
 }) =
     -- sha256^2(vers + prev_hash + merkle_root + time + diff + nonce)
-    Hash256FromBS . ba2bs . sha256 . sha256 $ mconcat [
+    bsToHash256 . ba2bs . sha256 . sha256 $ mconcat [
         encodeLE vers,
         hash256ToBS prev_hash,
         hash256ToBS merkle_root,
 
         encodeLE timestamp,
-        encodeLE bits,
+
+        encodeLE $ packHash256 hash_target,
+
         encodeLE nonce
     ]

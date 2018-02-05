@@ -8,6 +8,7 @@ import Tucker.Auth
 import Tucker.Error
 import Tucker.Msg.Script
 import Tucker.Msg.Common
+import Tucker.Msg.Hash256
 
 import Data.Hex
 import Data.Int
