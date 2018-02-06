@@ -8,6 +8,7 @@ import Data.Int
 import Data.Bits
 import Data.Word
 import Data.Char
+import Data.LargeWord
 import qualified Data.Monoid as MND
 import qualified Data.ByteString as BSR
 
@@ -69,6 +70,9 @@ instance Encodable Word32 where
 
 instance Encodable Word64 where
     encode = encodeInt 8
+
+instance Encodable Word256 where
+    encode = encodeInt 32
 
 instance Encodable a => Encodable [a] where
     encode end = BSR.concat . (map (encode end))
@@ -277,3 +281,6 @@ instance Decodable Word32 where
 
 instance Decodable Word64 where
     decoder = intD 8
+
+instance Decodable Word256 where
+    decoder = intD 32

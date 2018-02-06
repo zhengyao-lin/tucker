@@ -63,6 +63,9 @@ tucker_version = "0.0.1"
 tucker_btp_name_regex = "^btp.(0|[1-9][0-9]*)$"
 tucker_btp_name_gen num = "btp." ++ show num
 
+tucker_bdiff_diff1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
+tucker_pdiff_diff1 = 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
 -- tucker_cache_tree_chunk = 1
 
 tucker_default_conf_mainnet =

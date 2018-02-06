@@ -39,6 +39,17 @@ data Chain = Chain {
         chain     :: [Block]
     } deriving (Eq, Show)
 
+
+data BranchNode
+    = ForkPoint Hash256
+    | BlockNode {
+        prev_node  :: BranchNode,
+        block_cont :: Block
+    } deriving (Eq, Show)
+
+data Branch = Branch Difficulty BranchNode -- last node of each branch
+data Branches = Branches [Branch]
+
 -- monoid
 -- encode/decode
 -- split
@@ -88,12 +99,12 @@ linkChain prev@(Chain r1 c1) (Chain r2 c2) =
     else
         Nothing
 
--- forkChain original_chain on -> (common ancestor chain, main branch, new empty branch)
-forkChain :: Int -> Chain -> (Chain, Chain, Chain)
-forkChain on chain =
-    (common, main, Chain root [])
-    where
-        (common, main@(Chain root _)) = splitChain on chain
+-- -- forkChain original_chain on -> (common ancestor chain, main branch, new empty branch)
+-- forkChain :: Int -> Chain -> (Chain, Chain, Chain)
+-- forkChain on chain =
+--     (common, main, Chain root [])
+--     where
+--         (common, main@(Chain root _)) = splitChain on chain
 
 merkleParents :: [Hash256] -> [Hash256]
 merkleParents [] = []
@@ -113,6 +124,13 @@ merkleRoot :: Block -> Hash256
 merkleRoot (Block {
     txns = txns
 }) = head $ merkleRoot' (map (stdHash256 . encodeLE) txns)
+
+-- searchBranch :: Branch -> Block -> BranchNode
+-- searchBranch 
+
+-- insertBlock :: Block -> Branches -> Maybe Branches
+-- insertBlock block br_orig =
+    
 
 {-
 

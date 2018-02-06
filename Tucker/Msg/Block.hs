@@ -8,10 +8,13 @@ import qualified Data.ByteString as BSR
 
 import Tucker.Enc
 import Tucker.Auth
+import Tucker.Conf
 import Tucker.Msg.Tx
 import Tucker.Msg.Inv
 import Tucker.Msg.Common
 import Tucker.Msg.Hash256
+
+type Difficulty = Double
 
 data Block =
     Block {
@@ -154,8 +157,8 @@ hashBlock (Block {
     -- sha256^2(vers + prev_hash + merkle_root + time + diff + nonce)
     bsToHash256 . ba2bs . sha256 . sha256 $ mconcat [
         encodeLE vers,
-        hash256ToBS prev_hash,
-        hash256ToBS merkle_root,
+        encodeLE prev_hash,
+        encodeLE merkle_root,
 
         encodeLE timestamp,
 
@@ -163,3 +166,11 @@ hashBlock (Block {
 
         encodeLE nonce
     ]
+
+-- target to approximate difficulty(truncated by bitcoin floating point)
+targetBDiff :: Hash256 -> Difficulty
+targetBDiff hash =
+    fromIntegral tucker_bdiff_diff1 / fromIntegral hash
+
+isHashOf :: Hash256 -> Block -> Bool
+isHashOf hash = (== hash) . block_hash

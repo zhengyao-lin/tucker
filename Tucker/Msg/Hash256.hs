@@ -3,6 +3,7 @@ module Tucker.Msg.Hash256 where
 import Data.Hex
 import Data.Word
 import Data.Char
+import Data.LargeWord
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -11,12 +12,33 @@ import Tucker.Auth
 import Tucker.Util
 
 -- stored in little endian
-data Hash256 = Hash256 ByteString deriving (Eq)
+data Hash256 = Hash256 Word256 deriving (Eq)
 
 instance Ord Hash256 where
-    -- reverse the little-endian number to compare from the highest byte
-    compare (Hash256 h1) (Hash256 h2) =
-        compare (BSR.reverse h1) (BSR.reverse h2)
+    compare (Hash256 n1) (Hash256 n2) = compare n1 n2
+
+instance Num Hash256 where
+    (Hash256 n1) + (Hash256 n2) = Hash256 (n1 + n2)
+    (Hash256 n1) * (Hash256 n2) = Hash256 (n1 * n2)
+    
+    abs (Hash256 n) = Hash256 (abs n)
+    negate (Hash256 n) = Hash256 (-n)
+    signum (Hash256 n) = Hash256 (signum n)
+
+    fromInteger i = Hash256 (fromInteger i)
+
+instance Real Hash256 where
+    toRational (Hash256 n) = toRational n
+
+instance Enum Hash256 where
+    toEnum i = Hash256 (toEnum i)
+    fromEnum (Hash256 n) = fromEnum n
+
+instance Integral Hash256 where
+    quotRem (Hash256 n1) (Hash256 n2) =
+        let (a, b) = quotRem n1 n2 in (Hash256 a, Hash256 b)
+
+    toInteger (Hash256 n) = toInteger n
 
 instance Show Hash256 where
     -- display order is the reversed order of the internal format
@@ -32,21 +54,21 @@ instance Read Hash256 where
         map toUpper $ str, "")]
 
 instance Encodable Hash256 where
-    encode _ (Hash256 bs) =
-        if BSR.length bs == 32 then bs
-        else error "hash 256 length not correct"
+    encode end (Hash256 n) = encode end n
 
 instance Decodable Hash256 where
-    decoder =
-        bsD 32 >>= pure . Hash256
+    decoder = Hash256 <$> decoder
 
-nullHash256 = Hash256 $ BSR.pack [ 0 | _ <- [ 1 .. 32 ] ]
+nullHash256 = 0 :: Hash256
 
-hash256ToBS (Hash256 bs) = bs
-bsToHash256 bs = Hash256 bs
+hash256ToBS (Hash256 n) = encodeLE n
+bsToHash256 bs =
+    case decodeLE bs of
+        (Right v, _) -> v
+        _ -> error "failed to decode hash256"
 
 stdHash256 :: ByteString -> Hash256
-stdHash256 = Hash256 . ba2bs . sha256 . sha256
+stdHash256 = bsToHash256 . ba2bs . sha256 . sha256
 
 -- -- real bit length of the hash
 -- validBits :: Hash256 -> Word
@@ -61,8 +83,10 @@ stdHash256 = Hash256 . ba2bs . sha256 . sha256
 
 -- TODO: too messy!!!
 packHash256 :: Hash256 -> Word32
-packHash256 (Hash256 bs) =
+packHash256 hash =
     let
+        bs = hash256ToBS hash
+
         valid = BSR.unpack $ BSR.dropWhile (== 0) $ BSR.reverse bs -- remove leading zero bytes
         valid3 = take 3 valid
 
@@ -107,4 +131,4 @@ unpackHash256 packed =
             else
                 replicate (size - 3) 0 ++ val
 
-    in Hash256 $ BSR.pack real
+    in bsToHash256 $ BSR.pack real
