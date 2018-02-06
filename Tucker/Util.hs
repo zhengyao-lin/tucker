@@ -4,6 +4,9 @@ import Data.Time.Clock.POSIX
 
 import System.CPUTime
 
+class Default a where
+    def :: a
+
 unixTimestamp :: Integral a => IO a
 unixTimestamp = round `fmap` getPOSIXTime
 
