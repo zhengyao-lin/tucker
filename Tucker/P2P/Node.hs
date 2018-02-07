@@ -11,12 +11,15 @@ import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
 import Control.Concurrent
+import Control.Monad.Morph
+import Control.Monad.Trans.Resource
 import qualified Control.Concurrent.Lock as LK
 
 import Network.Socket
 
 import Debug.Trace
 
+import Tucker.DB
 import Tucker.Enc
 import Tucker.Msg
 import Tucker.Conf
@@ -43,10 +46,9 @@ data MainLoopEnv =
         io_lock       :: LK.Lock,
         io_buf        :: Atom [String]
 
-        -- fetched_block :: Atom (SET.Set Hash256),
-        -- tree_lock     :: LK.Lock,
-        -- block_tree    :: Atom BlockTreeCached,
-        -- idle_block    :: Atom (OSET.OSet BlockPayloadHashed)
+        -- db_block      :: Database,
+        -- db_tx         :: Database,
+        -- db_chain      :: Database
     }
 
 data RouterAction
@@ -115,18 +117,6 @@ instance Monoid NullTask where
 
 instance NodeTask NullTask
 
--- envCurrentTreeHeight :: MainLoopEnv -> IO Int
--- envCurrentTreeHeight env = getA (block_tree env) >>= treeCachedHeight
-
--- envDumpIdleBlock :: MainLoopEnv -> IO [Hash256]
--- envDumpIdleBlock env =
---     getA (idle_block env) >>=
---     (return . map (\(BlockPayloadHashed hash _) -> hash) . FD.toList)
-
--- envDumpReceivedBlock :: MainLoopEnv -> IO [Hash256]
--- envDumpReceivedBlock env =
---     getA (fetched_block env) >>= (return . SET.toList)
-
 envMsg :: MainLoopEnv -> String -> IO ()
 envMsg env msg = do
     -- force eval
@@ -139,43 +129,15 @@ envMsg env msg = do
     -- appA (++ [ "env: " ++ msg ]) (io_buf env)
     -- putStrLn' $ "env: " ++ msg
 
--- genesisBlock :: TCKRConf -> Block
--- genesisBlock conf =
---     let genesis@(Block {
---             header = header
---         }) = case decodeLE (genesisRaw conf) of
---             (Left err, _) ->
---                 error $ "fatal: genesis block decoding error: " ++ show err
---             (Right gen, _) -> gen
-
---     in genesis
-
-initEnv :: TCKRConf -> IO MainLoopEnv
+initEnv :: TCKRConf -> ResIO MainLoopEnv
 initEnv conf = do
-    node_list <- newA []
-    io_lock <- LK.new
-    io_buf <- newA []
+    node_list <- lift $ newA []
+    io_lock <- lift $ LK.new
+    io_buf <- lift $ newA []
 
-    -- fetched <- newA SET.empty
-    -- tree_lock <- LK.new
-
-    -- idle_block <- newA OSET.empty
-
-    -- block_tree <- treeCachedFromDirectory (tckr_block_tree_path conf)
-    -- cur_height <- treeCachedHeight block_tree
-
-    -- if cur_height == 0 then do
-    --     -- if it's an empty tree, insert genesis
-    --     res <- insertToTreeCached 0 block_tree $ genesisBlock net
-    --     case res of
-    --         Left err ->
-    --             error $ "fatal: illegal genesis block: " ++ show err
-    --         Right _ -> return ()
-
-    --     -- cur_height <- treeCachedHeight block_tree
-    -- else return ()
-
-    -- block_tree_atom <- newA block_tree
+    -- db_block <- openDB def (tckr_db_path conf) (tckr_ks_block conf)
+    -- db_tx <- openDB def (tckr_db_path conf) (tckr_ks_tx conf)
+    -- db_chain <- openDB def (tckr_db_path conf) (tckr_ks_chain conf)
 
     return $ MainLoopEnv {
         global_conf = conf,
@@ -187,10 +149,9 @@ initEnv conf = do
         io_lock = io_lock,
         io_buf = io_buf
 
-        -- fetched_block = fetched,
-        -- tree_lock = tree_lock,
-        -- block_tree = block_tree_atom,
-        -- idle_block = idle_block
+        -- db_block = db_block,
+        -- db_tx = db_tx,
+        -- db_chain = db_chain
     }
 
 initNode :: SockAddr -> Transport -> IO Node
@@ -229,44 +190,8 @@ initNode sock_addr trans = do
 envConf :: MainLoopEnv -> (TCKRConf -> t) -> t
 envConf env field = field $ global_conf env
 
--- envAddFetchedBlock :: MainLoopEnv -> Hash256 -> IO ()
--- envAddFetchedBlock env hash = do
---     appA (SET.insert hash) (fetched_block env)
-
--- envHasFetchedBlock :: MainLoopEnv -> Hash256 -> IO Bool
--- envHasFetchedBlock env hash = do
---     fetched <- getA (fetched_block env)
---     return $ SET.member hash fetched
-
--- envFilterFetchedBlock :: MainLoopEnv -> [Hash256] -> IO [Hash256]
--- envFilterFetchedBlock env hashes = do
---     fetched <- getA (fetched_block env)
---     return $ filter (`SET.notMember` fetched) hashes
-
 envAllNode :: MainLoopEnv -> IO [Node]
 envAllNode = getA . node_list
-
--- envAddIdleBlock :: MainLoopEnv -> Node -> BlockPayload -> IO ()
--- envAddIdleBlock env node payload@(BlockPayload {
---     header = header,
---     Tucker.Msg.txns = txns
--- }) = do
---     let hash = hashBlockHeader header
---         bph = BlockPayloadHashed hash payload
-
---     -- 1. try to insert to the tree
---     -- 2. if cannot, push it to the idle block
-
---     has_fetched <- envHasFetchedBlock env hash
-
---     if has_fetched then
---         nodeMsg env node $ "block received again: " ++ (show hash)
---     else do
---         nodeMsg env node $ "block received: " ++ (show hash) -- ++ " " ++ (show payload)
-            
---         -- add to the set
---         appA (SET.insert hash) (fetched_block env)
---         appA (OSET.|> bph) (idle_block env)
 
 insertAction :: MainLoopEnv -> NodeAction -> IO ()
 insertAction env action = do

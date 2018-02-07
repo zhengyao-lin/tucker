@@ -6,6 +6,9 @@ import Data.Word
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
+import System.FilePath
+import System.Directory
+
 import Network.Socket
 import Crypto.PubKey.ECC.Types
 
@@ -18,6 +21,12 @@ data TCKRConf =
     TCKRConf {
         tckr_net_version     :: Integer,
         tckr_node_service    :: NodeServiceType,
+
+        -- keyspaces: block, tx, 
+        tckr_db_path         :: FilePath,
+        tckr_ks_block        :: String, -- block hash -> block data
+        tckr_ks_tx           :: String, -- tx hash -> tx data
+        tckr_ks_chain        :: String, -- block height -> block hash
 
         tckr_user_agent      :: String,
 
@@ -68,10 +77,21 @@ tucker_pdiff_diff1 = 0x00000000fffffffffffffffffffffffffffffffffffffffffffffffff
 
 -- tucker_cache_tree_chunk = 1
 
-tucker_default_conf_mainnet =
-    TCKRConf {
+tucker_default_conf_mainnet = do
+    user_home <- getHomeDirectory
+
+    let tucker_path = user_home </> ".tucker"
+
+    createDirectoryIfMissing False tucker_path
+
+    return $ TCKRConf {
         tckr_net_version = 60002,
         tckr_node_service = NodeServiceType [ TCKR_NODE_NETWORK ],
+
+        tckr_db_path = tucker_path </> "db",
+        tckr_ks_block = "block",
+        tckr_ks_tx = "tx",
+        tckr_ks_chain = "chain",
 
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 
@@ -121,8 +141,9 @@ tucker_default_conf_mainnet =
     where
         ip4 = SockAddrInet 0 . tupleToHostAddress
 
-tucker_default_conf_testnet3 =
-    tucker_default_conf_mainnet {
+tucker_default_conf_testnet3 = do
+    conf <- tucker_default_conf_mainnet
+    return $ conf {
         tckr_wif_pref = 0xef,
         tckr_pub_pref = 0x6f,
         tckr_magic_no = BSR.pack [ 0x0b, 0x11, 0x09, 0x07 ],

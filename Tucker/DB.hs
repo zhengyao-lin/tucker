@@ -1,8 +1,10 @@
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TypeSynonymInstances, ConstraintKinds #-}
 
 -- key-value db wrapper with keyspace
 
 module Tucker.DB where
+
+import qualified Data.ByteString as BSR
 
 import qualified Database.LevelDB as D
 
@@ -15,11 +17,13 @@ import Control.Monad.Trans.Resource
 import Tucker.Enc
 import Tucker.Util
 
-type Database = D.DB
+type Database k v = D.DB
 
 type DBOption = D.Options
 type DBOptionR = D.ReadOptions
 type DBOptionW = D.WriteOptions
+
+type KeyValueType t = (Encodable t, Decodable t)
 
 type DBKeySpace = String
 
@@ -34,44 +38,57 @@ instance Default DBOptionR where
 instance Default DBOptionW where
     def = D.defaultWriteOptions
 
-type DBKey = ByteString
-type DBValue = ByteString
+data DBBatchOp k v
+    = DBSet k v
+    | DBDel k
 
-data DBBatchOp
-    = DBSet DBKey DBValue
-    | DBDel DBKey
+setWithOption :: (KeyValueType k, KeyValueType v)
+              => DBOptionW -> Database k v -> k -> v -> IO ()
+setWithOption opt db key val = D.put db opt (encodeLE key) (encodeLE val)
 
-setWithOption :: DBOptionW -> Database -> DBKey -> DBValue -> IO ()
-setWithOption opt db = D.put db opt
+getWithOption :: (KeyValueType k, KeyValueType v)
+              => DBOptionR -> Database k v -> k -> IO (Maybe v)
+getWithOption opt db key = do
+    res <- D.get db opt (encodeLE key)
+    return $ case res of
+        Nothing -> Nothing
+        Just bs ->
+            case decodeLE bs of
+                (Right v, _) -> Just v
+                _ -> fail "db decode failure"
 
-getWithOption :: DBOptionR -> Database -> DBKey -> IO (Maybe DBValue)
-getWithOption opt db = D.get db opt
+deleteWithOption :: KeyValueType k => DBOptionW -> Database k v -> k -> IO ()
+deleteWithOption opt db key = D.delete db opt (encodeLE key)
 
-deleteWithOption :: DBOptionW -> Database -> DBKey -> IO ()
-deleteWithOption opt db = D.delete db opt
-
-batchWithOption :: DBOptionW -> Database -> [DBBatchOp] -> IO ()
+batchWithOption :: (KeyValueType k, KeyValueType v)
+                => DBOptionW -> Database k v -> [DBBatchOp k v] -> IO ()
 batchWithOption opt db = D.write db opt . map toLDBOp
     where
-        toLDBOp (DBSet k v) = D.Put k v
-        toLDBOp (DBDel k) = D.Del k
+        toLDBOp (DBSet k v) = D.Put (encodeLE k) (encodeLE v)
+        toLDBOp (DBDel k) = D.Del (encodeLE k)
 
-withDB :: DBOption -> FilePath -> DBKeySpace -> (Database -> IO a) -> ResIO a
-withDB opt path space proc = do
+openDB :: DBOption -> FilePath -> DBKeySpace -> ResIO (Database k v)
+openDB opt path space = do
     lift $
         if D.createIfMissing opt then
             createDirectoryIfMissing False path
         else
             return ()
 
-    db <- D.open (path </> space) opt
-    lift $ proc db
+    D.open (path </> space) opt
 
-withDBIO :: DBOption -> FilePath -> DBKeySpace -> (Database -> IO a) -> IO a
-withDBIO opt path space proc =
-    runResourceT $ withDB opt path space proc
+withDB :: DBOption -> FilePath -> DBKeySpace -> (Database k v -> IO a) -> IO a
+withDB opt path space proc = runResourceT $
+    openDB opt path space >>= (lift . proc)
 
+set :: (KeyValueType k, KeyValueType v) => Database k v -> k -> v -> IO ()
 set = setWithOption def
+
+get :: (KeyValueType k, KeyValueType v) => Database k v -> k -> IO (Maybe v)
 get = getWithOption def
+
+delete :: KeyValueType k => Database k v -> k -> IO ()
 delete = deleteWithOption def
+
+batch :: (KeyValueType k, KeyValueType v) =>Database k v -> [DBBatchOp k v] -> IO ()
 batch = batchWithOption def

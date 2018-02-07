@@ -77,6 +77,9 @@ instance Encodable Word256 where
 instance Encodable a => Encodable [a] where
     encode end = BSR.concat . (map (encode end))
 
+instance (Encodable t1, Encodable t2) => Encodable (t1, t2) where
+    encode end (a, b) = encode end a <> encode end b
+
 bchar :: Integral t => t -> ByteString
 bchar = BSR.singleton . fromIntegral
 
@@ -284,3 +287,6 @@ instance Decodable Word64 where
 
 instance Decodable Word256 where
     decoder = intD 32
+
+instance (Decodable t1, Decodable t2) => Decodable (t1, t2) where
+    decoder = (,) <$> decoder <*> decoder

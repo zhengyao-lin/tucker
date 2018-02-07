@@ -39,7 +39,6 @@ data Chain = Chain {
         chain     :: [Block]
     } deriving (Eq, Show)
 
-
 data BranchNode
     = ForkPoint Hash256
     | BlockNode {
@@ -130,14 +129,13 @@ merkleRoot (Block {
 
 -- insertBlock :: Block -> Branches -> Maybe Branches
 -- insertBlock block br_orig =
-    
 
 {-
 
 what do we need to check with a block
 
 1. duplication
-2. non-empty transaction
+2. non-empty transaction list
 3. block hash satisfy diff_bits
 4. timestamp < 2 hours in the future
 5. first transaction is coinbase
@@ -148,15 +146,30 @@ what do we need to check with a block
 if orphan then
     put into the orphan pool, query peer, done
 else
-    9. check diff_bits match the difficulty rules
-    10. timestamp > median time of last 11 blocks
-    11. check old block hash (x)
+    1. check diff_bits match the difficulty rules
+    2. timestamp > median time of last 11 blocks
+    3. check old block hash (x)
 
     if block in main branch then
-        
+        1. for all transaction besides coinbase:
+            1. all input exists
+            2. if input is coinbase, it must have COINBASE_MATURITY confirmations(depth of the block)
+            3. inputs are unspent(in the main branch)
+            4. sum of output <= sum of input
+        2. delete duplicate transactions from the transaction pool
+        3. relay
     else if block in side branch then
         if side branch <= main branch then
+            add to the branch and do nothing
         else
+            1. do the same check for all blocks from the fork point
+            2. if reject, keep the original main branch
+
+            3. put all valid transactions in side branch to the tx pool
+            4. delete duplicate transactions from the transaction pool
+            5. relay
+
+9. try to connect orphan blocks to this new block if not rejected(from step 1)
 
 -}
 

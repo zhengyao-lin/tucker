@@ -23,14 +23,20 @@ import Tucker.Transport
 import Tucker.P2P.Msg
 import Tucker.P2P.Node
 import Tucker.P2P.Util
-import Tucker.P2P.Action
+import qualified Tucker.P2P.Action as A
 
-nodeDefaultActionHandler :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
-nodeDefaultActionHandler env node LackData = do
+-- NOTE:
+-- when trying to sync block chain,
+-- exec fetchBlock on at least <a> nodes
+-- then wait until a certain span(or the tree has reached a certain height)
+-- then re-exec the fetchBlock on other <a> nodes
+
+defaultHandler :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+defaultHandler env node LackData = do
     delay 100000 -- 100ms
     return []
 
-nodeDefaultActionHandler env node msg@(MsgHead {
+defaultHandler env node msg@(MsgHead {
         command = command,
         payload = payload
     }) = do
@@ -102,18 +108,10 @@ nodeDefaultActionHandler env node msg@(MsgHead {
                 nodeMsg env node $ "unhandled message: " ++ (show command)
                 return []
 
-nodeDefaultAction = NormalAction nodeDefaultActionHandler
-
--- NOTE:
--- when trying to sync block chain,
--- exec fetchBlock on at least <a> nodes
--- then wait until a certain span(or the tree has reached a certain height)
--- then re-exec the fetchBlock on other <a> nodes
-
 nodeDefaultActionList = [
         -- NormalAction fetchBlock, -- for test
-        NormalAction pingDelay, -- measure delay
-        nodeDefaultAction
+        NormalAction A.pingDelay, -- measure delay
+        NormalAction defaultHandler
     ]
 
 -- upon receiving a new message
