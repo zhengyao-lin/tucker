@@ -179,6 +179,16 @@ instance Decodable TxPayload where
             lock_time = lock_time
         }
 
+-- tx with only 1 input with block hash 0 and n -1
+isCoinbase :: TxPayload -> Bool
+isCoinbase (TxPayload {
+    tx_in = [TxInput {
+        prev_out = OutPoint 0 (-1)
+    }]
+}) = True
+
+isCoinbase _ = False
+
 -- update on Jan 14, 2018
 -- there are(maybe) 5 standard transactions
 -- 1. P2PKH(currently implemented)

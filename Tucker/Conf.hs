@@ -62,9 +62,18 @@ data TCKRConf =
 
         tckr_fetch_dup_node  :: Int,
         -- number of duplicated nodes to fetch the same bunch of block
-        tckr_fetch_dup_max_task :: Int
+        tckr_fetch_dup_max_task :: Int,
         -- if the number of block fetch task is less than this number,
         -- use dup_node
+
+        -- max difference of the timestamp of a block with the time received
+        tckr_max_block_future_diff :: Word32, -- in sec
+
+        -- the difficulty changes every tckr_diff_change_span blocks
+        tckr_diff_change_span :: Word32,
+        tckr_expect_diff_change_time :: Word32, -- expected difficulty change time in sec
+
+        tckr_use_special_min_diff :: Bool -- support special-min-difficulty or not(mainly on testnet)
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -130,7 +139,14 @@ tucker_default_conf_mainnet = do
         tckr_max_tree_insert_depth = 256,
 
         tckr_fetch_dup_node = 8,
-        tckr_fetch_dup_max_task = 4
+        tckr_fetch_dup_max_task = 4,
+
+        tckr_max_block_future_diff = 60 * 2, -- 2 hours
+
+        tckr_diff_change_span = 2016,
+        tckr_expect_diff_change_time = 14 * 24 * 60 * 60, -- 2 weeks in sec
+
+        tckr_use_special_min_diff = False
 
         -- the collector will wait until the top chunk
         -- has (tckr_max_block_per_chunk + tckr_max_tree_insert_depth)
@@ -149,5 +165,7 @@ tucker_default_conf_testnet3 = do
         tckr_magic_no = BSR.pack [ 0x0b, 0x11, 0x09, 0x07 ],
         tckr_listen_port = 18333,
 
-        tckr_genesis_raw = BS.pack $ (!! 0) $ unhex "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4ADAE5494DFFFF001D1AA4AE180101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000"
+        tckr_genesis_raw = BS.pack $ (!! 0) $ unhex "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4ADAE5494DFFFF001D1AA4AE180101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000",
+    
+        tckr_use_special_min_diff = True    
     }

@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, ConstraintKinds #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 -- key-value db wrapper with keyspace
 
@@ -23,8 +23,6 @@ type DBOption = D.Options
 type DBOptionR = D.ReadOptions
 type DBOptionW = D.WriteOptions
 
-type KeyValueType t = (Encodable t, Decodable t)
-
 type DBKeySpace = String
 
 instance Default DBOption where
@@ -42,11 +40,11 @@ data DBBatchOp k v
     = DBSet k v
     | DBDel k
 
-setWithOption :: (KeyValueType k, KeyValueType v)
+setWithOption :: (Encodable k, Encodable v)
               => DBOptionW -> Database k v -> k -> v -> IO ()
 setWithOption opt db key val = D.put db opt (encodeLE key) (encodeLE val)
 
-getWithOption :: (KeyValueType k, KeyValueType v)
+getWithOption :: (Encodable k, Decodable v)
               => DBOptionR -> Database k v -> k -> IO (Maybe v)
 getWithOption opt db key = do
     res <- D.get db opt (encodeLE key)
@@ -57,10 +55,14 @@ getWithOption opt db key = do
                 (Right v, _) -> Just v
                 _ -> fail "db decode failure"
 
-deleteWithOption :: KeyValueType k => DBOptionW -> Database k v -> k -> IO ()
+hasWithOption :: Encodable k => DBOptionR -> Database k v -> k -> IO Bool
+hasWithOption opt db key =
+    maybeToBool <$> D.get db opt (encodeLE key)
+    
+deleteWithOption :: Encodable k => DBOptionW -> Database k v -> k -> IO ()
 deleteWithOption opt db key = D.delete db opt (encodeLE key)
 
-batchWithOption :: (KeyValueType k, KeyValueType v)
+batchWithOption :: (Encodable k, Encodable v)
                 => DBOptionW -> Database k v -> [DBBatchOp k v] -> IO ()
 batchWithOption opt db = D.write db opt . map toLDBOp
     where
@@ -81,14 +83,17 @@ withDB :: DBOption -> FilePath -> DBKeySpace -> (Database k v -> IO a) -> IO a
 withDB opt path space proc = runResourceT $
     openDB opt path space >>= (lift . proc)
 
-set :: (KeyValueType k, KeyValueType v) => Database k v -> k -> v -> IO ()
+set :: (Encodable k, Encodable v) => Database k v -> k -> v -> IO ()
 set = setWithOption def
 
-get :: (KeyValueType k, KeyValueType v) => Database k v -> k -> IO (Maybe v)
+get :: (Encodable k, Decodable v) => Database k v -> k -> IO (Maybe v)
 get = getWithOption def
 
-delete :: KeyValueType k => Database k v -> k -> IO ()
+has :: Encodable k => Database k v -> k -> IO Bool
+has = hasWithOption def
+
+delete :: Encodable k => Database k v -> k -> IO ()
 delete = deleteWithOption def
 
-batch :: (KeyValueType k, KeyValueType v) =>Database k v -> [DBBatchOp k v] -> IO ()
+batch :: (Encodable k, Encodable v) =>Database k v -> [DBBatchOp k v] -> IO ()
 batch = batchWithOption def

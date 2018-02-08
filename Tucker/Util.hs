@@ -46,5 +46,9 @@ maybeToEither :: a -> Maybe b -> Either a b
 maybeToEither a (Just b) = Right b
 maybeToEither a Nothing = Left a
 
+maybeToBool :: Maybe a -> Bool
+maybeToBool (Just _) = True
+maybeToBool Nothing = False
+
 fi :: (Integral a, Integral b) => a -> b
 fi = fromIntegral
