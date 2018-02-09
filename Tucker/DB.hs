@@ -25,6 +25,8 @@ type DBOptionW = D.WriteOptions
 
 type DBKeySpace = String
 
+data DBAny
+
 instance Default DBOption where
     def = D.defaultOptions {
         D.createIfMissing = True
@@ -44,9 +46,9 @@ setWithOption :: (Encodable k, Encodable v)
               => DBOptionW -> Database k v -> k -> v -> IO ()
 setWithOption opt db key val = D.put db opt (encodeLE key) (encodeLE val)
 
-getWithOption :: (Encodable k, Decodable v)
-              => DBOptionR -> Database k v -> k -> IO (Maybe v)
-getWithOption opt db key = do
+getWithOptionAs :: (Encodable k, Decodable v)
+                => DBOptionR -> Database k v' -> k -> IO (Maybe v)
+getWithOptionAs opt db key = do
     res <- D.get db opt (encodeLE key)
     return $ case res of
         Nothing -> Nothing
@@ -58,7 +60,7 @@ getWithOption opt db key = do
 hasWithOption :: Encodable k => DBOptionR -> Database k v -> k -> IO Bool
 hasWithOption opt db key =
     maybeToBool <$> D.get db opt (encodeLE key)
-    
+
 deleteWithOption :: Encodable k => DBOptionW -> Database k v -> k -> IO ()
 deleteWithOption opt db key = D.delete db opt (encodeLE key)
 
@@ -87,7 +89,10 @@ set :: (Encodable k, Encodable v) => Database k v -> k -> v -> IO ()
 set = setWithOption def
 
 get :: (Encodable k, Decodable v) => Database k v -> k -> IO (Maybe v)
-get = getWithOption def
+get = getWithOptionAs def
+
+getAs :: (Encodable k, Decodable v) => Database k v' -> k -> IO (Maybe v)
+getAs = getWithOptionAs def
 
 has :: Encodable k => Database k v -> k -> IO Bool
 has = hasWithOption def

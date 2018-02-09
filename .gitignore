@@ -28,4 +28,5 @@ upload.log
 .old/
 
 *.block.d/
+tucker-testdb/
 

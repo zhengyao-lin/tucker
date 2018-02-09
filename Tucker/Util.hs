@@ -4,6 +4,10 @@ import Data.Time.Clock.POSIX
 
 import System.CPUTime
 
+import Control.Exception
+
+import Tucker.Error
+
 class Default a where
     def :: a
 
@@ -52,3 +56,13 @@ maybeToBool Nothing = False
 
 fi :: (Integral a, Integral b) => a -> b
 fi = fromIntegral
+
+maybeCat lst = [ v | Just v <- lst ]
+
+eitherToIO :: Show a => Either a b -> IO b
+eitherToIO = either (fail . show) (pure . id)
+
+ioToEitherIO :: IO a -> IO (Either TCKRError a)
+ioToEitherIO =
+    (`catch` \e -> return $ Left $ TCKRError $ show (e :: SomeException)) .
+    (Right <$>)

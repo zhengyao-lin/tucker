@@ -44,11 +44,10 @@ data MainLoopEnv =
         gc_interv     :: Integer, -- in ms
 
         io_lock       :: LK.Lock,
-        io_buf        :: Atom [String]
+        io_buf        :: Atom [String],
 
-        -- db_block      :: Database,
-        -- db_tx         :: Database,
-        -- db_chain      :: Database
+        chain_lock    :: LK.Lock,
+        block_chain   :: Atom Chain
     }
 
 data RouterAction
@@ -139,6 +138,9 @@ initEnv conf = do
     -- db_tx <- openDB def (tckr_db_path conf) (tckr_ks_tx conf)
     -- db_chain <- openDB def (tckr_db_path conf) (tckr_ks_chain conf)
 
+    chain_lock <- lift $ LK.new
+    block_chain <- initChain conf >>= (lift . newA)
+
     return $ MainLoopEnv {
         global_conf = conf,
 
@@ -147,7 +149,10 @@ initEnv conf = do
         gc_interv = tckr_gc_interval conf,
 
         io_lock = io_lock,
-        io_buf = io_buf
+        io_buf = io_buf,
+
+        chain_lock = chain_lock,
+        block_chain = block_chain
 
         -- db_block = db_block,
         -- db_tx = db_tx,

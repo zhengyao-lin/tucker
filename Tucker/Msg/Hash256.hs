@@ -1,11 +1,14 @@
 module Tucker.Msg.Hash256 where
 
 import Data.Hex
+import Data.Bits
 import Data.Word
 import Data.Char
 import Data.LargeWord
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
+
+import Debug.Trace
 
 import Tucker.Enc
 import Tucker.Auth
@@ -22,10 +25,17 @@ instance Num Hash256 where
     (Hash256 n1) * (Hash256 n2) = Hash256 (n1 * n2)
     
     abs (Hash256 n) = Hash256 (abs n)
-    negate (Hash256 n) = Hash256 (-n)
+    -- negate (Hash256 n) = Hash256 (-n)
+    negate (Hash256 n) = Hash256 (complement n + 1)
+    -- TODO: using two's complment here, a bug in the large-word library
     signum (Hash256 n) = Hash256 (signum n)
 
-    fromInteger i = Hash256 (fromInteger i)
+    -- TODO: using the negate of Hash256 because the same problem of large-word
+    fromInteger i =
+        if i < 0 then
+            -Hash256 (fromInteger (abs i))
+        else
+            Hash256 (fromInteger i)
 
 instance Real Hash256 where
     toRational (Hash256 n) = toRational n
@@ -57,7 +67,7 @@ instance Encodable Hash256 where
     encode end (Hash256 n) = encode end n
 
 instance Decodable Hash256 where
-    decoder = Hash256 <$> decoder
+    decoder = intD 32
 
 nullHash256 = 0 :: Hash256
 
@@ -69,6 +79,8 @@ bsToHash256 bs =
 
 stdHash256 :: ByteString -> Hash256
 stdHash256 = bsToHash256 . ba2bs . sha256 . sha256
+
+-- decodeBE $ hex2bs "9b0fc92260312ce44e74ef369f5c66bbb85848f2eddd5a7a1cde251e54ccfdd5" :: (Either TCKRError Hash256, ByteString)
 
 -- -- real bit length of the hash
 -- validBits :: Hash256 -> Word

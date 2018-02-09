@@ -9,11 +9,14 @@ import Data.Word
 import Data.Maybe
 import Data.List hiding (map)
 import qualified Data.Set as SET
+import qualified Data.ByteString as BSR
 import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
 import Control.Monad.Loops
 import Control.Applicative
+import Control.Monad.Morph
+import Control.Monad.Trans.Resource
 
 import Control.Exception
 
@@ -44,6 +47,7 @@ import Tucker.Error
 --     } deriving (Eq, Show)
 
 type Height = Word64
+-- height starts from 0(genesis)
 
 data Branch
     = BlockNode {
@@ -74,6 +78,9 @@ data Chain =
 
         db_block      :: Database Hash256 (Height, Block),
         db_chain      :: Database Height Hash256,
+        db_global     :: Database String DBAny,
+        -- global var
+        -- 1. "height" :: Height, height >= real height
 
         orphan_pool   :: OSET.OSet Block,
         buffer_chain  :: Maybe Branch,
@@ -81,6 +88,100 @@ data Chain =
         -- the length of the buffer chain should >= tckr_max_tree_insert_depth
         edge_branches :: [Branch]
     }
+
+initChain :: TCKRConf -> ResIO Chain
+initChain conf@(TCKRConf {
+    tckr_db_path = db_path,
+    tckr_ks_block = ks_block,
+    tckr_ks_chain = ks_chain,
+    tckr_ks_global = ks_global,
+
+    tckr_genesis_raw = genesis_raw,
+    tckr_max_tree_insert_depth = max_depth
+}) = do
+    db_block <- openDB def db_path ks_block
+    db_chain <- openDB def db_path ks_chain
+    db_global <- openDB def db_path ks_global
+
+    let chain = Chain {
+            std_conf = conf,
+            db_block = db_block,
+            db_chain = db_chain,
+            db_global = db_global,
+
+            orphan_pool = OSET.empty,
+            
+            buffer_chain = Nothing,
+            edge_branches = []
+        }
+
+    mheight <- lift $ get db_global "height"
+
+    case mheight :: Maybe Height of
+        Nothing ->
+            -- empty chain
+            -- load genesis to the memory
+            return $ case decodeLE genesis_raw of
+                (Left err, _) -> error $ "genesis decode error: " ++ show err
+
+                (Right genesis, _) -> do
+                    chain {
+                        edge_branches = [BlockNode {
+                            prev_node = Nothing,
+                            block_data = genesis,
+
+                            acc_diff = targetBDiff (hash_target genesis),
+                            cur_height = 0
+                        }]
+                    }
+        
+        Just height -> lift $ do
+            -- load at least tckr_max_tree_insert_depth blocks into the edge_branches
+            let min_height =
+                    if height > fi max_depth then
+                        height - fi max_depth
+                    else 0
+                
+                range =
+                    if height > 0 then [ height, height - 1 .. min_height ]
+                    else [0]
+
+            hashes <- maybeCat <$> mapM (get db_chain) range
+                   :: IO [Hash256]
+
+            res    <- maybeCat <$> mapM (get db_block) hashes
+                   :: IO [(Height, Block)]
+            
+            let fold_proc (height, block) Nothing =
+                    Just $ BlockNode {
+                        prev_node = Nothing,
+                        block_data = block,
+                        acc_diff = targetBDiff (hash_target block),
+                        cur_height = height
+                    }
+
+                fold_proc (height, block) (Just node) =
+                    Just $ BlockNode {
+                        prev_node = Just node,
+                        block_data = block,
+                        acc_diff = targetBDiff (hash_target block) + acc_diff node,
+                        cur_height = height
+                    }
+
+            -- print height
+
+            return $ case foldr fold_proc Nothing res of
+                Nothing -> error "corrupted database(height field not correct for db_global)"
+                Just branch ->
+                    chain {
+                        edge_branches = [branch]
+                    }
+
+
+-- load db from path
+-- set orphan pool to Nothing
+-- load at least tckr_max_tree_insert_depth blocks into the edge_branches
+-- 
 
 {-
 
@@ -197,9 +298,15 @@ insertToEdge chain@(Chain {
                 edge_branches = new_node : edge_branches
             }
 
+blocksAtHeight :: Chain -> Height -> IO [Block]
+blocksAtHeight chain height =
+    (maybeCat <$>) $ forM (edge_branches chain) $
+        \b -> blockAtHeight chain b height
+
 blockAtHeight :: Chain -> Branch -> Height -> IO (Maybe Block)
 blockAtHeight (Chain {
     db_chain = db_chain,
+    db_block = db_block,
     buffer_chain = buffer_chain
 }) branch@(BlockNode {
     cur_height = max_height
@@ -218,8 +325,14 @@ blockAtHeight (Chain {
             Nothing -> do
                 -- not found in branch or buf_chain
                 -- search db
-                res <- get db_chain height :: IO (Maybe (Height, Block))
-                return $ snd <$> res
+                res <- get db_chain height :: IO (Maybe Hash256)
+
+                case res of
+                    Nothing -> return Nothing
+                    Just hash -> do
+                        Just (_, block) <- get db_block hash
+                                        :: IO  (Maybe (Height, Block))
+                        return $ Just block
 
 hashTargetValid :: Chain -> Branch -> IO Bool
 hashTargetValid chain@(Chain {
@@ -283,18 +396,39 @@ minTopDiff lst =
         remain = take i lst ++ drop (i + 1) lst
         max2 = maximum remain
     in
-        max2 - max1
+        if null remain then max1
+        else max2 - max1
 
 saveBranch :: Chain -> Branch -> IO ()
 saveBranch (Chain {
-    db_chain = db_chain
+    db_chain = db_chain,
+    db_global = db_global
 }) branch = do
+    -- ascending order of height
     let pairs = branchToBlockList branch
 
-    forM pairs $ \(height, (Block { block_hash = hash })) ->
-        set db_chain height hash
+    if not (null pairs) then do
+        -- save height later to ensure the height <= real height
+        let (height, _) = last pairs
+        mheight <- get db_global "height"
 
-    return ()
+        case mheight of
+            Nothing ->
+                set db_global "height" height
+
+            Just cur_height -> do
+                if height > cur_height then
+                    -- save height first
+                    set db_global "height" height
+                else
+                    return ()
+        
+        forM pairs $ \(height, (Block { block_hash = hash })) ->
+            set db_chain height hash
+
+        return ()
+    else
+        return ()
 
 -- try to fix a highest branch to save some memory
 fixBranch :: Chain -> IO Chain
@@ -303,10 +437,18 @@ fixBranch chain@(Chain {
     buffer_chain = buffer_chain,
     edge_branches = branches
 }) = do
-    let depth = minTopDiff $ map cur_height branches
+    let depth =
+            if length branches > 1 then
+                minTopDiff $ map cur_height branches
+            else if not (null branches) then
+                fi $ length (branchToBlockList (head branches))
+            else 0
+
         winner@(BlockNode {
             prev_node = mprev
         }) = maximum branches
+
+    -- print depth
 
     if fi depth > tckr_max_tree_insert_depth conf then
         case mprev of
@@ -329,33 +471,30 @@ fixBranch chain@(Chain {
 
     else return chain
 
-addBlock :: Chain -> Block -> IO (Either TCKRError Chain)
-addBlock chain@(Chain {
-    std_conf = conf,
+-- should not fail
+collectOrphan :: Chain -> IO Chain
+collectOrphan chain@(Chain {
     orphan_pool = orphan_pool
-}) block = do
-    res <- try (addBlock' True chain block)
+}) = do
+    let orphan_list = OSET.toAscList orphan_pool
+        fold_proc (suc, chain) block = do
+            -- print "hi"
+            mres <- addBlock chain block
+            return $ case mres of
+                Right new_chain -> (True, new_chain)
+                Left _ -> (suc, chain) -- don't throw
 
-    case res of
-        Left _ -> return res
-        Right new_chain -> do
-            -- TODO: traverse orphan pool to try to collect blocks
+    (suc, chain) <- foldM fold_proc (False, chain) orphan_list
 
-            let orphan_list = OSET.toAscList orphan_pool
-                fold_proc chain orphan = do
-                    res <- try (addBlock' False chain orphan)
-                           :: IO (Either TCKRError Chain)
+    if suc then collectOrphan chain -- if success, try to collect the orphan again
+    else return chain -- otherwise return the original chain
 
-                    return $ case res of
-                        Left _ -> chain
-                        Right chain -> chain
+addBlock :: Chain -> Block -> IO (Either TCKRError Chain)
+addBlock chain block = ioToEitherIO (addBlockFail chain block)
 
-            final_chain <- foldM fold_proc new_chain orphan_list
-
-            Right <$> fixBranch final_chain
-
-addBlock' :: Bool -> Chain -> Block -> IO Chain
-addBlock' check_dup chain@(Chain {
+-- throws a TCKRError when rejecting the block
+addBlockFail :: Chain -> Block -> IO Chain
+addBlockFail chain@(Chain {
     std_conf = conf,
     db_block = db_block,
     orphan_pool = orphan_pool
@@ -366,17 +505,16 @@ addBlock' check_dup chain@(Chain {
     merkle_root = merkle_root,
     txns = txns
 }) = do
-    if check_dup then
-        expectFalseIO "block already exists" $
-            chain `hasBlock` block
-    else
-        return ()
+    expectFalseIO "block already exists" $
+        chain `hasBlockInChain` block
 
-    expectFalse "empty tx list" $
-        null txns
+    -- don't check if the block is in orphan or not
+
+    expectTrue "empty tx list" $
+        not (null txns)
 
     expectTrue "hash target not met" $
-        hash_target < block_hash
+        hash_target > block_hash
 
     cur_time <- unixTimestamp
 
@@ -391,6 +529,20 @@ addBlock' check_dup chain@(Chain {
     -- for the coinbase (first) transaction, scriptSig length must be 2-100
     -- reject if sum of transaction sig opcounts > MAX_BLOCK_SIGOPS
 
+    -- 9b0fc92260312ce[4]4e74ef369f5c66b[b]b85848f2eddd5a7[a]1cde251e54ccfdd5
+    -- 9b0fc92260312ce[5]4e74ef369f5c66b[c]b85848f2eddd5a7[b]1cde251e54ccfdd5
+    -- 9b0fc92260312ce44e74ef369f5c66bbb85848f2eddd5a7a1cde251e54ccfdd5
+
+    -- 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd
+    -- 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd
+
+    -- print 11
+    -- print (block_hash)
+    -- print (merkle_root)
+    -- print (merkleRoot block)
+    -- print (stdHash256 $ encodeLE (head txns))
+    -- print (BSR.length $ encodeLE (head txns))
+
     expectTrue "merkle root claimed not correct" $
         merkleRoot block == merkle_root
 
@@ -398,15 +550,15 @@ addBlock' check_dup chain@(Chain {
         Nothing -> do -- no previous hash found
             has_recv <- db_block `has` prev_hash block
         
-            if has_recv then
-                -- have received the previous block
-                -- but it's too deep to change
-                reject "the previous block is too old to fetch"
-            else
-                -- put it into the orphan pool
-                return $ chain {
-                    orphan_pool = orphan_pool OSET.|> block
-                }
+            -- if has_recv then
+            --     -- have received the previous block
+            --     -- but it's too deep to change
+            --     reject "the previous block is too old to fetch"
+            -- else
+            --     -- put it into the orphan pool
+            return $ chain {
+                orphan_pool = orphan_pool OSET.|> block
+            }
 
         Just (branch, chain) -> do
             -- block inserted, new branch leaf created
@@ -421,20 +573,41 @@ addBlock' check_dup chain@(Chain {
             -- write the block into the block database
             set db_block block_hash (cur_height branch, block)
 
-            return chain
+            is_orphan <- chain `hasBlockInOrhpan` block
 
--- search two places for the block: block db and the orphan pool
-hasBlock :: Chain -> Block -> IO Bool
-hasBlock (Chain {
-    db_block = db_block,
-    orphan_pool = orphan_pool
+            final_chain <-
+                if is_orphan then
+                    -- remove the block from orphan pool if accepted
+                    return $ chain {
+                        orphan_pool = OSET.delete block orphan_pool
+                    }
+                else
+                    -- new block added, collect orphan
+                    collectOrphan chain
+
+            fixBranch final_chain
+
+-- received before && is in a branch
+hasBlockInChain :: Chain -> Block -> IO Bool
+hasBlockInChain chain@(Chain {
+    db_block = db_block
 }) block@(Block {
     block_hash = hash
 }) = do
-    in_db <- db_block `has` hash
-    let is_orphan = block `OSET.member` orphan_pool
+    mres <- get db_block hash :: IO (Maybe (Height, Block))
+    case mres of
+        Nothing -> return False
+        Just (height, _) ->
+            (not . null) <$> blocksAtHeight chain height
 
-    return $ in_db || is_orphan
+hasBlockInOrhpan :: Chain -> Block -> IO Bool
+hasBlockInOrhpan chain block =
+    return $ block `OSET.member` orphan_pool chain
+
+-- search two places for the block: block db and the orphan pool
+hasBlock :: Chain -> Block -> IO Bool
+hasBlock chain block =
+    (||) <$> hasBlockInChain chain block <*> hasBlockInOrhpan chain block
 
 reject :: String -> IO a
 reject msg = throw $ TCKRError msg
