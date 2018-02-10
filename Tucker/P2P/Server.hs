@@ -170,7 +170,7 @@ nodeExec env unready_node = do
     node <- timeoutFailS (timeout_s env) $ handshake env node
 
     -- set default action
-    nodePrependAction node nodeDefaultActionList
+    nodePrependActions node nodeDefaultActionList
 
     -- officially inserting the node
     envAppendNode env node

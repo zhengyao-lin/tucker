@@ -68,3 +68,33 @@ pingDelay env node msg = do
             return [ StopProp, DumpMe ]
         else
             return [] -- skip
+
+-- fetch the block inventory
+fetchInv :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+fetchInv env node msg = do
+    let conf = global_conf env
+        trans = conn_trans node
+
+    nodeMsg env node $ "start fetching blocks"
+
+    latest <- getA (block_chain env) >>= latestBlocks (tckr_known_inv_count conf)
+
+    getblocks <- encodeMsg conf BTC_CMD_GETBLOCKS $
+                 encodeGetblocksPayload conf (map block_hash latest) nullHash256
+
+    timeoutRetryS (timeout_s env) $ tSend trans getblocks
+
+    recvM [] BTC_CMD_INV $ \(InvPayload {
+        inv_vect = inv_vect
+    }) -> do
+        nodeMsg env node $ "inv received with " ++ (show $ length inv_vect) ++ " item(s)" -- ++ show inv_vect
+
+        -- maxt <- getEnvConf env tckr_max_block_task
+
+        -- hashes <- envFilterFetchedBlock env (map invToHash256 inv_vect)
+        -- let new_inv_vect = map (InvVector INV_TYPE_BLOCK) hashes
+        --     tasks = splitTask maxt new_inv_vect
+
+        -- rest <- spreadFetchTask env tasks
+
+        return [ StopProp, DumpMe ]

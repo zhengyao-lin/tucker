@@ -88,6 +88,10 @@ data Node =
         alive          :: Atom Bool
     }
 
+instance Eq Node where
+    (Node { thread_id = t1 }) == (Node { thread_id = t2 })
+        = t1 == t2
+
 instance Show Node where
     show node =
         "node on " ++ show (sock_addr node)
@@ -198,19 +202,6 @@ envConf env field = field $ global_conf env
 envAllNode :: MainLoopEnv -> IO [Node]
 envAllNode = getA . node_list
 
-insertAction :: MainLoopEnv -> NodeAction -> IO ()
-insertAction env action = do
-    nodes <- getA $ node_list env
-
-    forM nodes $ \node -> do
-        alive <- getA $ alive node
-        if alive then
-            appA (action:) (new_action node)
-        else
-            return ()
-
-    return ()
-
 nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
 nodeMsg env node msg = do
     envMsg env $ (show node) ++ ": " ++ msg
@@ -219,8 +210,8 @@ nodeMsg env node msg = do
 nodeLastSeen :: Node -> IO Word64
 nodeLastSeen = getA . last_seen
 
-nodePrependAction :: Node -> [NodeAction] -> IO ()
-nodePrependAction node new_actions =
+nodePrependActions :: Node -> [NodeAction] -> IO ()
+nodePrependActions node new_actions =
     appA (new_actions ++) (new_action node)
 
 nodeNetAddr :: Node -> IO NetAddr
@@ -262,7 +253,7 @@ envSpreadAction env gen_action tasks = do
         nodeMsg env node $ "prepending new action(s)"
 
         -- append new actions to each node
-        nodePrependAction node (gen_action task)
+        nodePrependActions node (gen_action task)
         
     return ()
 

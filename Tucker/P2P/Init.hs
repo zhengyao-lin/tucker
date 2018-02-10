@@ -63,7 +63,7 @@ pingLoop env =
             last_seen <- getA $ last_seen node
 
             if alive && now - last_seen > reping_time then
-                nodePrependAction node [ NormalAction pingDelay ]
+                nodePrependActions node [ NormalAction pingDelay ]
             else
                 return ()
 

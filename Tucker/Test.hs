@@ -10,6 +10,7 @@ import Network.Socket.ByteString
 
 import System.IO
 import System.Random
+import System.Directory
 
 import Test.HUnit
 
@@ -21,6 +22,8 @@ import Control.Monad.Trans.Resource
 import Control.Concurrent
 import Control.Concurrent.Thread.Delay
 
+import Control.Exception
+
 import Tucker.DB
 import Tucker.Enc
 import Tucker.Msg
@@ -31,9 +34,9 @@ import Tucker.Util
 import Tucker.Error
 
 import Tucker.P2P.Init
--- import Tucker.P2P.Util
--- import Tucker.P2P.Node
--- import Tucker.P2P.Action
+import Tucker.P2P.Util
+import Tucker.P2P.Node
+import Tucker.P2P.Action
 
 import Tucker.Chain.Object
 -- import Tucker.Chain.Cached
@@ -85,12 +88,14 @@ hex2block = decodeFail . hex2bs
 blockChainTest = TestCase $ do
     def_conf <- tucker_default_conf_mainnet
 
-    let conf = def_conf {
-            tckr_db_path = "tucker-testdb",
-            tckr_max_tree_insert_depth = 10
+    let test_db_path = "tucker-testdb"
+        conf = def_conf {
+            tckr_db_path = test_db_path
+            -- tckr_max_tree_insert_depth = 10
         }
 
-        blocks = map hex2block [
+        blocks =
+            map hex2block [
                 "010000006fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d6190000000000982051fd1e4ba744bbbe680e1fee14677ba1a3c3540bf7b1cdb606e857233e0e61bc6649ffff001d01e362990101000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0104ffffffff0100f2052a0100000043410496b538e853519c726a2c91e61ec11600ae1390813a627c66fb8be7947be63c52da7589379515d4e0a604f8141781e62294721166bf621e73a82cbf2342c858eeac00000000",
                 "010000004860eb18bf1b1620e37e9490fc8a427514416fd75159ab86688e9a8300000000d5fdcc541e25de1c7a5addedf24858b8bb665c9f36ef744ee42c316022c90f9bb0bc6649ffff001d08d2bd610101000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d010bffffffff0100f2052a010000004341047211a824f55b505228e4c3d5194c1fcfaa15a456abdf37f9b9d97a4040afc073dee6c89064984f03385237d92167c13e236446b417ab79a0fcae412ae3316b77ac00000000",
                 "01000000bddd99ccfda39da1b108ce1a5d70038d0a967bacb68b6b63065f626a0000000044f672226090d85db9a9f2fbfe5f0f9609b387af7be5b7fbb7a1767c831c9e995dbe6649ffff001d05e0ed6d0101000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d010effffffff0100f2052a0100000043410494b9d3e76c5b1629ecf97fff95d7a4bbdac87cc26099ada28066c6ff1eb9191223cd897194a08d0c2726c5747f1db49e8cf90e75dc3e3550ae9b30086f3cd5aaac00000000",
@@ -101,20 +106,24 @@ blockChainTest = TestCase $ do
             ]
         -- "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d010bffffffff0100f2052a010000004341047211a824f55b505228e4c3d5194c1fcfaa15a456abdf37f9b9d97a4040afc073dee6c89064984f03385237d92167c13e236446b417ab79a0fcae412ae3316b77ac00000000"
 
-        addBlockIgn chain block = do
-            mres <- addBlock chain block
-            case mres of
-                Right chain -> return chain
-                Left err -> do
-                    putStrLn $ "failed to add block: " ++ show block ++ show err
-                    return chain
+    exist <- doesDirectoryExist test_db_path
+    if exist then
+        removeDirectoryRecursive test_db_path
+    else return ()
 
-    putStrLn ""
+    -- putStrLn ""
     withChain conf $ \chain -> do
-        chain <- foldM addBlockIgn chain blocks
+        chain <- addBlocks chain blocks $ \b e ->
+            putStrLn $ "failed to add block: " ++ show b ++ show e
 
-        putStrLn $ show $ map branchToBlockList $ edge_branches chain
-        putStrLn $ show $ branchToBlockList <$> buffer_chain chain
+        -- assertEqual "wrong resulting chain"
+        --     (zip [1..] blocks)
+        --     (tail $ branchToBlockList $ head $ edge_branches chain)
+
+        -- putStrLn $ show $ map branchToBlockList $ edge_branches chain
+        -- putStrLn $ show $ branchToBlockList <$> buffer_chain chain
+
+        return ()
 
 blockTest = TestList [
         TestLabel "block chain basic" blockChainTest
@@ -174,7 +183,7 @@ env <- mainLoop btc_testnet3 tucker_default_conf
 idle = envDumpIdleBlock env >>= (return . length)
 fetched = envDumpReceivedBlock env >>= (return . length)
 height = envCurrentTreeHeight env
-envSpreadSimpleAction env (NormalAction fetchBlock) 1
+envSpreadSimpleAction env (NormalAction fetchInv) 1
 
 sync <- forkIO $ blockSyncLoop env
 

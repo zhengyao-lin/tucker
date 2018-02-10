@@ -9,6 +9,7 @@ import qualified Data.ByteString as BSR
 import Tucker.Enc
 import Tucker.Auth
 import Tucker.Conf
+import Tucker.Util
 import Tucker.Msg.Tx
 import Tucker.Msg.Inv
 import Tucker.Msg.Common
@@ -111,7 +112,7 @@ instance Decodable BlockHeader where
             nonce = nonce,
 
             -- fill with undefined
-            txns = [ undefined | _ <- [ 1 .. txn_count ] ]
+            txns = replicate (fi txn_count) undefined
         }
 
         return $ BlockHeader $ tmp { block_hash = hashBlock tmp }

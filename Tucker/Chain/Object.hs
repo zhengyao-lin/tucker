@@ -489,8 +489,39 @@ collectOrphan chain@(Chain {
     if suc then collectOrphan chain -- if success, try to collect the orphan again
     else return chain -- otherwise return the original chain
 
+takeBranch' :: Int -> Maybe Branch -> [Branch]
+takeBranch' n Nothing = []
+takeBranch' 0 _ = []
+takeBranch' n (Just branch@(BlockNode {
+    prev_node = prev
+})) = branch : takeBranch' (n - 1) prev
+
+takeBranch n branch =
+    if n >= 0 then takeBranch' n (Just branch)
+    else []
+
+-- latestBlocks chain max_number_of_block
+-- take maxn from each branch
+-- highest height first
+latestBlocks :: Int -> Chain -> IO [Block]
+latestBlocks maxn (Chain {
+    edge_branches = branches
+}) =
+    return $
+    map block_data $
+    sortBy (\a b -> compare (cur_height b) (cur_height a))
+           (concatMap (takeBranch maxn) branches)
+
 addBlock :: Chain -> Block -> IO (Either TCKRError Chain)
 addBlock chain block = ioToEitherIO (addBlockFail chain block)
+
+-- add blocks with a error handler
+addBlocks :: Chain -> [Block] -> (Block -> TCKRError -> IO ()) -> IO Chain
+addBlocks chain blocks err_proc =
+    let fold_proc chain block =
+            addBlockFail chain block
+            `catch` \e -> err_proc block e >> return chain
+    in foldM fold_proc chain blocks
 
 -- throws a TCKRError when rejecting the block
 addBlockFail :: Chain -> Block -> IO Chain
