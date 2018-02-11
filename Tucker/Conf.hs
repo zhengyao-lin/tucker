@@ -75,7 +75,9 @@ data TCKRConf =
         tckr_diff_change_span :: Word32,
         tckr_expect_diff_change_time :: Word32, -- expected difficulty change time in sec
 
-        tckr_use_special_min_diff :: Bool -- support special-min-difficulty or not(mainly on testnet)
+        tckr_use_special_min_diff :: Bool, -- support special-min-difficulty or not(mainly on testnet)
+
+        tckr_block_fetch_timeout :: Int -- in sec
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -119,10 +121,10 @@ tucker_default_conf_mainnet = do
         tckr_trans_timeout = 5, -- 5 sec
         tckr_bootstrap_host = [ "seed.tbtc.petertodd.org" ],
 
-        tckr_seek_min = 16, -- if node_count < min_seek then seek for more nodes
-        tckr_seek_max = 32, -- if node_count >= max_seek then stop seeking
+        tckr_seek_min = 8, -- if node_count < min_seek then seek for more nodes
+        tckr_seek_max = 16, -- if node_count >= max_seek then stop seeking
 
-        tckr_max_node = 128, -- max number of nodes in total
+        tckr_max_node = 64, -- max number of nodes in total
         
         tckr_node_blacklist = [
                 ip4 (127, 0, 0, 1),
@@ -131,7 +133,7 @@ tucker_default_conf_mainnet = do
     
         tckr_gc_interval = 30 * 1000 * 1000, -- 30 sec
         
-        tckr_max_block_task = 32,
+        tckr_max_block_task = 16,
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min
@@ -151,7 +153,9 @@ tucker_default_conf_mainnet = do
         tckr_diff_change_span = 2016,
         tckr_expect_diff_change_time = 14 * 24 * 60 * 60, -- 2 weeks in sec
 
-        tckr_use_special_min_diff = False
+        tckr_use_special_min_diff = False,
+
+        tckr_block_fetch_timeout = 2
 
         -- the collector will wait until the top chunk
         -- has (tckr_max_block_per_chunk + tckr_max_tree_insert_depth)

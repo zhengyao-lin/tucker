@@ -101,12 +101,24 @@ gcLoop env =
 
         delay $ gc_interv env
 
+sync :: MainLoopEnv -> Int -> IO ()
+sync env n = do
+    envSpreadSimpleAction env (NormalAction (syncChain (sync env n))) n
+    return ()
+
+syncOne env n = do
+    envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n
+    return ()
+
 mainLoop :: TCKRConf -> IO MainLoopEnv
 mainLoop conf = runResourceT $ do
     env <- initEnv conf
 
     lift $ bootstrap env (tckr_bootstrap_host conf)
     -- setA (node_list env) init_nodes
+
+    -- bootstrap finished, start sync
+    resourceForkIO $ lift $ sync env 1
 
     -- keep the resource, never exit
     resourceForkIO $ lift $ gcLoop env

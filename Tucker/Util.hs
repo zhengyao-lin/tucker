@@ -4,7 +4,9 @@ import Data.Time.Clock.POSIX
 
 import System.CPUTime
 
+import Control.Monad
 import Control.Exception
+import Control.Monad.Loops
 
 import Tucker.Error
 
@@ -66,3 +68,43 @@ ioToEitherIO :: IO a -> IO (Either TCKRError a)
 ioToEitherIO =
     (`catch` \e -> return $ Left $ TCKRError $ show (e :: SomeException)) .
     (Right <$>)
+
+divCeiling :: Integral a => a -> a -> a
+divCeiling a b = (a + b - 1) `div` b
+
+divFloor :: Integral a => a -> a -> a
+divFloor a b = a `div` b
+
+-- split a list to n lists such that the number of elements of each list is <= max
+splitList :: Int -> [a] -> [[a]]
+splitList max list =
+    [
+        take max $ drop (i * max) list
+        | i <- [ 0 .. n - 1 ]
+    ]
+    where
+        n = length list `divCeiling` max
+
+forUntilM_ :: Monad m => [a] -> (a -> m Bool) -> m ()
+forUntilM_ lst mpred =
+    anyM mpred lst >> return ()
+
+-- separate a list to two list (l1, l2)
+-- where all pred l1
+-- and   all (not . pred) l2
+sepWhen :: (a -> Bool) -> [a] -> ([a], [a])
+sepWhen pred =
+    foldl (\(l1, l2) v ->
+        if pred v then
+            (l1 ++ [v], l2)
+        else
+            (l1, l2 ++ [v])) ([], [])
+
+sepWhenM :: Monad m => (a -> m Bool) -> [a] -> m ([a], [a])
+sepWhenM pred =
+    foldM (\(l1, l2) v -> do
+        r <- pred v
+        if r then
+            return (l1 ++ [v], l2)
+        else
+            return (l1, l2 ++ [v])) ([], [])

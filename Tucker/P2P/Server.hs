@@ -99,10 +99,10 @@ defaultHandler env node msg@(MsgHead {
 
                     return []
 
-            -- h BTC_CMD_BLOCK = do
-            --     d $ \msg -> do
-            --         envAddIdleBlock env node msg
-            --         return []
+            h BTC_CMD_BLOCK = do
+                d $ \block -> do
+                    envAddBlock env node block
+                    return []
 
             h _ = do
                 nodeMsg env node $ "unhandled message: " ++ (show command)

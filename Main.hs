@@ -1,7 +1,9 @@
 module Main where
 
-import Tucker.Enc
-import Tucker.Std
-import Data.List
+import Control.Monad
 
-main = return ()
+import Tucker.Conf
+import Tucker.P2P.Init
+
+main = do
+    env <- tucker_default_conf_testnet3 >>= mainLoop

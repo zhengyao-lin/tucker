@@ -123,7 +123,7 @@ instance Decodable VStr where
 instance Encodable NodeServiceType where
     encode end (NodeServiceType serv) =
         encode end $
-        ((foldr (.|.) 0) $
+        ((foldl (.|.) 0) $
         map (\s -> case findIndex (== s) serv_type of
             Just i -> 1 `shift` i
             _ -> error "impossible") serv :: Word64)
@@ -215,6 +215,9 @@ instance Decodable MsgHead where
             checksum      <- bsD 4
 
             clen          <- checkLenD $ fromIntegral payload_len
+            -- len           <- lenD
+
+            -- trace ("!!! received: " ++ show command ++ " " ++ show len ++ "/" ++ show payload_len) $
 
             if not clen then
                 return LackData

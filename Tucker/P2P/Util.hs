@@ -192,25 +192,25 @@ timeoutRetryS sec action = untilJust $ timeoutS sec action
 
 nodeRecvOneMsg :: MainLoopEnv
                -> Node
-               -> (Transport -> ByteString -> IO (Either TCKRError MsgHead, ByteString))
+               -> (Transport -> ByteString -> IO (Either TCKRError MsgHead, ByteString, Int))
                -> IO MsgHead
                -> IO MsgHead
 nodeRecvOneMsg env node recv_proc timeout_proc = do
-    buf         <- getA $ recv_buf node
-    (msg, buf)  <- recv_proc (conn_trans node) buf
+    orig_buf        <- getA $ recv_buf node
+    (msg, buf, len) <- recv_proc (conn_trans node) orig_buf
+
+    if len /= 0 then do
+        -- at least received some data
+        timestamp <- unixTimestamp
+        setA (last_seen node) timestamp
+    else return ()
 
     case msg of
         Right msg@(MsgHead {}) ->
             if magicno msg /= envConf env tckr_magic_no then
                 throw $ TCKRError "network magic number not match"
-            else do
-                updateBuf buf
-                appA (msg:) (msg_list node)
-
-                timestamp <- unixTimestamp
-                setA (last_seen node) timestamp
-
-                return msg
+            else
+                updateBuf buf >> return msg
 
         Right LackData -> updateBuf buf >> timeout_proc
         Left err -> throw err
@@ -220,7 +220,7 @@ nodeRecvOneMsg env node recv_proc timeout_proc = do
 
 nodeRecvOneMsgTimeout :: MainLoopEnv -> Node -> IO MsgHead -> IO MsgHead
 nodeRecvOneMsgTimeout env node timeout_proc = do
-    nodeRecvOneMsg env node ((flip tRecvOneMsg) (timeout_s env)) timeout_proc
+    nodeRecvOneMsg env node (`tRecvOneMsg` timeout_s env) timeout_proc
 
 nodeRecvOneMsgNonBlocking :: MainLoopEnv -> Node -> IO MsgHead
 nodeRecvOneMsgNonBlocking env node = do

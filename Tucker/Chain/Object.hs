@@ -78,7 +78,10 @@ data Chain =
 
         db_block      :: Database Hash256 (Height, Block),
         db_chain      :: Database Height Hash256,
-        db_global     :: Database String DBAny,
+
+        saved_height  :: Height, -- hight of the lowest block stored in memory
+
+        -- db_global     :: Database String DBAny,
         -- global var
         -- 1. "height" :: Height, height >= real height
 
@@ -101,13 +104,15 @@ initChain conf@(TCKRConf {
 }) = do
     db_block <- openDB def db_path ks_block
     db_chain <- openDB def db_path ks_chain
-    db_global <- openDB def db_path ks_global
+    -- db_global <- openDB def db_path ks_global
 
     let chain = Chain {
             std_conf = conf,
+
             db_block = db_block,
             db_chain = db_chain,
-            db_global = db_global,
+
+            saved_height = 0,
 
             orphan_pool = OSET.empty,
             
@@ -115,68 +120,77 @@ initChain conf@(TCKRConf {
             edge_branches = []
         }
 
-    mheight <- lift $ get db_global "height"
+    -- mheight <- lift $ get db_global "height"
 
-    case mheight :: Maybe Height of
-        Nothing ->
-            -- empty chain
-            -- load genesis to the memory
-            return $ case decodeLE genesis_raw of
-                (Left err, _) -> error $ "genesis decode error: " ++ show err
+    entries <- lift $ count db_chain
+    let height = entries - 1 :: Height
 
-                (Right genesis, _) -> do
-                    chain {
-                        edge_branches = [BlockNode {
-                            prev_node = Nothing,
-                            block_data = genesis,
+    lift $ putStrLn $ "a tree of height " ++ show height ++ " found in database"
 
-                            acc_diff = targetBDiff (hash_target genesis),
-                            cur_height = 0
-                        }]
-                    }
-        
-        Just height -> lift $ do
-            -- load at least tckr_max_tree_insert_depth blocks into the edge_branches
-            let min_height =
-                    if height > fi max_depth then
-                        height - fi max_depth
-                    else 0
-                
-                range =
-                    if height > 0 then [ height, height - 1 .. min_height ]
-                    else [0]
+    if entries == 0 then
+        -- empty chain
+        -- load genesis to the memory
+        case decodeLE genesis_raw of
+            (Left err, _) -> error $ "genesis decode error: " ++ show err
 
-            hashes <- maybeCat <$> mapM (get db_chain) range
-                   :: IO [Hash256]
+            (Right genesis, _) -> do
+                lift $ set db_block (block_hash genesis) genesis
 
-            res    <- maybeCat <$> mapM (get db_block) hashes
-                   :: IO [(Height, Block)]
-            
-            let fold_proc (height, block) Nothing =
-                    Just $ BlockNode {
+                return $ chain {
+                    edge_branches = [BlockNode {
                         prev_node = Nothing,
-                        block_data = block,
-                        acc_diff = targetBDiff (hash_target block),
-                        cur_height = height
-                    }
+                        block_data = genesis,
 
-                fold_proc (height, block) (Just node) =
-                    Just $ BlockNode {
-                        prev_node = Just node,
-                        block_data = block,
-                        acc_diff = targetBDiff (hash_target block) + acc_diff node,
-                        cur_height = height
-                    }
+                        acc_diff = targetBDiff (hash_target genesis),
+                        cur_height = 0
+                    }]
+                }
+    else lift $ do
+        -- load at least tckr_max_tree_insert_depth blocks into the edge_branches
+        let min_height =
+                if height >= fi max_depth then
+                    height - fi max_depth + 1
+                else 0
+            
+            range =
+                if height > 0 then [ height, height - 1 .. min_height ]
+                else [0]
 
-            -- print height
+        hashes <- maybeCat <$> mapM (get db_chain) range
+                :: IO [Hash256]
 
-            return $ case foldr fold_proc Nothing res of
-                Nothing -> error "corrupted database(height field not correct for db_global)"
-                Just branch ->
-                    chain {
-                        edge_branches = [branch]
-                    }
+        res    <- maybeCat <$> mapM (get db_block) hashes
+                :: IO [(Height, Block)]
+        
+        let fold_proc (height, block) Nothing =
+                Just $ BlockNode {
+                    prev_node = Nothing,
+                    block_data = block,
+                    acc_diff = targetBDiff (hash_target block),
+                    cur_height = height
+                }
 
+            fold_proc (height, block) (Just node) =
+                Just $ BlockNode {
+                    prev_node = Just node,
+                    block_data = block,
+                    acc_diff = targetBDiff (hash_target block) + acc_diff node,
+                    cur_height = height
+                }
+
+        -- print height
+
+        return $ case foldr fold_proc Nothing res of
+            Nothing -> error "corrupted database(height not correct)"
+            Just branch ->
+                chain {
+                    edge_branches = [branch],
+                    saved_height = min_height
+                }
+
+branchHeights :: Chain -> [Height]
+branchHeights (Chain { edge_branches = branches }) =
+    map cur_height branches
 
 -- load db from path
 -- set orphan pool to Nothing
@@ -266,6 +280,8 @@ insertToEdge chain@(Chain {
     let search_res =
             [ b | Just b <- map (`searchBranchHash` prev_hash) edge_branches ]
 
+    -- trace "inserting!" $ return 0
+
     prev_bn <-
         if null search_res then
             case buffer_chain of
@@ -307,32 +323,33 @@ blockAtHeight :: Chain -> Branch -> Height -> IO (Maybe Block)
 blockAtHeight (Chain {
     db_chain = db_chain,
     db_block = db_block,
+    saved_height = saved_height,
     buffer_chain = buffer_chain
 }) branch@(BlockNode {
     cur_height = max_height
 }) height =
+    -- trace ("height!!!!" ++ show (height, max_height, saved_height)) $
     if height > max_height then
         return Nothing
-    else do
-        let search branch = 
+    else if height >= saved_height then do
+        -- the block should be in memory
+        let search branch =
+                -- trace "should be two of me" $
                 searchBranchHeight branch height >>=
                 (return . block_data)
 
-        case search branch <|> (buffer_chain >>= search) of
-            Just block ->
+        return $ search branch <|> (buffer_chain >>= search)
+    else do
+        res <- get db_chain height :: IO (Maybe Hash256)
+
+        case res of
+            Nothing -> return Nothing
+            Just hash -> do
+                Just (_, block) <- get db_block hash
+                                :: IO  (Maybe (Height, Block))
                 return $ Just block
 
-            Nothing -> do
-                -- not found in branch or buf_chain
-                -- search db
-                res <- get db_chain height :: IO (Maybe Hash256)
-
-                case res of
-                    Nothing -> return Nothing
-                    Just hash -> do
-                        Just (_, block) <- get db_block hash
-                                        :: IO  (Maybe (Height, Block))
-                        return $ Just block
+corrupt = reject "corrupted data base"
 
 hashTargetValid :: Chain -> Branch -> IO Bool
 hashTargetValid chain@(Chain {
@@ -344,21 +361,22 @@ hashTargetValid chain@(Chain {
     }
 }) = do
     let change_cond = shouldDiffChange conf height
-
-    mprev_1_block <- blockAtHeight chain branch (height - 1)
-    mprev_2016_block <- blockAtHeight chain branch (height - 2016)
-
-    let expect_target =
+        expect_target =
             if tckr_use_special_min_diff conf then
                 -- TODO: non-standard special-min-diff
                 return $ fi tucker_bdiff_diff1
             else do
-                Block { hash_target = old_target, timestamp = t2 } <- mprev_1_block
+                mprev_1_block <- blockAtHeight chain branch (height - 1)
+
+                let (Block { hash_target = old_target, timestamp = t2 }) =
+                        maybe corrupt id mprev_1_block
 
                 if not change_cond then
                     return old_target
                 else do
-                    Block { timestamp = t1 } <- mprev_2016_block
+                    mprev_2016_block <- blockAtHeight chain branch (height - 2016)
+
+                    let (Block { timestamp = t1 }) = maybe corrupt id mprev_2016_block
                     
                     let actual_span = fi $ t2 - t1
                         expect_span = fi $ tckr_expect_diff_change_time conf
@@ -379,9 +397,7 @@ hashTargetValid chain@(Chain {
 
                     return real_target
 
-    return $ case (>= hash_target) <$> expect_target of
-        Nothing -> False
-        Just res -> res
+    (>= hash_target) <$> expect_target
 
     where
         shouldDiffChange conf height =
@@ -401,28 +417,15 @@ minTopDiff lst =
 
 saveBranch :: Chain -> Branch -> IO ()
 saveBranch (Chain {
-    db_chain = db_chain,
-    db_global = db_global
+    db_chain = db_chain
 }) branch = do
     -- ascending order of height
     let pairs = branchToBlockList branch
 
     if not (null pairs) then do
-        -- save height later to ensure the height <= real height
+        -- save height
         let (height, _) = last pairs
-        mheight <- get db_global "height"
 
-        case mheight of
-            Nothing ->
-                set db_global "height" height
-
-            Just cur_height -> do
-                if height > cur_height then
-                    -- save height first
-                    set db_global "height" height
-                else
-                    return ()
-        
         forM pairs $ \(height, (Block { block_hash = hash })) ->
             set db_chain height hash
 
@@ -478,7 +481,7 @@ collectOrphan chain@(Chain {
 }) = do
     let orphan_list = OSET.toAscList orphan_pool
         fold_proc (suc, chain) block = do
-            -- print "hi"
+            -- print $ "collect orphan " ++ show block
             mres <- addBlock chain block
             return $ case mres of
                 Right new_chain -> (True, new_chain)
@@ -513,14 +516,19 @@ latestBlocks maxn (Chain {
            (concatMap (takeBranch maxn) branches)
 
 addBlock :: Chain -> Block -> IO (Either TCKRError Chain)
-addBlock chain block = ioToEitherIO (addBlockFail chain block)
+addBlock chain block =
+    -- trace ("adding block " ++ show block) $
+    ioToEitherIO (addBlockFail chain block)
 
 -- add blocks with a error handler
-addBlocks :: Chain -> [Block] -> (Block -> TCKRError -> IO ()) -> IO Chain
-addBlocks chain blocks err_proc =
+addBlocks :: Chain -> [Block] -> (Block -> Either TCKRError Chain -> IO ()) -> IO Chain
+addBlocks chain blocks proc =
     let fold_proc chain block =
-            addBlockFail chain block
-            `catch` \e -> err_proc block e >> return chain
+            addBlock chain block >>= \r ->
+                proc block r >> case r of
+                    Left _ -> return chain
+                    Right chain -> return chain
+
     in foldM fold_proc chain blocks
 
 -- throws a TCKRError when rejecting the block
@@ -539,7 +547,7 @@ addBlockFail chain@(Chain {
     expectFalseIO "block already exists" $
         chain `hasBlockInChain` block
 
-    -- don't check if the block is in orphan or not
+    -- don't check if the block is in orphan pool
 
     expectTrue "empty tx list" $
         not (null txns)
@@ -559,20 +567,6 @@ addBlockFail chain@(Chain {
     -- for each transaction, apply "tx" checks 2-4
     -- for the coinbase (first) transaction, scriptSig length must be 2-100
     -- reject if sum of transaction sig opcounts > MAX_BLOCK_SIGOPS
-
-    -- 9b0fc92260312ce[4]4e74ef369f5c66b[b]b85848f2eddd5a7[a]1cde251e54ccfdd5
-    -- 9b0fc92260312ce[5]4e74ef369f5c66b[c]b85848f2eddd5a7[b]1cde251e54ccfdd5
-    -- 9b0fc92260312ce44e74ef369f5c66bbb85848f2eddd5a7a1cde251e54ccfdd5
-
-    -- 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd
-    -- 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd
-
-    -- print 11
-    -- print (block_hash)
-    -- print (merkle_root)
-    -- print (merkleRoot block)
-    -- print (stdHash256 $ encodeLE (head txns))
-    -- print (BSR.length $ encodeLE (head txns))
 
     expectTrue "merkle root claimed not correct" $
         merkleRoot block == merkle_root
@@ -616,6 +610,8 @@ addBlockFail chain@(Chain {
                     -- new block added, collect orphan
                     collectOrphan chain
 
+            -- latestBlocks 3 chain >>= print
+
             fixBranch final_chain
 
 -- received before && is in a branch
@@ -626,6 +622,7 @@ hasBlockInChain chain@(Chain {
     block_hash = hash
 }) = do
     mres <- get db_block hash :: IO (Maybe (Height, Block))
+    
     case mres of
         Nothing -> return False
         Just (height, _) ->
@@ -640,7 +637,7 @@ hasBlock :: Chain -> Block -> IO Bool
 hasBlock chain block =
     (||) <$> hasBlockInChain chain block <*> hasBlockInOrhpan chain block
 
-reject :: String -> IO a
+reject :: String -> a
 reject msg = throw $ TCKRError msg
 
 expect :: Eq a => String -> a -> IO a -> IO ()

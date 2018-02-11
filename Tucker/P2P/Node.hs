@@ -77,7 +77,7 @@ data Node =
         vers_payload   :: VersionPayload,
 
         recv_buf       :: Atom ByteString,
-        msg_list       :: Atom [MsgHead], -- prepend
+        -- msg_list       :: Atom [MsgHead], -- prepend
         last_seen      :: Atom Word64,
 
         action_list    :: Atom [NodeAction],
@@ -92,6 +92,10 @@ instance Eq Node where
     (Node { thread_id = t1 }) == (Node { thread_id = t2 })
         = t1 == t2
 
+instance Ord Node where
+    compare (Node { thread_id = t1 }) (Node { thread_id = t2 })
+        = compare t1 t2
+
 instance Show Node where
     show node =
         "node on " ++ show (sock_addr node)
@@ -101,16 +105,24 @@ instance Show Node where
 -- that is going to be spreaded out
 -- the task needs to be monoid for task combination
 class Monoid t => NodeTask t where
+    done :: MainLoopEnv -> Node -> t -> IO ()
 
 taskFold :: NodeTask t => [t] -> Int -> [t]
 taskFold ts n =
     [
-        mconcat $ take foldn $ drop (i * foldn) ts
-        | i <- [ 0 .. n - 1 ]
+        mconcat $ take maxn $ drop (i * maxn) ts
+        | i <- [ 0 .. t - 1 ]
+    ] ++ [
+        mconcat $ take minn $ drop (t * maxn + i * minn) ts
+        | i <- [ 0 .. n - t - 1 ]
     ]
     where
-        old_n = length ts
-        foldn = ceiling $ fromIntegral old_n / fromIntegral n -- number of tasks to fold together
+        oldn = length ts
+        -- foldn = old_n `divCeiling` n -- number of tasks to fold together
+        maxn = oldn `divCeiling` n
+        minn = oldn `divFloor` n
+
+        t = oldn - minn * n
 
 data NullTask = NullTask
 
@@ -118,7 +130,8 @@ instance Monoid NullTask where
     mempty = NullTask
     mappend _ _ = NullTask
 
-instance NodeTask NullTask
+instance NodeTask NullTask where
+    done e n t = return ()
 
 envMsg :: MainLoopEnv -> String -> IO ()
 envMsg env msg = do
@@ -169,7 +182,7 @@ initNode sock_addr trans = do
 
     -- vers_payload <- newA VersionPending -- version placeholder
     recv_buf     <- newA $ BSR.empty
-    msg_list     <- newA []
+    -- msg_list     <- newA []
     last_seen    <- newA timestamp
     action_list  <- newA [] -- nodeDefaultActionList
     new_action   <- newA []
@@ -186,7 +199,7 @@ initNode sock_addr trans = do
         vers_payload = undefined,
 
         recv_buf     = recv_buf,
-        msg_list     = msg_list,
+        -- msg_list     = msg_list,
         last_seen    = last_seen,
         action_list  = action_list,
         new_action   = new_action,
@@ -220,9 +233,11 @@ nodeNetAddr = return . net_addr
 nodeNetDelay :: Node -> IO Word
 nodeNetDelay = getA . ping_delay
 
--- spread actions to nodes
-envSpreadAction :: NodeTask t => MainLoopEnv -> (t -> [NodeAction]) -> [t] -> IO ()
-envSpreadAction env gen_action tasks = do
+-- spread actions to nodes except the ones in the black list
+-- return [] if no available node is found
+envSpreadActionExcept :: NodeTask t
+                      => [Node] -> MainLoopEnv -> (t -> [NodeAction]) -> [t] -> IO [(Node, t)]
+envSpreadActionExcept blacklist env gen_action tasks = do
     nodes <- getA (node_list env)
 
     alive_nodes <- filterM (getA . alive) nodes
@@ -230,37 +245,71 @@ envSpreadAction env gen_action tasks = do
 
     delays <- mapM nodeNetDelay nodes
 
+    -- envMsg env $ "blacklist: " ++ show blacklist
+
     let sorted = sortBy (\(d1, _) (d2, _) -> compare d1 d2)
                         (zip delays alive_nodes)
-        sorted_nodes = map snd sorted
+        sorted_nodes =
+            filter (`notElem` blacklist) $
+            map snd sorted
 
         taskn = length tasks
         noden = length sorted_nodes
 
-    envMsg env $ show sorted
+    -- envMsg env $ show sorted
 
-    let (target_nodes, new_tasks) =
-            if noden < taskn then
-                -- no enough node
-                (sorted_nodes, taskFold tasks noden)
-            else
-                -- great, we have enough nodes
-                -- simply take n nodes
-                (take taskn sorted_nodes, tasks)
+    if noden == 0 then return []
+    else do
+        let (target_nodes, new_tasks) =
+                if noden < taskn then
+                    -- no enough node
+                    (sorted_nodes, taskFold tasks noden)
+                else
+                    -- great, we have enough nodes
+                    -- simply take n nodes
+                    (take taskn sorted_nodes, tasks)
 
-    -- assume length target_nodes == length new_tasks
-    forM (zip target_nodes new_tasks) $ \(node, task) -> do
-        nodeMsg env node $ "prepending new action(s)"
+            assignment = zip target_nodes new_tasks
 
-        -- append new actions to each node
-        nodePrependActions node (gen_action task)
-        
-    return ()
+        -- assume length target_nodes == length new_tasks
+        forM assignment $ \(node, task) -> do
+            -- nodeMsg env node $ "prepending new action(s)"
 
-envSpreadSimpleAction :: MainLoopEnv -> NodeAction -> Int -> IO ()
+            -- append new actions to each node
+            nodePrependActions node (gen_action task)
+            
+        return assignment
+
+envSpreadAction = envSpreadActionExcept []
+
+envSpreadSimpleAction :: MainLoopEnv -> NodeAction -> Int -> IO [(Node, NullTask)]
 envSpreadSimpleAction env action n =
-    envSpreadAction env (const [action]) [ NullTask | _ <- [ 1 .. n ] ]
+    envSpreadAction env (const [action]) (replicate n NullTask)
 
 envAppendNode :: MainLoopEnv -> Node -> IO ()
 envAppendNode env node =
     appA (++ [node]) (node_list env)
+
+envAddBlock :: MainLoopEnv -> Node -> Block -> IO ()
+envAddBlock env node block =
+    envAddBlocks env node [block]
+
+envAddBlocks :: MainLoopEnv -> Node -> [Block] -> IO ()
+envAddBlocks env node blocks = do
+    LK.acquire (chain_lock env)
+
+    chain <- getA (block_chain env)
+
+    new_chain <- addBlocks chain blocks $ \block res ->
+        case res of
+            Left err ->
+                nodeMsg env node $ "error when adding block " ++ show block ++ ": " ++ show err
+            
+            Right _ ->
+                nodeMsg env node $ "block added: " ++ show block
+
+    nodeMsg env node "blocks added"
+
+    setA (block_chain env) new_chain
+
+    LK.release (chain_lock env)

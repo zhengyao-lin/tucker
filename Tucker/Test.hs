@@ -113,8 +113,12 @@ blockChainTest = TestCase $ do
 
     -- putStrLn ""
     withChain conf $ \chain -> do
-        chain <- addBlocks chain blocks $ \b e ->
-            putStrLn $ "failed to add block: " ++ show b ++ show e
+        chain <- addBlocks chain blocks $ \b r ->
+            case r of
+                Left err ->
+                    putStrLn $ "failed to add block: " ++ show b ++ show err
+                Right _ ->
+                    putStrLn $ "block added: " ++ show b
 
         -- assertEqual "wrong resulting chain"
         --     (zip [1..] blocks)
@@ -179,11 +183,24 @@ allTest = TestList [
 to collect blocks
 
 :l Tucker.Test
-env <- mainLoop btc_testnet3 tucker_default_conf
+env <- tucker_default_conf_testnet3 >>= mainLoop
+sync env 1
+
+envSpreadSimpleAction env (NormalAction syncInv) 1
+
+
+
+heights of each branch
+branchHeights <$> getA (block_chain env)
+
+
+
+
+
+
 idle = envDumpIdleBlock env >>= (return . length)
 fetched = envDumpReceivedBlock env >>= (return . length)
 height = envCurrentTreeHeight env
-envSpreadSimpleAction env (NormalAction fetchInv) 1
 
 sync <- forkIO $ blockSyncLoop env
 

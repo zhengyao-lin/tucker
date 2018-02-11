@@ -12,6 +12,7 @@ import System.FilePath
 import System.Directory
 
 import Control.Monad.Morph
+import Control.Monad.Loops
 import Control.Monad.Trans.Resource
 
 import Tucker.Enc
@@ -100,5 +101,19 @@ has = hasWithOption def
 delete :: Encodable k => Database k v -> k -> IO ()
 delete = deleteWithOption def
 
-batch :: (Encodable k, Encodable v) =>Database k v -> [DBBatchOp k v] -> IO ()
+batch :: (Encodable k, Encodable v) => Database k v -> [DBBatchOp k v] -> IO ()
 batch = batchWithOption def
+
+count :: Integral t => Database k v -> IO t
+count db = runResourceT $ do
+    iter <- D.iterOpen db (def { D.fillCache = False })
+
+    lift $ D.iterFirst iter
+
+    res <- lift $ iterateUntilM snd
+        (\(count, valid) -> do
+            valid <- D.iterValid iter
+            D.iterNext iter
+            return (count + 1, not valid)) (-1, False)
+
+    return $ fromInteger $ fst res
