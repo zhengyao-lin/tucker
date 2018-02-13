@@ -11,13 +11,16 @@ newA :: t -> IO (Atom t)
 newA = atomically . newTVar
 
 getA :: Atom t -> IO t
-getA = atomically . readTVar
+getA = readTVarIO
 
 setA :: Atom t -> t -> IO ()
 setA v = atomically . writeTVar v
 
-appA :: (t -> t) -> Atom t -> IO ()
-appA f x = atomically $ modifyTVar' x f
+-- return the new value
+appA :: (t -> t) -> Atom t -> IO t
+appA f x = atomically $ do
+    modifyTVar' x f
+    readTVar x
 
 lseq :: [a] -> b -> b
 lseq []     w = w

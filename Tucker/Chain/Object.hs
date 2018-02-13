@@ -125,7 +125,7 @@ initChain conf@(TCKRConf {
     entries <- lift $ count db_chain
     let height = entries - 1 :: Height
 
-    lift $ putStrLn $ "a tree of height " ++ show height ++ " found in database"
+    lift $ putStrLn $ "a tree of height " ++ show entries ++ " - 1 found in database"
 
     if entries == 0 then
         -- empty chain
@@ -575,6 +575,8 @@ addBlockFail chain@(Chain {
         Nothing -> do -- no previous hash found
             has_recv <- db_block `has` prev_hash block
         
+            traceIO "orphan block!"
+
             -- if has_recv then
             --     -- have received the previous block
             --     -- but it's too deep to change
@@ -621,7 +623,7 @@ hasBlockInChain chain@(Chain {
 }) block@(Block {
     block_hash = hash
 }) = do
-    mres <- get db_block hash :: IO (Maybe (Height, Block))
+    mres <- get db_block hash :: IO (Maybe (Height, Placeholder))
     
     case mres of
         Nothing -> return False

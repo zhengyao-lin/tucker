@@ -99,20 +99,20 @@ instance Decodable VInt where
         fst <- byteD
         let
             wrap :: Integral t => t -> Decoder VInt
-            wrap = pure . VInt . fromIntegral
-        
+            wrap = pure . VInt . fi
+
         case fst of
             0xfd -> (decoder :: Decoder Word16) >>= wrap
             0xfe -> (decoder :: Decoder Word32) >>= wrap
             0xff -> (decoder :: Decoder Word64) >>= wrap
-            b    -> return $ VInt $ fromIntegral b
+            b    -> return $ VInt $ fi b
 
 instance Encodable VStr where
     encode end (VStr str) =
-        encode end (VInt $ fromIntegral $ length str) <> BS.pack str
+        encode end (VInt $ fi $ length str) <> BS.pack str
 
     encode end (VBStr bs) =
-        encode end (VInt $ fromIntegral $ BSR.length bs) <> bs
+        encode end (VInt $ fi $ BSR.length bs) <> bs
 
 instance Decodable VStr where
     decoder = do
@@ -191,7 +191,7 @@ instance Encodable MsgHead where
             e magicno,
             e command,
 
-            e (fromIntegral $ BSR.length payload :: Word32),
+            e (fi $ BSR.length payload :: Word32),
             payloadCheck payload, -- checksum
 
             e payload
@@ -214,7 +214,7 @@ instance Decodable MsgHead where
             payload_len   <- decoder :: Decoder Word32
             checksum      <- bsD 4
 
-            clen          <- checkLenD $ fromIntegral payload_len
+            clen          <- checkLenD $ fi payload_len
             -- len           <- lenD
 
             -- trace ("!!! received: " ++ show command ++ " " ++ show len ++ "/" ++ show payload_len) $
@@ -222,7 +222,7 @@ instance Decodable MsgHead where
             if not clen then
                 return LackData
             else do
-                payload       <- bsD $ fromIntegral payload_len
+                payload       <- bsD $ fi payload_len
 
                 if payloadCheck payload == checksum then
                     return $ MsgHead {
@@ -237,11 +237,12 @@ instance Decodable MsgHead where
 vlistD :: Decoder t -> Decoder [t]
 vlistD elemD = do
     VInt len <- decoder
-    listD (fromInteger len) elemD
+    -- traceM $ "vlist length " ++ show len
+    listD (fi len) elemD
 
 encodeVList :: Encodable t => Endian -> [t] -> ByteString
 encodeVList end list =
-    encode end (VInt $ fromIntegral $ length list) <> encode end list
+    encode end (VInt $ fi $ length list) <> encode end list
 
 payloadCheck :: ByteString -> ByteString
 payloadCheck = BS.take 4 . ba2bs . sha256 . sha256
@@ -257,7 +258,7 @@ trimnull bs =
     if BSR.length bs == 0 || BSR.head bs == 0x00 then
         []
     else
-        (chr $ fromIntegral $ BSR.head bs) : (trimnull $ BSR.tail bs)
+        (chr $ fi $ BSR.head bs) : (trimnull $ BSR.tail bs)
 
 encodeMsg :: TCKRConf -> Command -> IO ByteString -> IO ByteString
 encodeMsg conf cmd mpayload = do

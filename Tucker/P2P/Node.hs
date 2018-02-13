@@ -66,6 +66,19 @@ data NodeAction
 
 type ActionHandle = MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 
+-- progress of a download task
+-- Progress received total
+-- all in bytes
+data Progress = Progress Integer Integer
+
+instance Show Progress where
+    show (Progress recv'd total) =
+        if total >= 0 then
+            let perc = fi recv'd / fi total in
+            printf "progress %d/%d(%f) received" recv'd total (perc :: Double)
+        else
+            printf "progress %d received" recv'd
+
 data Node =
     Node {
         conn_trans     :: Transport,
@@ -79,6 +92,10 @@ data Node =
         recv_buf       :: Atom ByteString,
         -- msg_list       :: Atom [MsgHead], -- prepend
         last_seen      :: Atom Word64,
+        cur_progress   :: Atom Progress,
+        -- download progress on the current msg(when last_seen)
+
+        blacklist_time :: Atom Int, -- how many times is the node blacklisted
 
         action_list    :: Atom [NodeAction],
         new_action     :: Atom [NodeAction],
@@ -181,32 +198,37 @@ initNode sock_addr trans = do
     timestamp    <- unixTimestamp
 
     -- vers_payload <- newA VersionPending -- version placeholder
-    recv_buf     <- newA $ BSR.empty
+    recv_buf       <- newA $ BSR.empty
     -- msg_list     <- newA []
-    last_seen    <- newA timestamp
-    action_list  <- newA [] -- nodeDefaultActionList
-    new_action   <- newA []
-    ping_delay   <- newA maxBound -- max time in case the node doesn't reply
-    alive        <- newA True
+    last_seen      <- newA timestamp
+    cur_progress   <- newA $ Progress 0 (-1)
+    blacklist_time <- newA 0
+    action_list    <- newA [] -- nodeDefaultActionList
+    new_action     <- newA []
+    ping_delay     <- newA maxBound -- max time in case the node doesn't reply
+    alive          <- newA True
 
     return $ Node {
-        conn_trans   = trans,
-        incoming     = False,
+        conn_trans     = trans,
+        incoming       = False,
 
-        thread_id    = undefined,
-        sock_addr    = sock_addr,
-        net_addr     = undefined,
-        vers_payload = undefined,
+        thread_id      = undefined,
+        sock_addr      = sock_addr,
+        net_addr       = undefined,
+        vers_payload   = undefined,
 
-        recv_buf     = recv_buf,
+        recv_buf       = recv_buf,
         -- msg_list     = msg_list,
-        last_seen    = last_seen,
-        action_list  = action_list,
-        new_action   = new_action,
+        last_seen      = last_seen,
+        cur_progress   = cur_progress,
+        blacklist_time = blacklist_time,
 
-        ping_delay   = ping_delay,
+        action_list    = action_list,
+        new_action     = new_action,
 
-        alive        = alive
+        ping_delay     = ping_delay,
+
+        alive          = alive
     }
 
 envConf :: MainLoopEnv -> (TCKRConf -> t) -> t
@@ -223,9 +245,22 @@ nodeMsg env node msg = do
 nodeLastSeen :: Node -> IO Word64
 nodeLastSeen = getA . last_seen
 
+nodeBlacklistTime :: Node -> IO Int
+nodeBlacklistTime = getA . blacklist_time
+
+nodeBlacklistInc :: Node -> IO Int
+nodeBlacklistInc = appA (+1) . blacklist_time
+
+nodeBlacklistDec :: Node -> IO Int
+nodeBlacklistDec = appA (\c -> if c > 0 then c - 1 else 0) . blacklist_time
+
+-- nodeBlacklistDec :: Node -> IO ()
+-- nodeBlacklistDec node =
+--     appA (-1) (blacklist_time node)
+
 nodePrependActions :: Node -> [NodeAction] -> IO ()
 nodePrependActions node new_actions =
-    appA (new_actions ++) (new_action node)
+    appA (new_actions ++) (new_action node) >> return ()
 
 nodeNetAddr :: Node -> IO NetAddr
 nodeNetAddr = return . net_addr
@@ -288,7 +323,7 @@ envSpreadSimpleAction env action n =
 
 envAppendNode :: MainLoopEnv -> Node -> IO ()
 envAppendNode env node =
-    appA (++ [node]) (node_list env)
+    appA (++ [node]) (node_list env) >> return ()
 
 envAddBlock :: MainLoopEnv -> Node -> Block -> IO ()
 envAddBlock env node block =

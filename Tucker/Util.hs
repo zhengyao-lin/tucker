@@ -1,6 +1,10 @@
 module Tucker.Util where
 
+import qualified Text.Printf as TP
+
 import Data.Time.Clock.POSIX
+import qualified Data.Foldable as FD
+import qualified Data.Set.Ordered as OSET
 
 import System.CPUTime
 
@@ -56,7 +60,7 @@ maybeToBool :: Maybe a -> Bool
 maybeToBool (Just _) = True
 maybeToBool Nothing = False
 
-fi :: (Integral a, Integral b) => a -> b
+fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral
 
 maybeCat lst = [ v | Just v <- lst ]
@@ -108,3 +112,15 @@ sepWhenM pred =
             return (l1 ++ [v], l2)
         else
             return (l1, l2 ++ [v])) ([], [])
+
+listUnion :: Ord a => [[a]] -> [a]
+listUnion lists =
+    FD.toList $
+    foldl (OSET.|<>) OSET.empty $
+    map OSET.fromList lists
+
+unique :: Ord a => [a] -> [a]
+unique = FD.toList . OSET.fromList
+
+printf :: TP.PrintfType r => String -> r
+printf = TP.printf

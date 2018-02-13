@@ -8,6 +8,7 @@ import qualified Data.Set as SET
 import qualified Data.ByteString as BSR
 
 import Control.Monad
+import Control.Exception
 import Control.Concurrent
 import Control.Applicative
 import Control.Monad.Loops
@@ -37,8 +38,9 @@ import Tucker.Chain.Object
 
 -- 172.104.120.91
 
-recvM :: MsgPayload t => [RouterAction] -> Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
-recvM r_act cmd proc =
+recv' :: MainLoopEnv -> Node
+      -> [RouterAction] -> Command -> (ByteString -> IO [RouterAction]) -> IO [RouterAction]
+recv' env node r_act cmd proc =
     return $ r_act ++ [ UpdateMe $ NormalAction handle ]
     where
         handle env node LackData = return []
@@ -47,17 +49,34 @@ recvM r_act cmd proc =
             payload = payload
         }) = do
             if command == cmd then
-                decodePayload env node payload (do
-                    nodeMsg env node $ "decode failed on command " ++ (show command)
-                    return []) proc
+                proc payload
             else do
                 -- nodeMsg env node $ "command not match, skipping(" ++ (show command) ++ ")"
                 return []
 
+recv :: MsgPayload t
+     => MainLoopEnv -> Node
+     -> [RouterAction] -> Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
+recv env node r_act cmd proc =
+    recv' env node r_act cmd $ \payload ->
+        decodePayload env node payload fail proc
+
+    where
+        fail = do
+            nodeMsg env node $ "decode failed on command " ++ show cmd
+            return []
+
 -- keep receiving a certain type of message until the proc returns DumpMe
-keepRecvM :: MsgPayload t => Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
-keepRecvM cmd proc = recvM [] cmd $ \msg ->
-    (++) <$> proc msg <*> keepRecvM cmd proc
+keepRecv' :: MainLoopEnv -> Node
+          -> Command -> (ByteString -> IO [RouterAction]) -> IO [RouterAction]
+keepRecv' env node cmd proc = recv' env node [] cmd $ \msg ->
+    (++) <$> proc msg <*> keepRecv' env node cmd proc
+
+keepRecv :: MsgPayload t
+         => MainLoopEnv -> Node
+         -> Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
+keepRecv env node cmd proc = recv env node [] cmd $ \msg ->
+    (++) <$> proc msg <*> keepRecv env node cmd proc
 
 pingDelay :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 pingDelay env node msg = do
@@ -71,7 +90,7 @@ pingDelay env node msg = do
     start <- msCPUTime
     timeoutRetryS (timeout_s env) $ tSend trans ping
 
-    recvM [] BTC_CMD_PONG $ \(PingPongPayload back_nonce) -> do
+    recv env node [] BTC_CMD_PONG $ \(PingPongPayload back_nonce) -> do
         if back_nonce == nonce then do
             end <- msCPUTime
             setA (ping_delay node) (end - start)
@@ -79,10 +98,12 @@ pingDelay env node msg = do
         else
             return [] -- skip
 
+type BlockFetchDoneProc = Node -> BlockFetchTask -> [(Hash256, ByteString)] -> IO ()
+
 data BlockFetchTask =
     BlockFetchTask {
-        fetch_block :: [Either Hash256 Block],
-        done_proc   :: Maybe (Node -> BlockFetchTask -> [Block] -> IO ())
+        fetch_block :: [(Hash256, ByteString)],
+        done_proc   :: Maybe BlockFetchDoneProc
     }
 
 instance Show BlockFetchTask where
@@ -105,52 +126,60 @@ instance NodeTask BlockFetchTask where
         case done_proc task of
             Nothing -> return ()
             Just proc ->
-                proc node task $ map (either (error "unfetched block") id) (fetch_block task)
+                proc node task (fetch_block task)
 
 -- fetch & sync the block inventory
-syncChain :: IO () -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
-syncChain callback env node msg = do
+syncChain :: Int -> Atom [[Hash256]] -> IO ()
+          -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+syncChain n hash_pool callback env node msg = do
     let conf = global_conf env
         trans = conn_trans node
 
-    nodeMsg env node $ "!!!!!!!!!!! start fetching blocks"
+    nodeMsg env node $ "start fetching inventory"
 
     latest <- getA (block_chain env) >>= latestBlocks (tckr_known_inv_count conf)
 
-    nodeMsg env node $ "!!!!!!!!!!! latest " ++ show (map block_hash latest)
+    nodeMsg env node $ "latest known blocks" ++ show (map block_hash latest)
 
     getblocks <- encodeMsg conf BTC_CMD_GETBLOCKS $
                  encodeGetblocksPayload conf (map block_hash latest) nullHash256
 
     timeoutRetryS (timeout_s env) $ tSend trans getblocks
 
-    recvM [] BTC_CMD_INV $ \(InvPayload {
+    recv env node [] BTC_CMD_INV $ \(InvPayload {
         inv_vect = inv_vect
     }) -> do
         nodeMsg env node $ "inv received with " ++ show (length inv_vect) ++ " item(s)" -- ++ show inv_vect
 
-        chain <- getA (block_chain env)
-
-        -- nodeMsg env node $ "branches " ++ show (map branchToBlockList (edge_branches chain))
-
         let hashes = map invToHash256 inv_vect
 
-        scheduleFetch env node hashes callback
+        -- push to the common hash pool
+        cur_hash_pool <- appA (hashes:) hash_pool
+
+        if length cur_hash_pool == n then do
+            -- all n inventories fetched
+
+            -- compare inventories
+            let final_hashes = listUnion cur_hash_pool
+
+            nodeMsg env node $ "fetching final inventory of " ++ show (length final_hashes) ++ " item(s)"
+
+            scheduleFetch env node final_hashes callback
+        else
+            return ()
 
         return [ StopProp, DumpMe ]
 
-buildFetchTasks :: Int -> [Hash256]
-                -> (Node -> BlockFetchTask -> [Block] -> IO ())
-                -> [BlockFetchTask]
+buildFetchTasks :: Int -> [Hash256] -> BlockFetchDoneProc -> [BlockFetchTask]
 buildFetchTasks maxt hashes done_proc =
     map (\task -> BlockFetchTask {
-        fetch_block = map Left task,
+        fetch_block = map (flip (,) (throw $ TCKRError "unfetched block")) task,
         done_proc = Just done_proc
     }) $ splitList maxt hashes
 
 fetchTaskToHashes :: BlockFetchTask -> [Hash256]
 fetchTaskToHashes task =
-    map (either id block_hash) (fetch_block task)
+    map fst (fetch_block task)
 
 scheduleFetch :: MainLoopEnv -> Node -> [Hash256] -> IO () -> IO ()
 scheduleFetch env node hashes callback = do
@@ -165,6 +194,7 @@ scheduleFetch env node hashes callback = do
 
     -- assignment list
     assign_var <- newA [] :: IO (Atom [(Node, BlockFetchTask)])
+    assign_lock <- LK.new
 
     let doFetch hashes = do
             blacklist <- getA blacklist
@@ -178,32 +208,37 @@ scheduleFetch env node hashes callback = do
 
             -- return assign
 
-        done_proc node task blocks@(first:_) = do
+        done_proc node task results = do
             -- delete current active node from the blacklist
             appA (SET.delete node) blacklist
 
-            -- assign <- getA assign_var
-            -- nodeMsg env node $ "current assign " ++ show assign
+            -- remove the task
+            LK.acquire assign_lock
+            orig_assign <- getA assign_var
+            new_assign <- appA (filter ((/= task) . snd)) assign_var
+            -- nodeMsg env node $ "assign after removal " ++ show assign
+            LK.release assign_lock
 
-            -- nodeMsg env node $ "removing: " ++ show (node, task)
-
-            -- remove assignment
-            appA (delete (node, task)) assign_var
-
-            -- assign <- getA assign_var
-            -- nodeMsg env node $ "after removing " ++ show assign
-
-            -- fill in the block data
-            forM blocks $ \block -> do
-                let mvar = lookup (block_hash block) tarray
-
-                case mvar of
-                    Just var -> setA var (Just block)
-                    Nothing -> do
-                        nodeMsg env node $ "irrelavent block " ++ show block
-                        return ()
+            -- fill in the block 
             
-            return ()
+            if length orig_assign /= length new_assign then do
+                forM results $ \(hash, payload) -> do
+                    -- decode now
+                    let block = decodeFailLE payload
+                        mvar = lookup hash tarray
+
+                    -- here if the hash already exists, no decoding will be needed
+                    case mvar of
+                        Just var -> setA var (Just block)
+                        Nothing ->
+                            nodeMsg env node $ "irrelavent block " ++ show block
+
+                -- nodeMsg env node $ "task decoding finished"
+                return ()
+            else do
+                -- task already finished
+                nodeMsg env node $ "duplicated assignment"
+                return ()
 
         remain = do
             blocks <- all_blocks
@@ -224,7 +259,7 @@ scheduleFetch env node hashes callback = do
         -- nodeMsg env node $ "received " ++ show mreceived
 
         start_time <- unixTimestamp
-        delay $ loop_delay_us + time `div` 5 * loop_delay_us
+        delay loop_delay_us -- $ loop_delay_us + time `div` 5 * loop_delay_us
 
         received <- maybeCat <$> all_blocks
 
@@ -241,37 +276,63 @@ scheduleFetch env node hashes callback = do
             -- TODO: stop writing js
             forkIO callback
 
+            forM tarray $ \(_, block) -> setA block Nothing
+
             return True
         else do
             -- refetch
-            nodeMsg env node "fetch timeout, start refetching"
+            nodeMsg env node "still fetching"
 
+            LK.acquire assign_lock
             assign <- getA assign_var
 
-            -- last_seens <- mapM (getA . last_seen . fst) assign
-            -- nodeMsg env node $ show start_time ++ " last seen: " ++ show last_seens
+            prog <- forM assign $
+                getA . cur_progress . fst
+
+            nodeMsg env node $ "node progresses: " ++ show prog
 
             -- find non-responsive nodes
-            (slow, ok) <- (flip sepWhenM) assign $ \(n, _) -> do
+            (slow, ok) <- flip sepWhenM assign $ \(n, _) -> do
                 time <- getA (last_seen n)
                 return $ time < start_time
 
+            let
+                slow_nodes = unique $ map fst slow
+                ok_nodes = unique $ map fst ok
+
+            -- decrease/increase blacklist count
+            mapM nodeBlacklistDec ok_nodes
+            mapM nodeBlacklistInc slow_nodes
+
             nodeMsg env node $ "removing slow nodes: " ++ show slow
 
-            -- add them to the blacklist
-            appA (`SET.union` SET.fromList (map fst slow)) blacklist
+            if not $ null slow then do
+                -- add them to the blacklist
+                appA (`SET.union` SET.fromList slow_nodes) blacklist
 
-            -- refetch on certain slow nodes
-            let retry_hashes = fetchTaskToHashes (mconcat (map snd slow))
+                -- refetch on certain slow nodes
+                let retry_hashes = fetchTaskToHashes (mconcat (map snd slow))
 
-            nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
+                nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
 
-            assign <- doFetch retry_hashes
+                assign <- doFetch retry_hashes
 
-            if null assign then
-                setA blacklist SET.empty
+                if null assign then do
+                    -- blacklist full
+                    -- try again with empty blacklist
+                    nodeMsg env node "blacklist full"
+
+                    setA blacklist SET.empty
+                    assign <- doFetch retry_hashes
+                    setA assign_var (assign ++ ok)
+                else
+                    setA assign_var (assign ++ ok)
+
+                nodeMsg env node $ "new assignment " ++ show (assign ++ ok)
             else
-                setA assign_var (assign ++ ok)
+                return () -- no slow node
+
+            LK.release assign_lock
 
             return False
 
@@ -292,23 +353,25 @@ fetchBlock task env node _ = do
 
     -- nodeMsg env node "getdata sent"
 
-    fetched <- newA MAP.empty
+    fetched_var <- newA MAP.empty
 
-    keepRecvM BTC_CMD_BLOCK $ \block@(Block {
-        block_hash = hash
-    }) -> do
+    keepRecv' env node BTC_CMD_BLOCK $ \payload -> do
         -- nodeMsg env node $ "received block " ++ show block
 
-        if hash `elem` hashes then do
-            appA (MAP.insert hash block) fetched
-            fetched_pure <- getA fetched
+        -- only decode head to reduce decoding time
+        let BlockHeader (Block {
+            block_hash = hash
+        }) = decodeFailLE payload
 
-            if MAP.size fetched_pure == length hashes then do
+        if hash `elem` hashes then do
+            fetched <- appA (MAP.insert hash payload) fetched_var
+
+            if MAP.size fetched == length hashes then do
                 -- all fetched
                 nodeMsg env node "partial task finished"
 
                 done env node (task {
-                    fetch_block = map (Right . snd) $ MAP.toList fetched_pure
+                    fetch_block = MAP.toList fetched
                 })
 
                 return [ StopProp, DumpMe ]

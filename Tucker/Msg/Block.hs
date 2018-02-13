@@ -6,6 +6,8 @@ import Data.Int
 import Data.Word
 import qualified Data.ByteString as BSR
 
+import Debug.Trace
+
 import Tucker.Enc
 import Tucker.Auth
 import Tucker.Conf
@@ -32,7 +34,9 @@ data Block =
 
         nonce       :: Word32,
 
-        txns        :: [TxPayload]
+        txns        :: [TxPayload],
+
+        enc_cache   :: Maybe ByteString
     }
 
 instance Eq Block where
@@ -51,7 +55,9 @@ data BlockHeader = BlockHeader Block deriving (Eq, Show)
 
 data HeadersPayload = HeadersPayload [BlockHeader] deriving (Show, Eq)
 
-instance MsgPayload Block
+-- instance MsgPayload Block
+-- instance MsgPayload BlockHeader
+instance MsgPayload BlockPayload
 instance MsgPayload HeadersPayload
 
 instance Encodable HeadersPayload where
@@ -112,12 +118,18 @@ instance Decodable BlockHeader where
             nonce = nonce,
 
             -- fill with undefined
-            txns = replicate (fi txn_count) undefined
+            txns = replicate (fi txn_count) undefined,
+
+            enc_cache = Nothing
         }
 
         return $ BlockHeader $ tmp { block_hash = hashBlock tmp }
 
 instance Encodable Block where
+    encode end block@(Block {
+        enc_cache = Just cache
+    }) = cache -- use cache if possible
+
     encode end block@(Block {
         txns = txns
     }) =
@@ -126,14 +138,26 @@ instance Encodable Block where
 
 instance Decodable Block where
     decoder = do
+        buf <- allD'
+        init_len <- lenD
+
         (BlockHeader block@(Block {
             txns = txns
         })) <- decoder
 
+        -- traceM "decoding block"
+
         -- read real txns
         txns <- listD (length txns) decoder
 
-        return $ block { txns = txns }
+        -- traceM "decoding block finished"
+
+        final_len <- lenD
+
+        return $ block {
+            txns = txns,
+            enc_cache = Just $ BSR.take (init_len - final_len) buf
+        }
 
 instance Encodable BlockPayload where
     encode end (BlockPayload block) = encode end block

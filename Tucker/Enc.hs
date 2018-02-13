@@ -13,6 +13,7 @@ import qualified Data.Monoid as MND
 import qualified Data.ByteString as BSR
 
 import Control.Monad
+import Control.Exception
 
 import Tucker.Error
 
@@ -27,6 +28,8 @@ type ByteString = BSR.ByteString
 -- mempty :: Monoid a => a
 -- mempty = MND.mempty
 
+data Placeholder = Placeholder
+
 data Endian = LittleEndian | BigEndian deriving (Show, Read, Eq)
 
 class Encodable t where
@@ -37,6 +40,9 @@ class Encodable t where
 
     encodeBE :: t -> ByteString
     encodeBE = encode BigEndian
+
+instance Encodable Placeholder where
+    encode _ _ = BSR.empty
 
 instance Encodable ByteString where
     encode _ = id
@@ -156,22 +162,22 @@ instance Functor Decoder where
     fmap f (Decoder d) =
         Decoder $ \end bs ->
             case d end bs of
-                (Right r, rest) -> (Right $ f r, rest)
+                (Right r, rest) -> (Right (f r), rest)
                 (Left err, rest) -> (Left err, rest)
 
 instance Applicative Decoder where
-    pure = return
+    pure res = Decoder $ \end rest -> (Right res, rest)
 
     (Decoder d1) <*> (Decoder d2) =
         Decoder $ \end bs ->
             case d1 end bs of
                 (Right f, rest) ->
                     case d2 end rest of
-                        (Right r, rest) -> (Right $ f r, rest)
+                        (Right r, rest) -> (Right (f r), rest)
                         (Left err, rest) -> (Left err, rest)
 
 instance Monad Decoder where
-    return res = Decoder $ \end rest -> (Right res, rest)
+    return = pure
 
     fail err = Decoder $ \end bs -> (Left $ TCKRError err, bs)
 
@@ -205,6 +211,12 @@ class Decodable t where
     decodeAllBE :: ByteString -> Either TCKRError t
     decodeAllBE = fst . decodeBE
 
+    decodeFailLE :: ByteString -> t
+    decodeFailLE = (either throw id) . decodeAllLE
+
+    decodeFailBE :: ByteString -> t
+    decodeFailBE = (either throw id) . decodeAllBE
+
 intD :: Integral t => Int -> Decoder t
 intD nbyte = Decoder $ \end bs ->
     if BSR.length bs >= nbyte then
@@ -232,7 +244,9 @@ bsD len =
             (Left $ TCKRError ("need " ++ (show len) ++ " byte(s)"), bs)
 
 listD :: Int -> Decoder t -> Decoder [t]
-listD len d = forM [ 1 .. len ] (`seq` d)
+listD = replicateM
+    -- forM [ 1 .. len ] (\l -> traceShowM l >> d)
+    -- replicateM
 
 lenD :: Decoder Int
 lenD = Decoder $ \_ bs -> (Right $ BSR.length bs, bs)
@@ -249,6 +263,12 @@ appendD bs = Decoder $ \_ orig -> (Right (), BSR.append bs orig)
 
 allD :: Decoder ByteString
 allD = Decoder $ \_ bs -> (Right bs, BSR.empty)
+
+allD' :: Decoder ByteString
+allD' = Decoder $ \_ bs -> (Right bs, bs)
+
+instance Decodable Placeholder where
+    decoder = return Placeholder
 
 instance Decodable Bool where
     decoder = do

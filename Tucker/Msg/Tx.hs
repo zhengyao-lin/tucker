@@ -2,14 +2,6 @@
 
 module Tucker.Msg.Tx where
 
-import Tucker.Enc
-import Tucker.Conf
-import Tucker.Auth
-import Tucker.Error
-import Tucker.Msg.Script
-import Tucker.Msg.Common
-import Tucker.Msg.Hash256
-
 import Data.Hex
 import Data.Int
 import Data.Char
@@ -18,6 +10,15 @@ import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
 import Debug.Trace
+
+import Tucker.Enc
+import Tucker.Conf
+import Tucker.Auth
+import Tucker.Util
+import Tucker.Error
+import Tucker.Msg.Script
+import Tucker.Msg.Common
+import Tucker.Msg.Hash256
 
 data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show, Read)
 
@@ -47,9 +48,10 @@ data TxPayload =
         tx_out      :: [TxOutput],
         tx_witness  :: [TxWitness],
 
-        lock_time   :: Int32 -- the earliest time the tx can be used
-                             -- if lock_time < 500,000,000, treat it as a block height
-                             -- if lock_time >= 500,000,000, treat it as an unix timestamp
+        lock_time   :: Int32, -- the earliest time the tx can be used
+                              -- if lock_time < 500,000,000, treat it as a block height
+                              -- if lock_time >= 500,000,000, treat it as an unix timestamp
+        tx_cache    :: Maybe ByteString
     } deriving (Eq, Show, Read)
 
 data Wallet =
@@ -77,7 +79,7 @@ instance Encodable TxInput where
     }) =
         mconcat [
             e prev_out,
-            e (VInt $ fromIntegral $ BSR.length sig_script),
+            e (VInt $ fi $ BSR.length sig_script),
             e sig_script,
             e seqn
         ]
@@ -87,10 +89,14 @@ instance Encodable TxInput where
 
 instance Decodable TxInput where
     decoder = do
+        -- traceM "decoding tx input"
+
         prev_out <- decoder
         (VInt slen) <- decoder
-        sig_script <- bsD $ fromIntegral slen
+        sig_script <- bsD $ fi slen
         seqn <- decoder
+
+        -- traceM "decoding tx input finished"
 
         return $ TxInput {
             prev_out = prev_out,
@@ -105,7 +111,7 @@ instance Encodable TxOutput where
     }) =
         mconcat [
             e value,
-            e (VInt $ fromIntegral $ BSR.length pk_script),
+            e (VInt $ fi $ BSR.length pk_script),
             e pk_script
         ]
         where
@@ -116,7 +122,7 @@ instance Decodable TxOutput where
     decoder = do
         value <- decoder
         (VInt slen) <- decoder
-        pk_script <- bsD $ fromIntegral slen
+        pk_script <- bsD $ fi slen
         return $ TxOutput {
             value = value,
             pk_script = pk_script
@@ -131,6 +137,10 @@ instance Decodable TxWitness where
 instance MsgPayload TxPayload
 
 instance Encodable TxPayload where
+    encode end (TxPayload {
+        tx_cache = Just cache
+    }) = cache
+
     encode end (TxPayload {
         version = version,
         flag = flag, -- currently only 1 or 0
@@ -159,14 +169,22 @@ instance Encodable TxPayload where
 
 instance Decodable TxPayload where
     decoder = do
+        buf <- allD'
+        init_len <- lenD
+
         version <- decoder
 
         -- TODO: ignoring flags here
 
+        -- traceM "decoding tx"
         tx_in <- vlistD decoder
+        -- traceM "input finished"
         tx_out <- vlistD decoder
+        -- traceM "output finished"
 
         lock_time <- decoder
+
+        final_len <- lenD
 
         return $ TxPayload {
             version = version,
@@ -176,7 +194,9 @@ instance Decodable TxPayload where
             tx_out = tx_out,
             tx_witness = [],
 
-            lock_time = lock_time
+            lock_time = lock_time,
+
+            tx_cache = Just $ BSR.take (init_len - final_len) buf
         }
 
 -- tx with only 1 input with block hash 0 and n -1
@@ -259,7 +279,8 @@ signRawTx pair tx = do
         hash_raw = ba2bs $ sha256 $ raw <> BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
 
     -- another sha256 is performed here
-    seq (trace (show $ sha256 $ sha256 raw) 0) $ signSHA256DER pair hash_raw
+    -- seq (trace (show $ sha256 $ sha256 raw) 0) $
+    signSHA256DER pair hash_raw
 
 stdSigScript :: ECCKeyPair -> ByteString -> ByteString
 stdSigScript pair sign =
@@ -301,7 +322,9 @@ stdTx conf pair input output = do
             tx_out = out_lst,
 
             tx_witness = [],
-            lock_time = 0
+            lock_time = 0,
+
+            tx_cache = Nothing
         }
 
         raw = wrap in_lst out_lst

@@ -77,7 +77,8 @@ data TCKRConf =
 
         tckr_use_special_min_diff :: Bool, -- support special-min-difficulty or not(mainly on testnet)
 
-        tckr_block_fetch_timeout :: Int -- in sec
+        tckr_block_fetch_timeout :: Int, -- in sec
+        tckr_node_max_blacklist_count :: Int
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -155,7 +156,9 @@ tucker_default_conf_mainnet = do
 
         tckr_use_special_min_diff = False,
 
-        tckr_block_fetch_timeout = 2
+        tckr_block_fetch_timeout = 5,
+
+        tckr_node_max_blacklist_count = 5
 
         -- the collector will wait until the top chunk
         -- has (tckr_max_block_per_chunk + tckr_max_tree_insert_depth)

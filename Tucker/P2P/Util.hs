@@ -203,6 +203,8 @@ nodeRecvOneMsg env node recv_proc timeout_proc = do
         -- at least received some data
         timestamp <- unixTimestamp
         setA (last_seen node) timestamp
+
+        setA (cur_progress node) (Progress (fi $ BSR.length buf) (-1))
     else return ()
 
     case msg of

@@ -100,7 +100,7 @@ defaultHandler env node msg@(MsgHead {
                     return []
 
             h BTC_CMD_BLOCK = do
-                d $ \block -> do
+                d $ \(BlockPayload block) -> do
                     envAddBlock env node block
                     return []
 
@@ -128,25 +128,25 @@ nodeProcMsg env node msg = do
     -- processed action result is appended to exec_res
     -- continue indicates whether the execution is to be continued
     let proc = \orig@(exec_res, continue) action -> do
-        if continue then do
-            case action of
-                NormalAction handler -> do
-                    res <- handler env node msg
+            if continue then do
+                case action of
+                    NormalAction handler -> do
+                        res <- handler env node msg
 
-                    let update = [ a | UpdateMe a <- res ]
-                        continue = StopProp `notElem` res
-                        new_action =
-                            if DumpMe `elem` res then
-                                Nothing
-                            else if null update then 
-                                Just action
-                            else
-                                Just $ last update
+                        let update = [ a | UpdateMe a <- res ]
+                            continue = StopProp `notElem` res
+                            new_action =
+                                if DumpMe `elem` res then
+                                    Nothing
+                                else if null update then 
+                                    Just action
+                                else
+                                    Just $ last update
 
-                    return (exec_res ++ [new_action], continue)
+                        return (exec_res ++ [new_action], continue)
 
-                _ -> error "unsupported action"
-        else return orig
+                    _ -> error "unsupported action"
+            else return orig
 
     (exec_res, _) <- foldM proc ([], True) current_alist
 

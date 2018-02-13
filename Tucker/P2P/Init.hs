@@ -68,7 +68,12 @@ pingLoop env =
                 return ()
 
 gcLoop :: MainLoopEnv -> IO ()
-gcLoop env = 
+gcLoop env@(MainLoopEnv {
+    global_conf = TCKRConf {
+        tckr_node_alive_span = max_alive_span,
+        tckr_node_max_blacklist_count = max_bl_count
+    }
+}) =
     forever $ do
         cur_list <- getA $ node_list env
 
@@ -79,11 +84,14 @@ gcLoop env =
 
             -- check if the node has not been responding for a long time
             last_seen <- nodeLastSeen node
-            let alive_span = envConf env tckr_node_alive_span
-                kill = timestamp - last_seen > alive_span
+            bl_count  <- nodeBlacklistTime node
+
+            let kill =
+                    timestamp - last_seen > max_alive_span ||
+                    bl_count > max_bl_count
 
             if kill then do
-                nodeMsg env node "timeout and quit"
+                nodeMsg env node "!!! killed(timeout or too many blacklist count)"
                 killThread $ thread_id node
             else
                 return ()
@@ -103,12 +111,19 @@ gcLoop env =
 
 sync :: MainLoopEnv -> Int -> IO ()
 sync env n = do
-    envSpreadSimpleAction env (NormalAction (syncChain (sync env n))) n
+    -- [[Hash256]]
+    sync_inv <- newA []
+
+    let callback = sync env n
+        action = NormalAction (syncChain n sync_inv callback)
+
+    envSpreadSimpleAction env action n
+
     return ()
 
-syncOne env n = do
-    envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n
-    return ()
+-- syncOne env n = do
+--     envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n
+--     return ()
 
 mainLoop :: TCKRConf -> IO MainLoopEnv
 mainLoop conf = runResourceT $ do
@@ -117,7 +132,7 @@ mainLoop conf = runResourceT $ do
     lift $ bootstrap env (tckr_bootstrap_host conf)
     -- setA (node_list env) init_nodes
 
-    -- bootstrap finished, start sync
+    -- bootstrap finished, start sync with 3 nodes
     resourceForkIO $ lift $ sync env 1
 
     -- keep the resource, never exit
