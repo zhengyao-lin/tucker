@@ -31,3 +31,7 @@ upload.log
 tucker-testdb/
 profiling/
 
+.stack-work/
+tucker.cabal
+*~
+

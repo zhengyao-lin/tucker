@@ -209,3 +209,6 @@ blockHeader :: Block -> Block
 blockHeader block = block {
         txns = toPartial (txns block)
     }
+
+isFullBlock :: Block -> Bool
+isFullBlock block = isFull (txns block)

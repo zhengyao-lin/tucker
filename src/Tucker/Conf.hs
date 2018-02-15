@@ -25,10 +25,8 @@ data TCKRConf =
 
         -- keyspaces: block, tx, 
         tckr_db_path         :: FilePath,
-        tckr_ks_block        :: String, -- block hash -> block data
-        tckr_ks_tx           :: String, -- tx hash -> tx data
-        tckr_ks_chain        :: String, -- block height -> block hash
-        tckr_ks_global       :: String,
+        tckr_bucket_block_name :: String,
+        tckr_bucket_chain_name :: String,
 
         tckr_user_agent      :: String,
 
@@ -107,10 +105,8 @@ tucker_default_conf_mainnet = do
         tckr_node_service = NodeServiceType [ TCKR_NODE_NETWORK ],
 
         tckr_db_path = tucker_path </> "db",
-        tckr_ks_block = "block",
-        tckr_ks_tx = "tx",
-        tckr_ks_chain = "chain",
-        tckr_ks_global = "global",
+        tckr_bucket_block_name = "block",
+        tckr_bucket_chain_name = "chain",
 
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 
@@ -148,7 +144,7 @@ tucker_default_conf_mainnet = do
         tckr_max_block_per_chunk = 2048,
         tckr_max_tree_insert_depth = 50,
 
-        tckr_max_block_batch = 250,
+        tckr_max_block_batch = 500,
         -- receive 200 blocks a time(if inv is greater than that, trim the tail)
 
         tckr_fetch_dup_node = 8,

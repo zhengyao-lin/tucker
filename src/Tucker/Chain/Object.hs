@@ -56,7 +56,7 @@ type Height = Word64
 data Branch
     = BlockNode {
         prev_node  :: Maybe Branch,
-        block_data :: Block,
+        block_data :: Block, -- NOTE: block_data only contains a block header
         cur_height :: Height,
         acc_diff   :: Difficulty
     } deriving (Show, Generic, NFData)
@@ -80,14 +80,12 @@ data Chain =
         -- received(including those on the side branch)
         std_conf      :: TCKRConf,
 
-        db_block      :: Database Hash256 (Height, Block),
-        db_chain      :: Database Height Hash256,
+        db_global     :: Database,
+        
+        bucket_block  :: DBBucket Hash256 (Height, Block),
+        bucket_chain  :: DBBucket Height Hash256,
 
         saved_height  :: Height, -- hight of the lowest block stored in memory
-
-        -- db_global     :: Database String DBAny,
-        -- global var
-        -- 1. "height" :: Height, height >= real height
 
         orphan_pool   :: OSET.OSet Block,
         buffer_chain  :: Maybe Branch,
@@ -105,22 +103,23 @@ instance NFData Chain where
 initChain :: TCKRConf -> ResIO Chain
 initChain conf@(TCKRConf {
     tckr_db_path = db_path,
-    tckr_ks_block = ks_block,
-    tckr_ks_chain = ks_chain,
-    tckr_ks_global = ks_global,
+    tckr_bucket_block_name = block_name,
+    tckr_bucket_chain_name = chain_name,
 
     tckr_genesis_raw = genesis_raw,
     tckr_max_tree_insert_depth = max_depth
 }) = do
-    db_block <- openDB def db_path ks_block
-    db_chain <- openDB def db_path ks_chain
-    -- db_global <- openDB def db_path ks_global
+    db_global <- openDB def db_path
+
+    bucket_block <- lift $ openBucket db_global block_name
+    bucket_chain <- lift $ openBucket db_global chain_name
 
     let chain = Chain {
             std_conf = conf,
 
-            db_block = db_block,
-            db_chain = db_chain,
+            db_global = db_global,
+            bucket_block = bucket_block,
+            bucket_chain = bucket_chain,
 
             saved_height = 0,
 
@@ -132,7 +131,7 @@ initChain conf@(TCKRConf {
 
     -- mheight <- lift $ get db_global "height"
 
-    entries <- lift $ count db_chain
+    entries <- lift $ countB bucket_chain
     let height = entries - 1 :: Height
 
     lift $ putStrLn $ "a tree of height " ++ show entries ++ " - 1 found in database"
@@ -144,7 +143,7 @@ initChain conf@(TCKRConf {
             (Left err, _) -> error $ "genesis decode error: " ++ show err
 
             (Right genesis, _) -> do
-                lift $ set db_block (block_hash genesis) genesis
+                lift $ setB bucket_block (block_hash genesis) (0, genesis)
 
                 return $ chain {
                     edge_branches = [BlockNode {
@@ -166,10 +165,10 @@ initChain conf@(TCKRConf {
                 if height > 0 then [ min_height, min_height + 1 .. height ]
                 else [0]
 
-        hashes <- maybeCat <$> mapM (get db_chain) range
+        hashes <- maybeCat <$> mapM (getB bucket_chain) range
                :: IO [Hash256]
 
-        res    <- maybeCat <$> mapM (get db_block) hashes
+        res    <- maybeCat <$> mapM (getAsB bucket_block) hashes
                :: IO [(Height, BlockHeader)] -- read headers only
         
         let fold_proc Nothing (height, BlockHeader block) =
@@ -332,8 +331,8 @@ blocksAtHeight chain height =
 
 blockAtHeight :: Chain -> Branch -> Height -> IO (Maybe Block)
 blockAtHeight (Chain {
-    db_chain = db_chain,
-    db_block = db_block,
+    bucket_chain = bucket_chain,
+    bucket_block = bucket_block,
     saved_height = saved_height,
     buffer_chain = buffer_chain
 }) branch@(BlockNode {
@@ -351,12 +350,12 @@ blockAtHeight (Chain {
 
         return $ search branch <|> (buffer_chain >>= search)
     else do
-        res <- get db_chain height :: IO (Maybe Hash256)
+        res <- getB bucket_chain height :: IO (Maybe Hash256)
 
         case res of
             Nothing -> return Nothing
             Just hash -> do
-                Just (_, block) <- get db_block hash
+                Just (_, block) <- getB bucket_block hash
                                 :: IO  (Maybe (Height, Block))
                 return $ Just block
 
@@ -428,7 +427,7 @@ minTopDiff lst =
 
 saveBranch :: Chain -> Branch -> IO ()
 saveBranch (Chain {
-    db_chain = db_chain
+    bucket_chain = bucket_chain
 }) branch = do
     -- ascending order of height
     let pairs = branchToBlockList branch
@@ -438,7 +437,7 @@ saveBranch (Chain {
         let (height, _) = last pairs
 
         forM_ pairs $ \(height, (Block { block_hash = hash })) ->
-            set db_chain height hash
+            setB bucket_chain height hash
     else
         return ()
 
@@ -556,7 +555,7 @@ addBlocks chain blocks proc =
 addBlockFail :: Chain -> Block -> IO Chain
 addBlockFail chain@(Chain {
     std_conf = conf,
-    db_block = db_block,
+    bucket_block = bucket_block,
     orphan_pool = orphan_pool
 }) block@(Block {
     block_hash = block_hash,
@@ -565,12 +564,15 @@ addBlockFail chain@(Chain {
     merkle_root = merkle_root,
     txns = txns'
 }) = do
+    expectTrue "require full block" $
+        isFullBlock block
+
+    let txns = FD.toList txns'
+
     expectFalseIO "block already exists" $
         chain `hasBlockInChain` block
 
     -- don't check if the block is in orphan pool
-
-    let txns = FD.toList txns'
 
     expectTrue "empty tx list" $
         not (null txns)
@@ -596,7 +598,7 @@ addBlockFail chain@(Chain {
 
     case insertToEdge chain block of
         Nothing -> do -- no previous hash found
-            has_recv <- db_block `has` prev_hash block
+            has_recv <- bucket_block `hasB` prev_hash block
         
             traceIO "orphan block!"
 
@@ -621,7 +623,7 @@ addBlockFail chain@(Chain {
             
             -- all check passed
             -- write the block into the block database
-            set db_block block_hash (cur_height branch, block)
+            setB bucket_block block_hash (cur_height branch, block)
 
             is_orphan <- chain `hasBlockInOrhpan` block
 
@@ -642,11 +644,11 @@ addBlockFail chain@(Chain {
 -- received before && is in a branch
 hasBlockInChain :: Chain -> Block -> IO Bool
 hasBlockInChain chain@(Chain {
-    db_block = db_block
+    bucket_block = bucket_block
 }) block@(Block {
     block_hash = hash
 }) = do
-    mres <- get db_block hash :: IO (Maybe (Height, Placeholder))
+    mres <- getAsB bucket_block hash :: IO (Maybe (Height, Placeholder))
     
     case mres of
         Nothing -> return False

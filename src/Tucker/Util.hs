@@ -35,9 +35,14 @@ toPartial :: PartialList a -> PartialList a
 toPartial (FullList list) = PartialList (length list)
 toPartial a = a
 
+partial_access = throw $ TCKRError "access to partial list"
+
 instance FD.Foldable PartialList where
     foldMap f (FullList list) = foldMap f list
+    foldMap f (PartialList list) = partial_access
+
     foldr f a (FullList list) = foldr f a list
+    foldr f a (PartialList list) = partial_access
 
     length (FullList list) = length list
     length (PartialList len) = len
@@ -45,7 +50,7 @@ instance FD.Foldable PartialList where
     null (PartialList len) = len == 0
     null (FullList list) = null list
 
-    toList (PartialList len) = replicate len (error "access to partial list")
+    toList (PartialList len) = replicate len partial_access
     toList (FullList list) = list
 
 unixTimestamp :: Integral a => IO a
