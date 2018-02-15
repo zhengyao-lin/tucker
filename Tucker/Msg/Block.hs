@@ -1,10 +1,15 @@
-{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE DuplicateRecordFields, DeriveGeneric, DeriveAnyClass #-}
 
 module Tucker.Msg.Block where
 
 import Data.Int
 import Data.Word
+import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
+
+import Control.DeepSeq
+
+import GHC.Generics (Generic)
 
 import Debug.Trace
 
@@ -34,10 +39,10 @@ data Block =
 
         nonce       :: Word32,
 
-        txns        :: [TxPayload],
+        txns        :: PartialList TxPayload,
 
         enc_cache   :: Maybe ByteString
-    }
+    } deriving (Generic, NFData)
 
 instance Eq Block where
     (Block { block_hash = h1 }) == (Block { block_hash = h2 })
@@ -118,7 +123,7 @@ instance Decodable BlockHeader where
             nonce = nonce,
 
             -- fill with undefined
-            txns = replicate (fi txn_count) undefined,
+            txns = PartialList (fi txn_count),
 
             enc_cache = Nothing
         }
@@ -155,7 +160,7 @@ instance Decodable Block where
         final_len <- lenD
 
         return $ block {
-            txns = txns,
+            txns = FullList txns,
             enc_cache = Just $ BSR.take (init_len - final_len) buf
         }
 
@@ -199,3 +204,8 @@ targetBDiff hash =
 
 isHashOf :: Hash256 -> Block -> Bool
 isHashOf hash = (== hash) . block_hash
+
+blockHeader :: Block -> Block
+blockHeader block = block {
+        txns = toPartial (txns block)
+    }

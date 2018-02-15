@@ -78,7 +78,9 @@ data TCKRConf =
         tckr_use_special_min_diff :: Bool, -- support special-min-difficulty or not(mainly on testnet)
 
         tckr_block_fetch_timeout :: Int, -- in sec
-        tckr_node_max_blacklist_count :: Int
+        tckr_node_max_blacklist_count :: Int,
+
+        tckr_max_block_batch :: Int
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -132,9 +134,9 @@ tucker_default_conf_mainnet = do
                 ip4 (0, 0, 0, 0)
             ],
     
-        tckr_gc_interval = 30 * 1000 * 1000, -- 30 sec
+        tckr_gc_interval = 10 * 1000 * 1000, -- 30 sec
         
-        tckr_max_block_task = 16,
+        tckr_max_block_task = 20,
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min
@@ -144,7 +146,10 @@ tucker_default_conf_mainnet = do
 
         tckr_block_tree_path = "test.block.d",
         tckr_max_block_per_chunk = 2048,
-        tckr_max_tree_insert_depth = 256,
+        tckr_max_tree_insert_depth = 50,
+
+        tckr_max_block_batch = 250,
+        -- receive 200 blocks a time(if inv is greater than that, trim the tail)
 
         tckr_fetch_dup_node = 8,
         tckr_fetch_dup_max_task = 4,

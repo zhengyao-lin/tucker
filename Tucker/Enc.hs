@@ -10,11 +10,13 @@ import Data.Word
 import Data.Char
 import Data.LargeWord
 import qualified Data.Monoid as MND
+import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
 
 import Control.Monad
 import Control.Exception
 
+import Tucker.Util
 import Tucker.Error
 
 type ByteString = BSR.ByteString
@@ -82,6 +84,9 @@ instance Encodable Word256 where
 
 instance Encodable a => Encodable [a] where
     encode end = BSR.concat . (map (encode end))
+
+instance Encodable a => Encodable (PartialList a) where
+    encode end = encode end . FD.toList
 
 instance (Encodable t1, Encodable t2) => Encodable (t1, t2) where
     encode end (a, b) = encode end a <> encode end b

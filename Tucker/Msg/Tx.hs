@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, DeriveGeneric, DeriveAnyClass #-}
 
 module Tucker.Msg.Tx where
 
@@ -8,6 +8,10 @@ import Data.Char
 import Data.Word
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
+
+import Control.DeepSeq
+
+import GHC.Generics (Generic)
 
 import Debug.Trace
 
@@ -20,7 +24,7 @@ import Tucker.Msg.Script
 import Tucker.Msg.Common
 import Tucker.Msg.Hash256
 
-data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show, Read)
+data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show, Read, Generic, NFData)
 
 type Value = Int64
 
@@ -29,15 +33,15 @@ data TxInput =
         prev_out        :: OutPoint,
         sig_script      :: RawScript,
         seqn            :: Int32 -- sequence, currently not used
-    } deriving (Eq, Show, Read)
+    } deriving (Eq, Show, Read, Generic, NFData)
 
 data TxOutput =
     TxOutput {
         value           :: Value, -- in Satoshis, 10^-8 BTC
         pk_script       :: RawScript
-    } deriving (Eq, Show, Read)
+    } deriving (Eq, Show, Read, Generic, NFData)
 
-data TxWitness = TxWitness deriving (Eq, Show, Read)
+data TxWitness = TxWitness deriving (Eq, Show, Read, Generic, NFData)
     
 data TxPayload =
     TxPayload {
@@ -48,11 +52,11 @@ data TxPayload =
         tx_out      :: [TxOutput],
         tx_witness  :: [TxWitness],
 
-        lock_time   :: Int32, -- the earliest time the tx can be used
+        lock_time   :: Int32  -- the earliest time the tx can be used
                               -- if lock_time < 500,000,000, treat it as a block height
                               -- if lock_time >= 500,000,000, treat it as an unix timestamp
-        tx_cache    :: Maybe ByteString
-    } deriving (Eq, Show, Read)
+        -- tx_cache    :: Maybe ByteString
+    } deriving (Eq, Show, Read, Generic, NFData)
 
 data Wallet =
     Wallet {
@@ -137,9 +141,9 @@ instance Decodable TxWitness where
 instance MsgPayload TxPayload
 
 instance Encodable TxPayload where
-    encode end (TxPayload {
-        tx_cache = Just cache
-    }) = cache
+    -- encode end (TxPayload {
+    --     tx_cache = Just cache
+    -- }) = cache
 
     encode end (TxPayload {
         version = version,
@@ -194,9 +198,9 @@ instance Decodable TxPayload where
             tx_out = tx_out,
             tx_witness = [],
 
-            lock_time = lock_time,
+            lock_time = lock_time
 
-            tx_cache = Just $ BSR.take (init_len - final_len) buf
+            -- tx_cache = Just $ BSR.take (init_len - final_len) buf
         }
 
 -- tx with only 1 input with block hash 0 and n -1
@@ -322,9 +326,9 @@ stdTx conf pair input output = do
             tx_out = out_lst,
 
             tx_witness = [],
-            lock_time = 0,
+            lock_time = 0
 
-            tx_cache = Nothing
+            -- tx_cache = Nothing
         }
 
         raw = wrap in_lst out_lst

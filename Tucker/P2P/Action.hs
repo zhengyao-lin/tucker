@@ -15,6 +15,7 @@ import Control.Monad.Loops
 import Control.Concurrent.Thread.Delay
 import qualified Control.Concurrent.Lock as LK
 
+-- import System.IO
 import System.Random
 
 import Tucker.Msg
@@ -151,7 +152,9 @@ syncChain n hash_pool callback env node msg = do
     }) -> do
         nodeMsg env node $ "inv received with " ++ show (length inv_vect) ++ " item(s)" -- ++ show inv_vect
 
-        let hashes = map invToHash256 inv_vect
+        let hashes =
+                map invToHash256 $
+                take (tckr_max_block_batch conf) inv_vect
 
         -- push to the common hash pool
         cur_hash_pool <- appA (hashes:) hash_pool
@@ -163,6 +166,8 @@ syncChain n hash_pool callback env node msg = do
             let final_hashes = listUnion cur_hash_pool
 
             nodeMsg env node $ "fetching final inventory of " ++ show (length final_hashes) ++ " item(s)"
+
+            -- delay $ 1000 * 1000 * 1000
 
             scheduleFetch env node final_hashes callback
         else
@@ -185,16 +190,22 @@ scheduleFetch :: MainLoopEnv -> Node -> [Hash256] -> IO () -> IO ()
 scheduleFetch env node hashes callback = do
     let conf = global_conf env
 
+    -- use this lock first before changing the ioref
+    var_lock <- LK.new
+
     -- task array of (hash, atom maybe block) pair
     tarray <- forM hashes $ \hash -> do
         var <- newA Nothing :: IO (Atom (Maybe Block))
         return (hash, var)
 
+    -- number of blocks in the front that have already been added
+    added_var <- newA 0 :: IO (Atom (Int))
+    let total = length tarray
+
     blacklist <- newA SET.empty :: IO (Atom (SET.Set Node))
 
     -- assignment list
     assign_var <- newA [] :: IO (Atom [(Node, BlockFetchTask)])
-    assign_lock <- LK.new
 
     let doFetch hashes = do
             blacklist <- getA blacklist
@@ -209,132 +220,141 @@ scheduleFetch env node hashes callback = do
             -- return assign
 
         done_proc node task results = do
+            LK.acquire var_lock
+
             -- delete current active node from the blacklist
             appA (SET.delete node) blacklist
 
             -- remove the task
-            LK.acquire assign_lock
             orig_assign <- getA assign_var
             new_assign <- appA (filter ((/= task) . snd)) assign_var
             -- nodeMsg env node $ "assign after removal " ++ show assign
-            LK.release assign_lock
 
-            -- fill in the block 
+            added <- getA added_var
             
             if length orig_assign /= length new_assign then do
-                forM results $ \(hash, payload) -> do
+                -- fill in the block
+                forM_ results $ \(hash, payload) -> do
                     -- decode now
                     let block = decodeFailLE payload
-                        mvar = lookup hash tarray
+                        midx = findIndex ((== hash) . fst) tarray
 
                     -- here if the hash already exists, no decoding will be needed
-                    case mvar of
-                        Just var -> setA var (Just block)
+                    case midx of
+                        Just idx ->
+                            if idx >= added then
+                                setA (snd (tarray !! idx)) (Just block)
+                            else
+                                return ()
                         Nothing ->
                             nodeMsg env node $ "irrelavent block " ++ show block
 
                 -- nodeMsg env node $ "task decoding finished"
-                return ()
             else do
                 -- task already finished
                 nodeMsg env node $ "duplicated assignment"
-                return ()
 
-        remain = do
-            blocks <- all_blocks
-            return $ maybeCat $
-                (flip map) (zip [0..] blocks) $ \(i, m) ->
-                    if m == Nothing then Just (hashes !! i)
-                    else Nothing
+            LK.release var_lock
 
         loop_delay_s = tckr_block_fetch_timeout conf
         loop_delay_us = fi $ loop_delay_s * 1000 * 1000
+
         all_blocks = mapM (getA . snd) tarray
 
     -- assignment list
     doFetch hashes >>= setA assign_var
 
-    forkIO $ forUntilM_ [1..] $ \time -> do
-        -- send fetching request for unfetched blocks
-        -- nodeMsg env node $ "received " ++ show mreceived
+    forkIO $ do
+        forUntilM_ [1..] $ \time -> do
+            -- send fetching request for unfetched blocks
+            -- nodeMsg env node $ "received " ++ show mreceived
 
-        start_time <- unixTimestamp
-        delay loop_delay_us -- $ loop_delay_us + time `div` 5 * loop_delay_us
+            start_time <- unixTimestamp
+            delay loop_delay_us -- $ loop_delay_us + time `div` 5 * loop_delay_us
 
-        received <- maybeCat <$> all_blocks
+            LK.acquire var_lock
 
-        nodeMsg env node $
-            "received " ++
-            show (length received) ++ "/" ++ show (length hashes) ++
-            " block(s) in total"
+            old_added <- getA added_var
 
-        if length received == length hashes then do
-            nodeMsg env node "all fetching finished"
-            blocks <- mapM (getA . snd) tarray
-            envAddBlocks env node received
+            mblocks <- all_blocks
 
-            -- TODO: stop writing js
-            forkIO callback
+            -- newly received successive blocks
+            let succ_received =
+                    maybeCat $
+                    takeWhile maybeToBool $
+                    drop old_added mblocks
+    
+            -- add received succ blocks
+            envAddBlocks env node succ_received
+            new_added <- appA (+ length succ_received) added_var
 
-            forM tarray $ \(_, block) -> setA block Nothing
+            -- clear corresponding fields to free some memory
+            let clear_fields = drop old_added $ take new_added tarray
+            forM_ clear_fields $ \(_, blockv) -> setA blockv Nothing
 
-            return True
-        else do
-            -- refetch
-            nodeMsg env node "still fetching"
+            nodeMsg env node $
+                "added " ++
+                show new_added ++ "/" ++ show total ++
+                " block(s) in total"
 
-            LK.acquire assign_lock
-            assign <- getA assign_var
+            if new_added == total then do
+                nodeMsg env node "all fetching finished"
+                LK.release var_lock
 
-            prog <- forM assign $
-                getA . cur_progress . fst
+                callback
 
-            nodeMsg env node $ "node progresses: " ++ show prog
+                return True
+            else do
+                assign <- getA assign_var
 
-            -- find non-responsive nodes
-            (slow, ok) <- flip sepWhenM assign $ \(n, _) -> do
-                time <- getA (last_seen n)
-                return $ time < start_time
+                prog <- forM assign $
+                    getA . cur_progress . fst
 
-            let
-                slow_nodes = unique $ map fst slow
-                ok_nodes = unique $ map fst ok
+                nodeMsg env node $ "node progresses: " ++ show prog
 
-            -- decrease/increase blacklist count
-            mapM nodeBlacklistDec ok_nodes
-            mapM nodeBlacklistInc slow_nodes
+                -- find non-responsive nodes
+                (slow, ok) <- flip sepWhenM assign $ \(n, _) -> do
+                    time <- getA (last_seen n)
+                    return $ time < start_time
 
-            nodeMsg env node $ "removing slow nodes: " ++ show slow
+                let slow_nodes = unique $ map fst slow
+                    ok_nodes = unique $ map fst ok
 
-            if not $ null slow then do
-                -- add them to the blacklist
-                appA (`SET.union` SET.fromList slow_nodes) blacklist
+                -- decrease/increase blacklist count
+                mapM_ nodeBlacklistDec ok_nodes
+                mapM_ nodeBlacklistInc slow_nodes
 
-                -- refetch on certain slow nodes
-                let retry_hashes = fetchTaskToHashes (mconcat (map snd slow))
+                nodeMsg env node $ "removing slow nodes: " ++ show slow
 
-                nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
+                if not $ null slow then do
+                    -- add them to the blacklist
+                    appA (`SET.union` SET.fromList slow_nodes) blacklist
 
-                assign <- doFetch retry_hashes
+                    -- refetch on certain slow nodes
+                    let retry_hashes = fetchTaskToHashes (mconcat (map snd slow))
 
-                if null assign then do
-                    -- blacklist full
-                    -- try again with empty blacklist
-                    nodeMsg env node "blacklist full"
+                    nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
 
-                    setA blacklist SET.empty
                     assign <- doFetch retry_hashes
-                    setA assign_var (assign ++ ok)
+
+                    if null assign then do
+                        -- blacklist full
+                        -- try again with empty blacklist
+                        nodeMsg env node "blacklist full"
+
+                        setA blacklist SET.empty
+                        assign <- doFetch retry_hashes
+                        setA assign_var (assign ++ ok)
+                    else
+                        setA assign_var (assign ++ ok)
+
+                    -- nodeMsg env node $ "new assignment " ++ show (assign ++ ok)
                 else
-                    setA assign_var (assign ++ ok)
+                    return () -- no slow node
 
-                nodeMsg env node $ "new assignment " ++ show (assign ++ ok)
-            else
-                return () -- no slow node
+                LK.release var_lock
 
-            LK.release assign_lock
-
-            return False
+                return False
 
     return ()
 

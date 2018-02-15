@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns, DeriveGeneric, DeriveAnyClass #-}
+
 module Tucker.Util where
 
 import qualified Text.Printf as TP
@@ -9,18 +11,49 @@ import qualified Data.Set.Ordered as OSET
 import System.CPUTime
 
 import Control.Monad
+import Control.DeepSeq
 import Control.Exception
 import Control.Monad.Loops
+
+import GHC.Generics (Generic)
 
 import Tucker.Error
 
 class Default a where
     def :: a
 
+data PartialList a = PartialList Int | FullList [a] deriving (Show, Generic, NFData)
+
+isPartial :: PartialList a -> Bool
+isPartial (PartialList _) = True
+isPartial _ = False
+
+isFull :: PartialList a -> Bool
+isFull = not . isPartial
+
+toPartial :: PartialList a -> PartialList a
+toPartial (FullList list) = PartialList (length list)
+toPartial a = a
+
+instance FD.Foldable PartialList where
+    foldMap f (FullList list) = foldMap f list
+    foldr f a (FullList list) = foldr f a list
+
+    length (FullList list) = length list
+    length (PartialList len) = len
+
+    null (PartialList len) = len == 0
+    null (FullList list) = null list
+
+    toList (PartialList len) = replicate len (error "access to partial list")
+    toList (FullList list) = list
+
 unixTimestamp :: Integral a => IO a
 unixTimestamp = round `fmap` getPOSIXTime
 
-replace pos new list = take pos list ++ new:drop (pos + 1) list
+replace !pos !new !list = take pos list ++ new : drop (pos + 1) list
+
+-- replace' pos new list = take pos list ++ new : drop (pos + 1) list
 
 fst3 (v, _, _) = v
 snd3 (_, v, _) = v
@@ -124,3 +157,12 @@ unique = FD.toList . OSET.fromList
 
 printf :: TP.PrintfType r => String -> r
 printf = TP.printf
+
+dup :: a -> (a, a)
+dup a = (a, a)
+
+foldM' :: Monad m => (b -> a -> m b) -> b -> [a] -> m b
+foldM' _ z [] = return z
+foldM' f z (x:xs) = do
+    z' <- f z x
+    z' `seq` foldM' f z' xs

@@ -121,9 +121,8 @@ nodeProcMsg env node msg = do
     -- prepend new actions
     new_alist <- getA $ new_action node
     setA (new_action node) []
-    appA (new_alist ++) (action_list node)
     
-    current_alist <- getA $ action_list node
+    current_alist <- appA (new_alist ++) (action_list node)
 
     -- processed action result is appended to exec_res
     -- continue indicates whether the execution is to be continued
@@ -250,7 +249,7 @@ handshake env node = do
 -- timeout in seconds
 probe :: MainLoopEnv -> [AddrInfo] -> IO ()
 probe env addrs = do
-    res <- (flip mapM) addrs $ \addr -> (try $ do
+    forM_ addrs $ \addr -> (try $ do
         let sock_addr = addrAddress addr
 
         envMsg env ("probing " ++ show sock_addr)
@@ -267,5 +266,3 @@ probe env addrs = do
         -- return $ Just node
 
         return ()) :: IO (Either SomeException ())
-
-    return ()

@@ -307,7 +307,7 @@ envSpreadActionExcept blacklist env gen_action tasks = do
             assignment = zip target_nodes new_tasks
 
         -- assume length target_nodes == length new_tasks
-        forM assignment $ \(node, task) -> do
+        forM_ assignment $ \(node, task) -> do
             -- nodeMsg env node $ "prepending new action(s)"
 
             -- append new actions to each node

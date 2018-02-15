@@ -1,4 +1,4 @@
-{-# LANGUAGE DuplicateRecordFields, ConstraintKinds #-}
+{-# LANGUAGE DuplicateRecordFields, ConstraintKinds, DeriveGeneric, DeriveAnyClass #-}
 
 -- block chain implementation
 
@@ -9,16 +9,20 @@ import Data.Word
 import Data.Maybe
 import Data.List hiding (map)
 import qualified Data.Set as SET
+import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
 import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
+import Control.DeepSeq
 import Control.Monad.Loops
 import Control.Applicative
 import Control.Monad.Morph
 import Control.Monad.Trans.Resource
 
 import Control.Exception
+
+import GHC.Generics (Generic)
 
 import Debug.Trace
 
@@ -55,7 +59,7 @@ data Branch
         block_data :: Block,
         cur_height :: Height,
         acc_diff   :: Difficulty
-    } deriving (Show)
+    } deriving (Show, Generic, NFData)
 
 instance Eq Branch where
     (BlockNode { block_data = b1 }) == (BlockNode { block_data = b2 })
@@ -91,6 +95,12 @@ data Chain =
         -- the length of the buffer chain should >= tckr_max_tree_insert_depth
         edge_branches :: [Branch]
     }
+
+instance NFData Chain where
+    rnf (Chain {
+        buffer_chain = buffer_chain,
+        edge_branches = edge_branches
+    }) = rnf buffer_chain `seq` rnf edge_branches `seq` ()
 
 initChain :: TCKRConf -> ResIO Chain
 initChain conf@(TCKRConf {
@@ -139,7 +149,7 @@ initChain conf@(TCKRConf {
                 return $ chain {
                     edge_branches = [BlockNode {
                         prev_node = Nothing,
-                        block_data = genesis,
+                        block_data = blockHeader genesis,
 
                         acc_diff = targetBDiff (hash_target genesis),
                         cur_height = 0
@@ -153,16 +163,16 @@ initChain conf@(TCKRConf {
                 else 0
             
             range =
-                if height > 0 then [ height, height - 1 .. min_height ]
+                if height > 0 then [ min_height, min_height + 1 .. height ]
                 else [0]
 
         hashes <- maybeCat <$> mapM (get db_chain) range
-                :: IO [Hash256]
+               :: IO [Hash256]
 
         res    <- maybeCat <$> mapM (get db_block) hashes
-                :: IO [(Height, Block)]
+               :: IO [(Height, BlockHeader)] -- read headers only
         
-        let fold_proc (height, block) Nothing =
+        let fold_proc Nothing (height, BlockHeader block) =
                 Just $ BlockNode {
                     prev_node = Nothing,
                     block_data = block,
@@ -170,7 +180,7 @@ initChain conf@(TCKRConf {
                     cur_height = height
                 }
 
-            fold_proc (height, block) (Just node) =
+            fold_proc (Just node) (height, BlockHeader block) =
                 Just $ BlockNode {
                     prev_node = Just node,
                     block_data = block,
@@ -180,7 +190,7 @@ initChain conf@(TCKRConf {
 
         -- print height
 
-        return $ case foldr fold_proc Nothing res of
+        return $ case foldl' fold_proc Nothing res of
             Nothing -> error "corrupted database(height not correct)"
             Just branch ->
                 chain {
@@ -191,6 +201,12 @@ initChain conf@(TCKRConf {
 branchHeights :: Chain -> [Height]
 branchHeights (Chain { edge_branches = branches }) =
     map cur_height branches
+
+forceChain :: Chain -> Chain
+forceChain c = c {
+        buffer_chain = force $ buffer_chain c,
+        edge_branches = force $ edge_branches c
+    }
 
 -- load db from path
 -- set orphan pool to Nothing
@@ -278,7 +294,7 @@ insertToEdge chain@(Chain {
     prev_hash = prev_hash
 }) = do
     let search_res =
-            [ b | Just b <- map (`searchBranchHash` prev_hash) edge_branches ]
+            maybeCat $ map (`searchBranchHash` prev_hash) edge_branches
 
     -- trace "inserting!" $ return 0
 
@@ -295,24 +311,19 @@ insertToEdge chain@(Chain {
     let new_node =
             BlockNode {
                 prev_node = Just prev_bn,
-                block_data = block,
+                block_data = blockHeader block, -- only store the header
 
                 cur_height = cur_height prev_bn + 1,
                 acc_diff = acc_diff prev_bn + targetBDiff hash_target
             }
 
     -- previous block found, inserting to the tree
-    return $ (,) new_node $ case elemIndex prev_bn edge_branches of
-        Just leaf_idx ->
-            -- previous block is a leaf
-            chain {
-                edge_branches = replace leaf_idx new_node edge_branches
-            }
-
-        Nothing ->
-            chain {
-                edge_branches = new_node : edge_branches
-            }
+    let new_branches =
+            case elemIndex prev_bn edge_branches of
+                Just leaf_idx -> replace leaf_idx new_node edge_branches
+                Nothing -> new_node : edge_branches
+    
+    return (new_node, chain { edge_branches = new_branches })
 
 blocksAtHeight :: Chain -> Height -> IO [Block]
 blocksAtHeight chain height =
@@ -426,10 +437,8 @@ saveBranch (Chain {
         -- save height
         let (height, _) = last pairs
 
-        forM pairs $ \(height, (Block { block_hash = hash })) ->
+        forM_ pairs $ \(height, (Block { block_hash = hash })) ->
             set db_chain height hash
-
-        return ()
     else
         return ()
 
@@ -461,11 +470,17 @@ fixBranch chain@(Chain {
             -- remove loser branches and replace the buffer chain
             Just prev -> do
                 -- write old buffer_chain to db_chain
-                case buffer_chain of
-                    Nothing -> return ()
-                    Just bufc -> saveBranch chain bufc
+                saved_height <-
+                    case buffer_chain of
+                        Nothing ->
+                            return $ saved_height chain
+
+                        Just bufc -> do
+                            saveBranch chain bufc
+                            return $ cur_height bufc + 1
 
                 return $ chain {
+                    saved_height = saved_height,
                     buffer_chain = Just prev,
                     edge_branches = [winner {
                         prev_node = Nothing
@@ -516,9 +531,15 @@ latestBlocks maxn (Chain {
            (concatMap (takeBranch maxn) branches)
 
 addBlock :: Chain -> Block -> IO (Either TCKRError Chain)
-addBlock chain block =
-    -- trace ("adding block " ++ show block) $
-    ioToEitherIO (addBlockFail chain block)
+addBlock chain block = do
+    traceM $
+        "chain status: heights: " ++ show (branchHeights chain) ++
+        ", orphan pool: " ++ show (OSET.size (orphan_pool chain)) ++
+        ", buffer chain: " ++ show (length (maybe [] branchToBlockList (buffer_chain chain))) 
+
+    force <$> ioToEitherIO (addBlockFail chain block)
+    -- res <- ioToEitherIO (addBlockFail chain block)
+    -- return $ force res
 
 -- add blocks with a error handler
 addBlocks :: Chain -> [Block] -> (Block -> Either TCKRError Chain -> IO ()) -> IO Chain
@@ -529,7 +550,7 @@ addBlocks chain blocks proc =
                     Left _ -> return chain
                     Right chain -> return chain
 
-    in foldM fold_proc chain blocks
+    in foldM' fold_proc chain blocks
 
 -- throws a TCKRError when rejecting the block
 addBlockFail :: Chain -> Block -> IO Chain
@@ -542,12 +563,14 @@ addBlockFail chain@(Chain {
     hash_target = hash_target,
     timestamp = timestamp,
     merkle_root = merkle_root,
-    txns = txns
+    txns = txns'
 }) = do
     expectFalseIO "block already exists" $
         chain `hasBlockInChain` block
 
     -- don't check if the block is in orphan pool
+
+    let txns = FD.toList txns'
 
     expectTrue "empty tx list" $
         not (null txns)
@@ -672,7 +695,7 @@ merkleRoot' leaves = merkleRoot' $ merkleParents leaves
 merkleRoot :: Block -> Hash256
 merkleRoot (Block {
     txns = txns
-}) = head $ merkleRoot' (map (stdHash256 . encodeLE) txns)
+}) = head $ merkleRoot' (map (stdHash256 . encodeLE) (FD.toList txns))
 
 --------------------------------------------------------
 

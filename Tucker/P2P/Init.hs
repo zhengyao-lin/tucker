@@ -5,6 +5,7 @@ import qualified Data.Set as SET
 import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
+import Control.DeepSeq
 import Control.Concurrent
 import Control.Monad.Loops
 import Control.Monad.Morph
@@ -23,6 +24,8 @@ import Tucker.P2P.Action
 import Tucker.P2P.Server
 
 import Tucker.Chain.Object
+
+import System.Mem
 
 bootstrap :: MainLoopEnv -> [String] -> IO ()
 bootstrap env hostnames = do
@@ -58,7 +61,7 @@ pingLoop env =
         cur_list <- getA $ node_list env
         now <- unixTimestamp
 
-        forM cur_list $ \node -> do
+        forM_ cur_list $ \node -> do
             alive <- getA $ alive node
             last_seen <- getA $ last_seen node
 
@@ -75,6 +78,8 @@ gcLoop env@(MainLoopEnv {
     }
 }) =
     forever $ do
+        delay $ gc_interv env
+
         cur_list <- getA $ node_list env
 
         timestamp <- unixTimestamp
@@ -102,19 +107,30 @@ gcLoop env@(MainLoopEnv {
 
         setA (node_list env) new_list
 
+        -- res <- forM new_list $ \node -> do
+        --     action_list <- getA (action_list node)
+        --     new_action <- getA (new_action node)
+        --     return (length action_list, length new_action)
+
+        -- envMsg env $ "actions: " ++ show res
+
         envMsg env $ "gc: " ++
                      (show $ length cur_list - length new_list) ++
                      " dead node(s) collected"
         envMsg env $ "all nodes: " ++ (show new_list)
-
-        delay $ gc_interv env
 
 sync :: MainLoopEnv -> Int -> IO ()
 sync env n = do
     -- [[Hash256]]
     sync_inv <- newA []
 
-    let callback = sync env n
+    let callback = do    
+            -- delay $ 5000000
+            -- cb
+            forkIO $ sync env n
+
+            return ()
+            
         action = NormalAction (syncChain n sync_inv callback)
 
     envSpreadSimpleAction env action n
@@ -132,11 +148,70 @@ mainLoop conf = runResourceT $ do
     lift $ bootstrap env (tckr_bootstrap_host conf)
     -- setA (node_list env) init_nodes
 
-    -- bootstrap finished, start sync with 3 nodes
-    resourceForkIO $ lift $ sync env 1
-
     -- keep the resource, never exit
-    resourceForkIO $ lift $ gcLoop env
+    gc_tid <- resourceForkIO $ lift $ gcLoop env
+
+    -- bootstrap finished, start sync with 3 nodes
+    lift $ forkIO $ sync env 1 -- $ do
+        -- chain <- getA (block_chain env)
+
+        -- let b1 = head $ map branchToBlockList (edge_branches chain)
+        --     b2 = branchToBlockList (maybe undefined id $ buffer_chain chain)
+
+        -- envMsg env $ show (head b1) ++ ", " ++ show (last b1)
+        -- envMsg env $ show (head b2) ++ ", " ++ show (last b2)
+
+        -- appA (\c -> c {
+        --     buffer_chain = force $ buffer_chain c,
+        --     edge_branches = force $ edge_branches c
+        -- }) (block_chain env)
+
+        -- chain <- getA (block_chain env)
+
+        -- envMsg env $ show $ buffer_chain chain
+        -- envMsg env $ show $ edge_branches chain
+
+        -- nodes <- getA (node_list env)
+        -- forM_ (init nodes) $ \node -> do
+        --     -- appA ((:[]) . last) (action_list node)
+        --     alist <- getA (action_list node)
+
+        --     if length alist >= 2 then
+        --         killThread (thread_id node)
+        --     else
+        --         return ()
+
+        --     killThread (thread_id node)
+                
+        -- delay $ 15 * 1000 * 1000
+
+        -- killThread gc_tid
+
+        -- who cleared the memory?
+        -- 1. some thread still holds the handler which contains the closure that contains the downloaded block
+        -- 2. levedb is the devil, whose resource handler is in gc_tid, and if gc is killed, memory is freed
+
+        -- tests
+        -- 1. full(strict chain, kill node threads, run gc, kill gc)  -- free'd
+        -- 2. strict chain, kill gc                                   -- not free'd
+        -- 3. strict chain, kill node threads, run gc                 -- free'd
+        -- 4. kill node threads, run gc                               -- free'd
+        -- 5. kill nodes with 2+ actions, run gc                      -- not free'd
+        -- 6. leave only the last node alive                          -- not free'd
+        -- 7. kill nodes with 2+ actions, delete chain, run gc        -- free'd
+        -- 8. delete chain                                            -- free'd
+        -- 9. delete databases only                                   -- not free'd ?
+        -- 10. delete several other things                            -- free'd
+        -- 11. delete buffer chain and edge branches only             -- free'd
+
+        -- envMsg env "finished"
+
+        -- delay $ 5 * 1000 * 1000
+
+        -- envMsg env "performing gc"
+        -- performGC
+        -- envMsg env "gc finished"
+
     -- forkIO $ blockCollectLoop env
     -- forkIO $ ioLoop env
 

@@ -29,4 +29,5 @@ upload.log
 
 *.block.d/
 tucker-testdb/
+profiling/
 

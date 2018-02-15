@@ -8,6 +8,8 @@ import Data.LargeWord
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
+import Control.DeepSeq
+
 import Debug.Trace
 
 import Tucker.Enc
@@ -16,6 +18,9 @@ import Tucker.Util
 
 -- stored in little endian
 data Hash256 = Hash256 Word256 deriving (Eq)
+
+instance NFData Hash256 where
+    rnf (Hash256 hash) = seq hash ()
 
 instance Ord Hash256 where
     compare (Hash256 n1) (Hash256 n2) = compare n1 n2

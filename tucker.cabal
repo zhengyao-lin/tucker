@@ -50,7 +50,7 @@ executable tucker
   -- .hs or .lhs file containing the Main module.
   main-is:             Main.hs
 
-  ghc-options:         -g -threaded -rtsopts
+  ghc-options:         -g -threaded -rtsopts -O2
 
   -- Modules included in this executable, other than Main.
   -- other-modules:       
@@ -59,7 +59,7 @@ executable tucker
   other-extensions:    FlexibleInstances, DuplicateRecordFields, TypeSynonymInstances, ConstraintKinds
   
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.9 && <4.10, largeword >=1.2 && <1.3, bytestring >=0.10 && <0.11, stm >=2.4 && <2.5, strict-io >=0.2 && <0.3, time >=1.6 && <1.7, monad-loops >=0.4 && <0.5, network >=2.6 && <2.7, leveldb-haskell >=0.6 && <0.7, filepath >=1.4 && <1.5, directory >=1.3 && <1.4, mmorph >=1.1 && <1.2, resourcet >=1.1 && <1.2, hex >=0.1 && <0.2, random >=1.1 && <1.2, HUnit >=1.6 && <1.7, unbounded-delays >=0.1 && <0.2, cryptonite >=0.24 && <0.25, memory >=0.14 && <0.15, asn1-encoding >=0.9 && <0.10, asn1-types >=0.3 && <0.4, containers >=0.5 && <0.6, ordered-containers >=0.1 && <0.2, concurrent-extra >=0.7 && <0.8, regex-posix >=0.95 && <0.96
+  build-depends:       base >=4.9 && <4.10, largeword >=1.2 && <1.3, bytestring >=0.10 && <0.11, stm >=2.4 && <2.5, strict-io >=0.2 && <0.3, time >=1.6 && <1.7, monad-loops >=0.4 && <0.5, network >=2.6 && <2.7, leveldb-haskell >=0.6 && <0.7, filepath >=1.4 && <1.5, directory >=1.3 && <1.4, mmorph >=1.1 && <1.2, resourcet >=1.1 && <1.2, hex >=0.1 && <0.2, random >=1.1 && <1.2, HUnit >=1.6 && <1.7, unbounded-delays >=0.1 && <0.2, cryptonite >=0.24 && <0.25, memory >=0.14 && <0.15, asn1-encoding >=0.9 && <0.10, asn1-types >=0.3 && <0.4, containers >=0.5 && <0.6, ordered-containers >=0.1 && <0.2, concurrent-extra >=0.7 && <0.8, regex-posix >=0.95 && <0.96, deepseq >= 1.4.3.0
   
   -- Directories containing source files.
   -- hs-source-dirs:      src
