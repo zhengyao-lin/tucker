@@ -1,4 +1,4 @@
-{-# LANGUAGE DuplicateRecordFields, ConstraintKinds, DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE DuplicateRecordFields, ConstraintKinds #-}
 
 -- block chain implementation
 
@@ -14,15 +14,12 @@ import qualified Data.ByteString as BSR
 import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
-import Control.DeepSeq
 import Control.Monad.Loops
 import Control.Applicative
 import Control.Monad.Morph
 import Control.Monad.Trans.Resource
 
 import Control.Exception
-
-import GHC.Generics (Generic)
 
 import Debug.Trace
 
@@ -33,6 +30,7 @@ import Tucker.Util
 import Tucker.Auth
 import Tucker.Conf
 import Tucker.Error
+import Tucker.DeepSeq
 
 -- data BlockTree = BlockTree [[Block]] deriving (Eq, Show)
 -- data Block
@@ -59,7 +57,14 @@ data Branch
         block_data :: Block, -- NOTE: block_data only contains a block header
         cur_height :: Height,
         acc_diff   :: Difficulty
-    } deriving (Show, Generic, NFData)
+    } deriving (Show)
+
+instance NFData Branch where
+    rnf (BlockNode prev_node block_data cur_height acc_diff) =
+        rnf prev_node `seq`
+        rnf block_data `seq`
+        rnf cur_height `seq`
+        rnf acc_diff
 
 instance Eq Branch where
     (BlockNode { block_data = b1 }) == (BlockNode { block_data = b2 })
@@ -98,7 +103,8 @@ instance NFData Chain where
     rnf (Chain {
         buffer_chain = buffer_chain,
         edge_branches = edge_branches
-    }) = rnf buffer_chain `seq` rnf edge_branches `seq` ()
+    }) =
+        rnf buffer_chain `seq` rnf edge_branches
 
 initChain :: TCKRConf -> ResIO Chain
 initChain conf@(TCKRConf {
@@ -531,25 +537,37 @@ latestBlocks maxn (Chain {
 
 addBlock :: Chain -> Block -> IO (Either TCKRError Chain)
 addBlock chain block = do
-    traceM $
-        "chain status: heights: " ++ show (branchHeights chain) ++
-        ", orphan pool: " ++ show (OSET.size (orphan_pool chain)) ++
-        ", buffer chain: " ++ show (length (maybe [] branchToBlockList (buffer_chain chain))) 
+    -- traceM $
+    --    "chain status: heights: " ++ show (branchHeights chain) ++
+    --    ", orphan pool: " ++ show (OSET.size (orphan_pool chain)) ++
+    --    ", buffer chain: " ++ show (length (maybe [] branchToBlockList (buffer_chain chain))) 
 
     force <$> ioToEitherIO (addBlockFail chain block)
     -- res <- ioToEitherIO (addBlockFail chain block)
     -- return $ force res
 
 -- add blocks with a error handler
-addBlocks :: Chain -> [Block] -> (Block -> Either TCKRError Chain -> IO ()) -> IO Chain
-addBlocks chain blocks proc =
-    let fold_proc chain block =
-            addBlock chain block >>= \r ->
-                proc block r >> case r of
-                    Left _ -> return chain
-                    Right chain -> return chain
+-- addBlocks :: Chain -> [Block] -> (Block -> Either TCKRError Chain -> IO ()) -> IO Chain
+-- addBlocks chain blocks proc =
+--     let fold_proc chain block =
+--             addBlock chain block >>= \r ->
+--                 proc block r >> case r of
+--                     Left _ -> return chain
+--                     Right chain -> return chain
 
-    in foldM' fold_proc chain blocks
+--     in foldM' fold_proc chain blocks
+
+addBlocks :: (Block -> Either TCKRError Chain -> IO ()) -> Chain -> [Block] -> IO Chain
+addBlocks proc chain [] = return chain
+addBlocks proc chain (block:blocks) = do
+    res <- addBlock chain block
+    res `seq` proc block res
+
+    let new_chain = case res of
+            Left _ -> chain
+            Right chain -> chain
+    
+    new_chain `seq` addBlocks proc new_chain blocks
 
 -- throws a TCKRError when rejecting the block
 addBlockFail :: Chain -> Block -> IO Chain

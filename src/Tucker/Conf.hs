@@ -78,7 +78,9 @@ data TCKRConf =
         tckr_block_fetch_timeout :: Int, -- in sec
         tckr_node_max_blacklist_count :: Int,
 
-        tckr_max_block_batch :: Int
+        tckr_max_block_batch :: Int,
+
+        tckr_sync_inv_timeout :: Int -- in sec
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -130,7 +132,7 @@ tucker_default_conf_mainnet = do
                 ip4 (0, 0, 0, 0)
             ],
     
-        tckr_gc_interval = 10 * 1000 * 1000, -- 30 sec
+        tckr_gc_interval = 20 * 1000 * 1000, -- 20 sec
         
         tckr_max_block_task = 20,
 
@@ -159,7 +161,9 @@ tucker_default_conf_mainnet = do
 
         tckr_block_fetch_timeout = 5,
 
-        tckr_node_max_blacklist_count = 5
+        tckr_node_max_blacklist_count = 5,
+
+        tckr_sync_inv_timeout = 3
 
         -- the collector will wait until the top chunk
         -- has (tckr_max_block_per_chunk + tckr_max_tree_insert_depth)

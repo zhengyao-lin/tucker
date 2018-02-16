@@ -155,9 +155,7 @@ envMsg env msg = do
     -- force eval
     let msg' = BS.pack ("env: " ++ msg)
 
-    LK.acquire (io_lock env)
-    BS.putStrLn msg'
-    LK.release (io_lock env)
+    LK.with (io_lock env) $ BS.putStrLn msg'
 
     -- appA (++ [ "env: " ++ msg ]) (io_buf env)
     -- putStrLn' $ "env: " ++ msg
@@ -329,22 +327,21 @@ envAddBlock :: MainLoopEnv -> Node -> Block -> IO ()
 envAddBlock env node block =
     envAddBlocks env node [block]
 
+-- removing explicit reference to the block list
+-- NOTE: may help reduce space leaks?
 envAddBlocks :: MainLoopEnv -> Node -> [Block] -> IO ()
-envAddBlocks env node blocks = do
-    LK.acquire (chain_lock env)
+envAddBlocks env node =
+    (>>= after) .
+    (before >>=) .
+    (flip (addBlocks proc))
 
-    chain <- getA (block_chain env)
-
-    new_chain <- addBlocks chain blocks $ \block res ->
-        case res of
-            Left err ->
-                nodeMsg env node $ "error when adding block " ++ show block ++ ": " ++ show err
-            
-            Right _ ->
-                nodeMsg env node $ "block added: " ++ show block
-
-    nodeMsg env node "blocks added"
-
-    setA (block_chain env) new_chain
-
-    LK.release (chain_lock env)
+    where
+        before = LK.acquire (chain_lock env) >> getA (block_chain env)
+        after chain = setA (block_chain env) chain >> LK.release (chain_lock env)
+        proc block res =
+            case res of
+                Left err ->
+                    nodeMsg env node $ "error when adding block " ++ show block ++ ": " ++ show err
+                
+                Right _ ->
+                    nodeMsg env node $ "block added: " ++ show block

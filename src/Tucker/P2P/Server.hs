@@ -174,7 +174,7 @@ nodeExec env unready_node = do
     -- officially inserting the node
     envAppendNode env node
 
-    -- enter event loop
+    -- enter receiving loop
     whileM_ (pure True) $
         nodeRecvOneMsgNonBlocking env node >>=
         nodeProcMsg env node

@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Tucker.Msg.Tx where
 
@@ -9,10 +9,6 @@ import Data.Word
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
-import Control.DeepSeq
-
-import GHC.Generics (Generic)
-
 import Debug.Trace
 
 import Tucker.Enc
@@ -20,11 +16,16 @@ import Tucker.Conf
 import Tucker.Auth
 import Tucker.Util
 import Tucker.Error
+import Tucker.DeepSeq
+
 import Tucker.Msg.Script
 import Tucker.Msg.Common
 import Tucker.Msg.Hash256
 
-data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show, Read, Generic, NFData)
+data OutPoint = OutPoint Hash256 Word32 deriving (Eq, Show, Read)
+
+instance NFData OutPoint where
+    rnf (OutPoint h w) = rnf (h, w)
 
 type Value = Int64
 
@@ -33,16 +34,24 @@ data TxInput =
         prev_out        :: OutPoint,
         sig_script      :: RawScript,
         seqn            :: Int32 -- sequence, currently not used
-    } deriving (Eq, Show, Read, Generic, NFData)
+    } deriving (Eq, Show, Read)
+
+instance NFData TxInput where
+    rnf (TxInput a b c) = rnf (a, b, c)
 
 data TxOutput =
     TxOutput {
         value           :: Value, -- in Satoshis, 10^-8 BTC
         pk_script       :: RawScript
-    } deriving (Eq, Show, Read, Generic, NFData)
+    } deriving (Eq, Show)
 
-data TxWitness = TxWitness deriving (Eq, Show, Read, Generic, NFData)
-    
+instance NFData TxOutput where
+    rnf (TxOutput a b) = rnf (a, b)
+
+data TxWitness = TxWitness deriving (Eq, Show, Read)
+
+instance NFData TxWitness
+
 data TxPayload =
     TxPayload {
         version     :: Int32,
@@ -56,7 +65,16 @@ data TxPayload =
                               -- if lock_time < 500,000,000, treat it as a block height
                               -- if lock_time >= 500,000,000, treat it as an unix timestamp
         -- tx_cache    :: Maybe ByteString
-    } deriving (Eq, Show, Read, Generic, NFData)
+    } deriving (Eq, Show)
+
+instance NFData TxPayload where
+    rnf (TxPayload version flag tx_in tx_out tx_witness lock_time) =
+        rnf version `seq`
+        rnf flag `seq`
+        rnf tx_in `seq`
+        rnf tx_out `seq`
+        rnf tx_witness `seq`
+        rnf lock_time
 
 data Wallet =
     Wallet {

@@ -118,12 +118,7 @@ blockChainTest = TestCase $ do
 
     -- putStrLn ""
     withChain conf $ \chain -> do
-        chain <- addBlocks chain blocks $ \b r ->
-            case r of
-                Left err ->
-                    putStrLn $ "failed to add block: " ++ show b ++ show err
-                Right _ ->
-                    putStrLn $ "block added: " ++ show b
+        chain <- addBlocks add_block_common_proc chain blocks
 
         -- assertEqual "wrong resulting chain"
         --     (zip [1..] blocks)
@@ -133,6 +128,13 @@ blockChainTest = TestCase $ do
         -- putStrLn $ show $ branchToBlockList <$> buffer_chain chain
 
         return ()
+
+add_block_common_proc b r =
+    case r of
+        Left err ->
+            putStrLn $ "failed to add block: " ++ show b ++ show err
+        Right _ ->
+            putStrLn $ "block added: " ++ show b
 
 blockTest = TestList [
         TestLabel "block chain basic" blockChainTest
@@ -188,10 +190,7 @@ tmp = do
             traceM "decode finished"
 
             withChain conf $ \chain -> do
-                addBlocks chain blocks $ \block res ->
-                    case res of
-                        Left err -> traceM (show err)
-                        Right _ -> traceM $ show block ++ " added"
+                addBlocks add_block_common_proc chain blocks
 
             putStrLn "finished!!!"
 

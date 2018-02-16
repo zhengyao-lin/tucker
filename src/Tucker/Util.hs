@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns, DeriveGeneric, DeriveAnyClass #-}
-
 module Tucker.Util where
 
 import qualified Text.Printf as TP
@@ -11,18 +9,16 @@ import qualified Data.Set.Ordered as OSET
 import System.CPUTime
 
 import Control.Monad
-import Control.DeepSeq
 import Control.Exception
 import Control.Monad.Loops
 
-import GHC.Generics (Generic)
-
 import Tucker.Error
+import Tucker.DeepSeq
 
 class Default a where
     def :: a
 
-data PartialList a = PartialList Int | FullList [a] deriving (Show, Generic, NFData)
+data PartialList a = PartialList Int | FullList [a] deriving (Show)
 
 isPartial :: PartialList a -> Bool
 isPartial (PartialList _) = True
@@ -36,6 +32,10 @@ toPartial (FullList list) = PartialList (length list)
 toPartial a = a
 
 partial_access = throw $ TCKRError "access to partial list"
+
+instance NFData a => NFData (PartialList a) where
+    rnf (FullList list) = rnf list
+    rnf (PartialList len) = rnf len
 
 instance FD.Foldable PartialList where
     foldMap f (FullList list) = foldMap f list
@@ -56,7 +56,7 @@ instance FD.Foldable PartialList where
 unixTimestamp :: Integral a => IO a
 unixTimestamp = round `fmap` getPOSIXTime
 
-replace !pos !new !list = take pos list ++ new : drop (pos + 1) list
+replace pos new list = take pos list ++ new : drop (pos + 1) list
 
 -- replace' pos new list = take pos list ++ new : drop (pos + 1) list
 

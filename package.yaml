@@ -45,7 +45,6 @@ dependencies:
 - ordered-containers
 - concurrent-extra
 - regex-posix
-- deepseq
 
 library:
   source-dirs: src

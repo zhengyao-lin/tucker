@@ -1,18 +1,18 @@
-{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
-
 module Tucker.Error where
 
-import Control.DeepSeq
 import Control.Exception
 
-import GHC.Generics (Generic)
+import Tucker.DeepSeq
 
-newtype TCKRError = TCKRError String deriving (Eq, Generic, NFData)
+newtype TCKRError = TCKRError String deriving (Eq)
 
 instance Show TCKRError where
     show (TCKRError err) = "tucker error: " ++ err
 
 instance Exception TCKRError
+
+instance NFData TCKRError where
+    rnf (TCKRError err) = rnf err
 
 wrapError :: TCKRError -> String -> TCKRError
 wrapError (TCKRError err) prep =

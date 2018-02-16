@@ -1,4 +1,4 @@
-{-# LANGUAGE DuplicateRecordFields, DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module Tucker.Msg.Block where
 
@@ -7,16 +7,14 @@ import Data.Word
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
 
-import Control.DeepSeq
-
-import GHC.Generics (Generic)
-
 import Debug.Trace
 
 import Tucker.Enc
 import Tucker.Auth
 import Tucker.Conf
 import Tucker.Util
+import Tucker.DeepSeq
+
 import Tucker.Msg.Tx
 import Tucker.Msg.Inv
 import Tucker.Msg.Common
@@ -42,7 +40,29 @@ data Block =
         txns        :: PartialList TxPayload,
 
         enc_cache   :: Maybe ByteString
-    } deriving (Generic, NFData)
+    }
+
+instance NFData Block where
+    rnf (Block {
+        block_hash = block_hash,
+        vers = vers,
+        prev_hash = prev_hash,
+        merkle_root = merkle_root,
+        timestamp = timestamp,
+        hash_target = hash_target,
+        nonce = nonce,
+        txns = txns,
+        enc_cache = enc_cache
+    }) =
+        rnf block_hash `seq`
+        rnf vers `seq`
+        rnf prev_hash `seq`
+        rnf merkle_root `seq`
+        rnf timestamp `seq`
+        rnf hash_target `seq`
+        rnf nonce `seq`
+        rnf txns `seq`
+        rnf enc_cache
 
 instance Eq Block where
     (Block { block_hash = h1 }) == (Block { block_hash = h2 })

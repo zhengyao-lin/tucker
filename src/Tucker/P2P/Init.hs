@@ -5,7 +5,6 @@ import qualified Data.Set as SET
 import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
-import Control.DeepSeq
 import Control.Concurrent
 import Control.Monad.Loops
 import Control.Monad.Morph
@@ -119,21 +118,6 @@ gcLoop env@(MainLoopEnv {
                      " dead node(s) collected"
         envMsg env $ "all nodes: " ++ (show new_list)
 
-sync :: MainLoopEnv -> Int -> IO ()
-sync env n = do
-    -- [[Hash256]]
-    sync_inv <- newA []
-
-    let callback = do
-            forkIO $ sync env n
-            return ()
-            
-        action = NormalAction (syncChain n sync_inv callback)
-
-    envSpreadSimpleAction env action n
-
-    return ()
-
 -- syncOne env n = do
 --     envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n
 --     return ()
@@ -149,7 +133,7 @@ mainLoop conf = runResourceT $ do
     gc_tid <- resourceForkIO $ lift $ gcLoop env
 
     -- bootstrap finished, start sync with 3 nodes
-    lift $ forkIO $ sync env 1
+    lift $ forkIO $ sync env 3
 
     -- forkIO $ blockCollectLoop env
     -- forkIO $ ioLoop env
