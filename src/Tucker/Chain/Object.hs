@@ -259,6 +259,14 @@ else
 
 9. try to connect orphan blocks to this new block if not rejected(from step 1)
 
+what do we need to check for each transaction:
+
+1. input exists(the input points to a valid block and a valid index)
+2. if referenced transaction is a coinbase, make sure the depth of the input block is >= 100
+3. verify signature(involves script)
+4. referenced output is not spent
+5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
+
 -}
 
 -- search edge branches, if found, insert to the branch
@@ -715,7 +723,7 @@ merkleRoot' leaves = merkleRoot' $ merkleParents leaves
 merkleRoot :: Block -> Hash256
 merkleRoot (Block {
     txns = txns
-}) = head $ merkleRoot' (map (stdHash256 . encodeLE) (FD.toList txns))
+}) = head $ merkleRoot' (map txid (FD.toList txns))
 
 --------------------------------------------------------
 

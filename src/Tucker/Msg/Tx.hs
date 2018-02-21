@@ -48,14 +48,20 @@ data TxOutput =
 instance NFData TxOutput where
     rnf (TxOutput a b) = rnf (a, b)
 
-data TxWitness = TxWitness deriving (Eq, Show, Read)
+-- TxWitness is a list of stack items in general
+data TxWitness =
+    TxWitness [ByteString] deriving (Eq, Show)
 
-instance NFData TxWitness
+instance NFData TxWitness where
+    rnf (TxWitness items) = rnf items
 
 data TxPayload =
     TxPayload {
+        txid        :: Hash256,
+        wtxid       :: Hash256,
+
         version     :: Int32,
-        flag        :: Int16, -- currently only 1 or 0
+        flag        :: Word8, -- currently only 1 or 0
         
         tx_in       :: [TxInput],
         tx_out      :: [TxOutput],
@@ -68,7 +74,9 @@ data TxPayload =
     } deriving (Eq, Show)
 
 instance NFData TxPayload where
-    rnf (TxPayload version flag tx_in tx_out tx_witness lock_time) =
+    rnf (TxPayload txid wtxid version flag tx_in tx_out tx_witness lock_time) =
+        rnf txid `seq`
+        rnf wtxid `seq`
         rnf version `seq`
         rnf flag `seq`
         rnf tx_in `seq`
@@ -151,10 +159,13 @@ instance Decodable TxOutput where
         }
 
 instance Encodable TxWitness where
-    encode _ _ = BSR.empty
+    encode end (TxWitness items) =
+        encodeVList end $ map VBStr items
 
 instance Decodable TxWitness where
-    decoder = return TxWitness
+    decoder =
+        vlistD decoder >>=
+        return . TxWitness . map vstrToBS
 
 instance MsgPayload TxPayload
 
@@ -176,12 +187,15 @@ instance Encodable TxPayload where
         mconcat [
             e version,
             
-            if flag == 0 then BSR.empty else e flag,
+            if flag == 0 then BSR.empty else
+                e (0x00 :: Word8) <>
+                e flag,
 
             encodeVList end tx_in,
             encodeVList end tx_out,
-            
-            e tx_witness,
+
+            if flag == 0 then BSR.empty else
+                encodeVList end tx_witness,
             
             e lock_time
         ]
@@ -196,7 +210,11 @@ instance Decodable TxPayload where
 
         version <- decoder
 
-        -- TODO: ignoring flags here
+        mark <- peekByteD
+
+        flag <-
+            if mark == 0 then byteD
+            else return 0
 
         -- traceM "decoding tx"
         tx_in <- vlistD decoder
@@ -204,17 +222,24 @@ instance Decodable TxPayload where
         tx_out <- vlistD decoder
         -- traceM "output finished"
 
+        tx_witness <-
+            if flag /= 0 then vlistD decoder
+            else return []
+
         lock_time <- decoder
 
         final_len <- lenD
 
-        return $ TxPayload {
+        return $ updateIds $ TxPayload {
+            txid = nullHash256,
+            wtxid = nullHash256,
+
             version = version,
-            flag = 0,
+            flag = flag,
 
             tx_in = tx_in,
             tx_out = tx_out,
-            tx_witness = [],
+            tx_witness = tx_witness,
 
             lock_time = lock_time
 
@@ -230,6 +255,32 @@ isCoinbase (TxPayload {
 }) = True
 
 isCoinbase _ = False
+
+getTxId :: TxPayload -> Hash256
+getTxId (TxPayload {
+    version = version,
+    tx_in = tx_in,
+    tx_out = tx_out,
+    lock_time = lock_time
+}) =
+    stdHash256 $ mconcat [
+        encodeLE version,
+        encodeVList LittleEndian tx_in,
+        encodeVList LittleEndian tx_out,
+        encodeLE lock_time
+    ]
+
+getWtxId :: TxPayload -> Hash256
+getWtxId tx =
+    stdHash256 $ encodeLE tx
+
+-- update txid and wtxid
+updateIds :: TxPayload -> TxPayload
+updateIds tx =
+    tx {
+        txid = getTxId tx,
+        wtxid = getWtxId tx
+    }
 
 -- update on Jan 14, 2018
 -- there are(maybe) 5 standard transactions
@@ -336,7 +387,10 @@ stdTx conf pair input output = do
         }) output
 
     let
-        wrap in_lst out_lst = TxPayload {
+        wrap in_lst out_lst = updateIds $ TxPayload {
+            txid = nullHash256,
+            wtxid = nullHash256,
+
             version = 1,
             flag = 0,
 

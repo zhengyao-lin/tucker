@@ -15,6 +15,7 @@ import qualified Data.ByteString as BSR
 
 import Control.Monad
 import Control.Exception
+import Control.Applicative
 
 import Tucker.Util
 import Tucker.Error
@@ -173,7 +174,7 @@ instance Functor Decoder where
 instance Applicative Decoder where
     pure res = Decoder $ \end rest -> (Right res, rest)
 
-    (Decoder d1) <*> (Decoder d2) =
+    Decoder d1 <*> Decoder d2 =
         Decoder $ \end bs ->
             case d1 end bs of
                 (Right f, rest) ->
@@ -181,16 +182,26 @@ instance Applicative Decoder where
                         (Right r, rest) -> (Right (f r), rest)
                         (Left err, rest) -> (Left err, rest)
 
+                (Left err, rest) -> (Left err, rest)
+
 instance Monad Decoder where
     return = pure
 
     fail err = Decoder $ \end bs -> (Left $ TCKRError err, bs)
 
-    (Decoder d) >>= f =
+    Decoder d >>= f =
         Decoder $ \end bs ->
             case d end bs of
                 (Right r, rest) -> doDecode (f r) end rest
                 (Left err, rest) -> (Left err, rest)
+
+instance Alternative Decoder where
+    empty = fail "empty decoder"
+    Decoder d1 <|> Decoder d2 =
+        Decoder $ \end bs ->
+            case d1 end bs of
+                r@(Right _, rest) -> r
+                _ -> d2 end bs
 
 class Decodable t where
     decoder :: Decoder t
@@ -240,6 +251,17 @@ byteD =
         else
             (Left $ TCKRError "need 1 byte", bs)
 
+beginWithByteD :: Word8 -> Decoder ()
+beginWithByteD byte =
+    Decoder $ \_ bs ->
+        if BSR.length bs >= 1 then
+            if BSR.head bs == byte then
+                (Right (), BSR.tail bs)
+            else
+                (Left $ TCKRError "first byte not match", bs)
+        else
+            (Left $ TCKRError "need 1 byte", bs)
+
 bsD :: Int -> Decoder ByteString
 bsD len =
     Decoder $ \_ bs ->
@@ -247,6 +269,14 @@ bsD len =
             (Right $ BSR.take len bs, BSR.drop len bs)
         else
             (Left $ TCKRError ("need " ++ (show len) ++ " byte(s)"), bs)
+
+peekByteD :: Decoder Word8
+peekByteD =
+    Decoder $ \_ bs ->
+        if BSR.length bs >= 1 then
+            (Right $ BSR.head bs, bs)
+        else
+            (Left $ TCKRError "peek need 1 byte", bs)
 
 listD :: Int -> Decoder t -> Decoder [t]
 listD = replicateM
@@ -315,3 +345,7 @@ instance Decodable Word256 where
 
 instance (Decodable t1, Decodable t2) => Decodable (t1, t2) where
     decoder = (,) <$> decoder <*> decoder
+
+-- decode as many t as possible
+instance Decodable t => Decodable [t] where
+    decoder = many decoder

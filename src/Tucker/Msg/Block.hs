@@ -205,7 +205,7 @@ hashBlock (Block {
     nonce = nonce
 }) =
     -- sha256^2(vers + prev_hash + merkle_root + time + diff + nonce)
-    bsToHash256 . ba2bs . sha256 . sha256 $ mconcat [
+    stdHash256 $ mconcat [
         encodeLE vers,
         encodeLE prev_hash,
         encodeLE merkle_root,

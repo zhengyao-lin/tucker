@@ -7,6 +7,7 @@ module Tucker.Msg (
     module Tucker.Msg.Block,
     module Tucker.Msg.Other,
     module Tucker.Msg.Common,
+    module Tucker.Msg.Script,
     module Tucker.Msg.Hash256,
     module Tucker.Msg.Version
 ) where
@@ -17,5 +18,6 @@ import Tucker.Msg.Addr
 import Tucker.Msg.Block
 import Tucker.Msg.Other
 import Tucker.Msg.Common
+import Tucker.Msg.Script
 import Tucker.Msg.Hash256
 import Tucker.Msg.Version

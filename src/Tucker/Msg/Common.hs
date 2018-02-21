@@ -47,6 +47,10 @@ class (Encodable p, Decodable p) => MsgPayload p where
 newtype VInt = VInt Integer deriving (Show, Eq)
 data VStr = VStr String | VBStr ByteString deriving (Show, Eq)
 
+vstrToBS :: VStr -> ByteString
+vstrToBS (VStr str) = BS.pack str
+vstrToBS (VBStr bs) = bs
+
 type RawScript = ByteString
 
 data NetAddr =

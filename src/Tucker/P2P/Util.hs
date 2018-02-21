@@ -62,6 +62,8 @@ seedLookup conf host =
         addrSocketType = Stream
     }) (Just host) (Just $ show $ tckr_listen_port conf)
 
+    `catch` \e -> (e :: SomeException) `seq` return []
+
 -- try to trim a message from the received data
 -- if a complete message is found, return (Right MsgHead {}, rest of data)
 -- if the message is incomplete, return (Right LackData, original data)

@@ -169,8 +169,29 @@ hash256Test = TestCase $ do
     assertEqual "wrong decode result 5" h5 (unpackHash256 0x0300aabb)
     assertEqual "wrong decode result 6" h6 (unpackHash256 0x0200aabb)
 
+scriptTest = TestCase $ do
+    let sc1 = [ OP_NOP ]
+        sc2 = [ OP_IF True [] [] ]
+        sc3 = [
+                OP_IF True [
+                    OP_IF True [
+                        OP_IF True [
+                            OP_NOP
+                        ] sc2
+                    ] sc2
+                ] sc2
+            ]
+
+        sc4 = [ OP_PUSHDATA $ BSR.pack [ 0x00 ] ]
+
+    assertEqual "wrong decode result 1" sc1 (decodeFailLE (encodeLE sc1))
+    assertEqual "wrong encode result 2" (BSR.pack [ 0x63, 0x68 ]) (encodeLE sc2)
+    assertEqual "wrong decode result 3" sc3 (decodeFailLE (encodeLE sc3))
+    assertEqual "wrong encode result 4" (BSR.pack [ 0x01, 0x00 ]) (encodeLE sc4)
+
 msgTest = TestList [
-        TestLabel "hash256 basic" hash256Test
+        TestLabel "hash256 basic" hash256Test,
+        TestLabel "script test" scriptTest
     ]
 
 allTest = TestList [
