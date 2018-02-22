@@ -46,6 +46,8 @@ dependencies:
 - concurrent-extra
 - regex-posix
 - mtl
+- split
+- arithmoi
 
 library:
   source-dirs: src

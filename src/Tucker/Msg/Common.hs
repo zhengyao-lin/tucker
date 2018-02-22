@@ -53,6 +53,23 @@ vstrToBS (VBStr bs) = bs
 
 type RawScript = ByteString
 
+data HashType =
+    SIGHASH_ALL | SIGHASH_NONE | SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+
+hashTypeToInt :: Integral t => HashType -> t
+hashTypeToInt SIGHASH_ALL          = 0x01
+hashTypeToInt SIGHASH_NONE         = 0x02
+hashTypeToInt SIGHASH_SINGLE       = 0x03
+hashTypeToInt SIGHASH_ANYONECANPAY = 0x80
+
+intToHashType :: Integral t => t -> HashType
+intToHashType i =
+    case fi i :: Int of
+        0x01 -> SIGHASH_ALL
+        0x02 -> SIGHASH_NONE
+        0x03 -> SIGHASH_SINGLE
+        0x80 -> SIGHASH_ANYONECANPAY
+
 data NetAddr =
     NetAddr {
         time         :: Word32,

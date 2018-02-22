@@ -2,9 +2,12 @@ module Tucker.Util where
 
 import qualified Text.Printf as TP
 
+import Data.Bits
 import Data.Time.Clock.POSIX
 import qualified Data.Foldable as FD
 import qualified Data.Set.Ordered as OSET
+
+import Math.NumberTheory.Moduli
 
 import System.CPUTime
 
@@ -171,3 +174,33 @@ foldM' _ z [] = return z
 foldM' f z (x:xs) = do
     z' <- f z x
     z' `seq` foldM' f z' xs
+
+isqrt' :: Integral t => t -> t -> t -> Maybe t
+isqrt' num u l =
+    -- assert l <= (sqrt num) < u
+    let mid = (u - l) `div` 2 + l
+        sq = mid ^ 2 in
+
+    if mid == l then
+        if sq == num then Just mid
+        else Nothing
+    else if sq < num then
+        isqrt' num u mid
+    else if sq > num then
+        isqrt' num mid l
+    else
+        Just mid
+
+isqrt :: Integral t => t -> Maybe t
+isqrt num =
+    isqrt' num (num + 1) 0
+
+modSqrt :: Integer -> Integer -> Maybe Integer
+modSqrt = sqrtModP
+
+-- by trevordixon at https://gist.github.com/trevordixon/6788535
+modExp :: (Integral t, Bits t) => t -> t -> t -> t
+modExp b 0 m = 1
+modExp b e m =
+    t * modExp ((b * b) `mod` m) (shiftR e 1) m `mod` m
+    where t = if testBit e 0 then b `mod` m else 1

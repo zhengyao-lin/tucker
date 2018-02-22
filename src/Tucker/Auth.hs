@@ -14,9 +14,11 @@ import qualified Data.ByteString.Char8 as BS
 
 import qualified Data.ByteArray as BA
 
+import Crypto.Error
+import Crypto.PubKey.ECC.P256
+import Crypto.PubKey.ECC.Types
 import Crypto.PubKey.ECC.ECDSA
 import Crypto.PubKey.ECC.Generate
-import Crypto.PubKey.ECC.Types
 
 import Data.ASN1.Encoding
 import Data.ASN1.BinaryEncoding
@@ -33,16 +35,17 @@ import Control.Monad.Loops
 
 import Tucker.Enc
 import Tucker.Conf
+import Tucker.Util
 import Tucker.Error
+
+ba2bs :: BA.ByteArrayAccess a => a -> ByteString
+ba2bs = BSR.pack . BA.unpack
 
 sha256 :: BA.ByteArrayAccess a => a -> Digest SHA256
 sha256 = hash
 
 ripemd160 :: BA.ByteArrayAccess a => a -> Digest RIPEMD160
 ripemd160 = hash
-
-ba2bs :: BA.ByteArrayAccess a => a -> ByteString
-ba2bs = BSR.pack . BA.unpack
 
 base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -102,23 +105,107 @@ base58decCheck enc = do
     else
         Left $ TCKRError "base58dec check failed"
 
+data ECCPrivateKey = ECCPrivateKey Integer deriving (Eq, Show)
+data ECCPublicKey = ECCPublicKey {
+        compressed :: Bool,
+        x_coord    :: Integer,
+        y_coord    :: Integer
+    } | ECCPrivatePointO deriving (Eq, Show)
+data ECCSignature = ECCSignature Integer Integer deriving (Eq, Show)
+
 type WIF = String
 type Address = String
 
-data ECCKeyPair = ECCKeyPair Integer Point deriving (Show, Read, Eq)
+-- enc/dec of pub/sig
+-- priv -> pub
+-- priv -> wif
+-- wif -> priv
+-- pub -> addr
 
--- for testnet
--- prefix in wif2priv and prev2wif
--- prefix in pub2addr
+instance Encodable ECCPublicKey where
+    -- q = 2^256
+    -- m = 256
+    -- finite field 𝔽p
+    encode _ (ECCPublicKey comp x y) =
+        if comp then
+            case tucker_curve of
+                CurveFP (CurvePrime p curve) ->
+                    BSR.cons
+                        (if y `mod` 2 == 0 then 0x02 else 0x03)
+                        (encodeInt 32 BigEndian x)
 
-priv2wif :: TCKRConf -> Integer -> Either TCKRError WIF
-priv2wif conf num = do
+                _ -> error "unsupported curve type"
+        else
+            BSR.cons 0x04
+                (encodeInt 32 BigEndian x <>
+                 encodeInt 32 BigEndian y)
+
+    encode _ ECCPrivatePointO = bchar 0x00
+
+instance Decodable ECCPublicKey where
+    decoder = do
+        i <- byteD
+
+        if i == 0x04 then do
+            x <- bsD 32
+            y <- bsD 32
+            return $ ECCPublicKey False (bs2vintBE x) (bs2vintBE y)
+        else if i == 0x00 then
+            return ECCPrivatePointO
+        else do
+            y_bit <- case i of
+                0x02 -> return 0
+                0x03 -> return 1
+                _    -> fail "illegal initial byte"
+            
+            x <- bs2vintBE <$> bsD 32
+
+            y <- case tucker_curve of
+                CurveFP (CurvePrime p curve) -> do
+                    let a = ecc_a curve
+                        b = ecc_b curve
+                        alpha = mod (x ^ 3 + a * x + b) p
+                    
+                    case modSqrt alpha p of
+                        Just beta ->
+                            if beta `mod` 2 == y_bit then
+                                return beta
+                            else
+                                return (p - beta)
+
+                        Nothing -> fail "failed to find a solution"
+
+                _ -> fail "unsupported curve type"
+
+            return $ ECCPublicKey True x y
+
+instance Encodable ECCSignature where
+    -- encode a signature using ASN1 by the following structure
+    -- SEQUENCE { r INTEGER, s INTEGER }
+    encode _ (ECCSignature r s) =
+        encodeASN1' DER [ Start Sequence, IntVal r, IntVal s, End Sequence ]
+
+instance Decodable ECCSignature where
+    decoder = do
+        all <- allD
+        case decodeASN1' DER all of
+            Right ((Start Sequence):(IntVal r):(IntVal s):(End Sequence):[])
+                -> return $ ECCSignature r s
+            Left err -> fail ("illegal DER encoding: " ++ show err)
+
+priv2pub :: ECCPrivateKey -> ECCPublicKey
+priv2pub (ECCPrivateKey num) =
+    let Point x y = generateQ tucker_curve num in
+    ECCPublicKey True x y
+
+priv2wif :: TCKRConf -> ECCPrivateKey -> Either TCKRError WIF
+priv2wif conf (ECCPrivateKey num) = do
     priv_raw <- vint2bsBE num
     let priv_proc = BSR.cons (tckr_wif_pref conf) priv_raw
 
     return $ BS.unpack $ base58encCheck priv_proc
 
-wif2priv :: TCKRConf -> WIF -> Either TCKRError Integer
+wif2priv :: TCKRConf -> WIF -> Either TCKRError ECCPrivateKey
 wif2priv conf wif = do
     priv_proc <- base58decCheck $ BS.pack wif
     
@@ -126,122 +213,59 @@ wif2priv conf wif = do
         Left $ TCKRError "illegal WIF"
     else do
         let priv_raw = BSR.drop 1 priv_proc
-        return $ bs2vintBE priv_raw
+        return $ ECCPrivateKey $ bs2vintBE priv_raw
 
-pub2enc :: Point -> ByteString
-pub2enc (Point x y) =
-    BSR.concat [ BSR.singleton 0x04, x_raw, y_raw ]
-    where
-        x_raw = encodeInt 32 BigEndian x
-        y_raw = encodeInt 32 BigEndian y
-
-enc2pub :: ByteString -> Either TCKRError Point
-enc2pub str =
-    if BSR.length str == 0 || BSR.head str /= 0x04 then
-        Left $ TCKRError "illegal ECC public key encoding"
-    else do
-        let x_raw = BSR.drop 1 $ BSR.take 33 str
-            y_raw = BSR.drop 33 str
-            x = decodeInt 32 BigEndian x_raw
-            y = decodeInt 32 BigEndian y_raw
-
-        return $ Point x y
-        
-pub2addr :: TCKRConf -> Point -> Address
-pub2addr conf pt =
+-- using default compressing encoding
+pub2addr :: TCKRConf -> ECCPublicKey -> Address
+pub2addr conf pub =
     BS.unpack $ base58encCheck pub_hash
     where
-        pub_raw = pub2enc pt
-                         -- main TCKRConf byte
+        pub_raw = encodeBE pub
+                            -- main TCKRConf byte
         pub_hash = BSR.cons (tckr_pub_pref conf) $ ba2bs $ ripemd160 $ sha256 pub_raw
 
-addr2pubhash :: TCKRConf -> Address -> Either TCKRError (Word8, ByteString)
-addr2pubhash conf addr = do
+addr2hash :: TCKRConf -> Address -> Either TCKRError ByteString
+addr2hash conf addr = do
     pub_hash_raw <- base58decCheck $ BS.pack addr
 
     if BSR.head pub_hash_raw /= tckr_pub_pref conf then
         Left $ TCKRError "illegal address"
-    else do
-        let
-            pub_type = BSR.index pub_hash_raw 0
-            pub_hash = BSR.drop 1 pub_hash_raw
+    else
+        return (BSR.drop 1 pub_hash_raw)
 
-        return (pub_type, pub_hash)
-
-priv2pub :: Integer -> Point
-priv2pub = generateQ tucker_curve
-
-wif2addr :: TCKRConf -> WIF -> Either TCKRError Address
-wif2addr conf wif = do
-    priv <- wif2priv conf wif
-    return $ pub2addr conf $ priv2pub priv
-
-wif2pair :: TCKRConf -> WIF -> Either TCKRError ECCKeyPair
-wif2pair conf wif = do
-    priv <- wif2priv conf wif
-    return $ ECCKeyPair priv (priv2pub priv)
-
-pair2pubenc :: ECCKeyPair -> ByteString
-pair2pubenc (ECCKeyPair _ pub) = pub2enc pub
-
-pair2addr :: TCKRConf -> ECCKeyPair -> Address
-pair2addr conf (ECCKeyPair _ pub) = pub2addr conf pub
-
-genRaw :: IO (PublicKey, PrivateKey)
-genRaw = generate tucker_curve
+genRaw :: IO (ECCPublicKey, ECCPrivateKey)
+genRaw = do
+    (PublicKey _ pt, PrivateKey _ num) <- generate tucker_curve
+    let Point x y = pt
+    return (ECCPublicKey True x y, ECCPrivateKey num)
 
 gen :: TCKRConf -> IO (Either TCKRError (WIF, Address))
 gen conf = do
-    (PublicKey _ pt, PrivateKey _ num) <- genRaw
+    (pub, priv) <- genRaw
 
-    return (do
-        let addr = pub2addr conf pt
-        wif <- priv2wif conf num
-        return (wif, addr))
-
--- generate with condition on the (wif, address)
-genCond :: TCKRConf
-        -> ((WIF, Address) -> Bool)
-        -> IO (Either TCKRError (WIF, Address))
-genCond conf cond =
-    iterateUntil (\res ->
-        case res of
-            Right ans -> cond ans
-            other -> True) (gen conf)
-
--- encode a signature using ASN1 by the following structure
--- SEQUENCE { r INTEGER, s INTEGER }
-         -- r        s
-signenc :: Signature -> ByteString
-signenc (Signature r s) =
-    encodeASN1' DER [ Start Sequence, IntVal r, IntVal s, End Sequence ]
-
-signdec :: ByteString -> Either TCKRError Signature
-signdec str =
-    case decodeASN1' DER str of
-        Right ((Start Sequence):(IntVal r):(IntVal s):(End Sequence):[])
-            -> Right (Signature r s)
-        _ -> Left $ TCKRError "illegal DER encoding"
+    return $ do
+        let addr = pub2addr conf pub
+        wif <- priv2wif conf priv
+        return (wif, addr)
 
 -- hash & sign
-signSHA256 :: ECCKeyPair -> ByteString -> IO Signature
-signSHA256 (ECCKeyPair priv _) =
-    sign privk SHA256
-    where privk = PrivateKey tucker_curve priv
+signSHA256 :: ECCPrivateKey -> ByteString -> IO ECCSignature
+signSHA256 (ECCPrivateKey num) msg = do
+    let privk = PrivateKey tucker_curve num
+    Signature r s <- sign privk SHA256 msg
+    return $ ECCSignature r s
 
-verifySHA256 :: ECCKeyPair -> ByteString -> Signature -> Bool
-verifySHA256 (ECCKeyPair _ pub) msg sign =
-    verify SHA256 pubk sign msg
-    where pubk = PublicKey tucker_curve pub
+verifySHA256 :: ECCPublicKey -> ByteString -> ECCSignature -> Bool
+verifySHA256 (ECCPublicKey _ x y) msg (ECCSignature r s) =
+    verify SHA256 pubk (Signature r s) msg
+    where pubk = PublicKey tucker_curve (Point x y)
 
-signSHA256DER :: ECCKeyPair -> ByteString -> IO ByteString
-signSHA256DER pair msg = do
-    sign <- signSHA256 pair msg
-    return $ signenc sign
+signSHA256DER :: ECCPrivateKey -> ByteString -> IO ByteString
+signSHA256DER priv msg = do
+    sig <- signSHA256 priv msg
+    return $ encodeBE sig
 
-verifySHA256DER :: ECCKeyPair -> ByteString -> ByteString -> Either TCKRError Bool
-verifySHA256DER pair msg sign_enc = do
-    sign <- signdec sign_enc
-    return $ verifySHA256 pair msg sign
-
--- error decoding 0caecf01d74102a28aed6a64dcf1cf7b0e41c4dd6c62f70f46febdc32514f0bd
+verifySHA256DER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Bool
+verifySHA256DER pub msg sig_enc = do
+    sig <- decodeAllBE sig_enc
+    return $ verifySHA256 pub msg sig

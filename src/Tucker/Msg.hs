@@ -9,7 +9,8 @@ module Tucker.Msg (
     module Tucker.Msg.Common,
     module Tucker.Msg.Script,
     module Tucker.Msg.Hash256,
-    module Tucker.Msg.Version
+    module Tucker.Msg.Version,
+    module Tucker.Msg.ScriptOp
 ) where
 
 import Tucker.Msg.Tx
@@ -21,3 +22,4 @@ import Tucker.Msg.Common
 import Tucker.Msg.Script
 import Tucker.Msg.Hash256
 import Tucker.Msg.Version
+import Tucker.Msg.ScriptOp

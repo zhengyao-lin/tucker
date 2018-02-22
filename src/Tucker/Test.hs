@@ -82,13 +82,11 @@ withChain conf proc = runResourceT $ do
     chain <- initChain conf
     lift $ proc chain
 
-decodeFail bs =
-    case decodeLE bs of
-        (Right v, _) -> v
-        (Left err, _) -> error $ "decode error: " ++ show err
-
 hex2block :: String -> Block
-hex2block = decodeFail . hex2bs
+hex2block = decodeFailLE . hex2bs
+
+hex2tx :: String -> TxPayload
+hex2tx = decodeFailLE . hex2bs
 
 blockChainTest = TestCase $ do
     def_conf <- tucker_default_conf_mainnet
@@ -169,6 +167,33 @@ hash256Test = TestCase $ do
     assertEqual "wrong decode result 5" h5 (unpackHash256 0x0300aabb)
     assertEqual "wrong decode result 6" h6 (unpackHash256 0x0200aabb)
 
+txCase1 = do
+    -- tx0 0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9 at block #9
+    -- tx1 f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 at block #170
+    let tx0 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0134ffffffff0100f2052a0100000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
+        tx1 = hex2tx "0100000001c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd3704000000004847304402204e45e16932b8af514961a1d3a1a25fdf3f4f7732e9d624c6c61548ab5fb8cd410220181522ec8eca07de4860a4acdd12909d831cc56cbbac4622082221a8768d1d0901ffffffff0200ca9a3b00000000434104ae1a62fe09c5f51b13905f07f06b99a2f7159b2225f374cd378d71302fa28414e7aab37397f554a7df5f142c21c1b7303b8a0626f1baded5c72a704f7e6cd84cac00286bee0000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
+        -- decode the script of the first outpoint
+        prev_out1 = tx_out tx0 !! 0
+        pk_sc1 = decodeFailLE $ pk_script prev_out1
+        sig_sc1 = decodeFailLE $ sig_script $ (tx_in tx1 !! 0)
+
+    -- print (sig_sc1 ++ pk_sc1)
+    -- print $ execEval (initState tx1 0 prev_out1) (sig_sc1 ++ pk_sc1)
+
+    assertEqual "wrong checksig result 1" (Right True) (runEval (initState tx1 0 prev_out1) (sig_sc1 ++ pk_sc1))
+
+txCase2 = do
+    -- tx0 4600bf5f3d49660a546c1b9acd3e6b85479ab227115f741cf12e50506ab24b54 at block #119594
+    -- tx1 e3d0425ab346dd5b76f44c222a4bb5d16640a4247050ef82462ab17e229c83b4 at block #123456
+    let tx0 = hex2tx "01000000017870c6dbf8522cf9c2b3ee1c8c0e3215b1c613e6ae724405459f96bb8f3bd0ae0000000049483045022043df36465eb8854649a62b36e8d9a402bce012267ac8f4857ef3b5ca2f3396b7022100ae120cbba78942b82304c98efecbabc8745be7b8f6358f089344a2c5efe942dc01ffffffff0200127a00000000001976a914a9730a07ea5626f14f7fa304c1309602b10a055388ac00f2052a010000001976a9144d63a4b3b4ae384c44ff5d112a9b87c4c49ff36f88ac00000000"
+        tx1 = hex2tx "0100000001544bb26a50502ef11c745f1127b29a47856b3ecd9a1b6c540a66493d5fbf0046010000008b483045022100c9e35aa55af5ac98cb67c4db7cf3d3f128753c4698f5d25ca0cdc3decd0c46be02204d6dfe89bd3fe88a32d47a44c0ab3ab60d87b27b90106f1b2f9f67c9c60cc80c01410449b8d933f97a8c4fe6ce962ee2abff8a81d8cfc5e0870a50cea76c50d04addf2df09331c4a47cdc3bc27a628e766ef5d01f28ee147ed21723b5ff3a62ed8da3effffffff024094ef03010000001976a9146c8de651f8b92f87ff43fb9732babec784bdb6f588acc05d1626000000001976a9144f006767feebf6438aaf51ef86ae4286a1c571b988ac00000000"
+        -- decode the script of the first outpoint
+        prev_out1 = tx_out tx0 !! 1
+        pk_sc1 = decodeFailLE $ pk_script prev_out1
+        sig_sc1 = decodeFailLE $ sig_script $ (tx_in tx1 !! 0)
+
+    assertEqual "wrong checksig result 2" (Right True) (runEval (initState tx1 0 prev_out1) (sig_sc1 ++ pk_sc1))
+
 scriptTest = TestCase $ do
     let sc1 = [ OP_NOP ]
         sc2 = [ OP_IF True [] [] ]
@@ -188,6 +213,9 @@ scriptTest = TestCase $ do
     assertEqual "wrong encode result 2" (BSR.pack [ 0x63, 0x68 ]) (encodeLE sc2)
     assertEqual "wrong decode result 3" sc3 (decodeFailLE (encodeLE sc3))
     assertEqual "wrong encode result 4" (BSR.pack [ 0x01, 0x00 ]) (encodeLE sc4)
+
+    txCase1
+    txCase2
 
 msgTest = TestList [
         TestLabel "hash256 basic" hash256Test,
