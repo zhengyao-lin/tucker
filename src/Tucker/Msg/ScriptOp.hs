@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_GHC -Wno-overflowed-literals #-}
 
 module Tucker.Msg.ScriptOp where
@@ -17,30 +18,48 @@ import Tucker.Enc
 import Tucker.Util
 import Tucker.Error
 
+type ScriptPc = Int
+
 data ScriptOp
     -- constant ops
     = OP_PUSHDATA ByteString
     | OP_CONST Word8
+    | OP_0
 
     -- flow-control
     | OP_NOP
 
     -- if <expected value> true_branch false_branch
-    | OP_IF Bool [ScriptOp] [ScriptOp]
-
+    -- the two pc's point to the RELATIVE location of corresponding else and endif respectively
+    | OP_IF Bool ScriptPc
+    | OP_ELSE ScriptPc
+    | OP_ENDIF
 
     | OP_VERIFY
     | OP_RETURN
 
     -- stack ops
     | OP_DUP
+    
+    | OP_NIP
+    | OP_PICK
+    | OP_SWAP
+
+    -- splice
+    | OP_SIZE
 
     -- bitwise ops
     | OP_EQUAL
     | OP_EQUALVERIFY
 
+    -- arithmetic
+    | OP_BOOLAND
+    | OP_BOOLOR
+    | OP_WITHIN
+
     -- crypto ops
     | OP_HASH160
+    | OP_SHA256
     | OP_HASH256
     | OP_CHECKSIG
     | OP_CHECKSIGVERIFY
@@ -48,6 +67,8 @@ data ScriptOp
     | OP_CHECKMULTISIGVERIFY
     
     | OP_CODESEPARATOR
+
+    | OP_EOC -- end of code
 
     -- for test ues
     | OP_PRINT String deriving (Eq, Show)
@@ -59,6 +80,7 @@ data ScriptOp
 
 one_byte_op_map :: [(ScriptOp, Word8)]
 one_byte_op_map = [
+        (OP_0,                   0x00),
         (OP_NOP,                 0x61),
 
         (OP_VERIFY,              0x69),
@@ -66,9 +88,20 @@ one_byte_op_map = [
 
         (OP_DUP,                 0x76),
 
+        (OP_NIP,                 0x77),
+        (OP_PICK,                0x79),
+        (OP_SWAP,                0x7c),
+
+        (OP_SIZE,                0x82),
+
         (OP_EQUAL,               0x87),
         (OP_EQUALVERIFY,         0x88),
+        
+        (OP_BOOLAND,             0x9a),
+        (OP_BOOLOR,              0x9b),
+        (OP_WITHIN,              0xa5),
 
+        (OP_SHA256,              0xa8),
         (OP_HASH160,             0xa9),
         (OP_HASH256,             0xaa),
         (OP_CHECKSIG,            0xac),
@@ -95,13 +128,15 @@ instance Encodable ScriptOp where
             len = BSR.length dat
 
     encode _ (OP_CONST n)
-        | n == 0    = bchar 0x00
         | n == -1   = bchar 0x4f
         | n >= 1 && n <= 16
                     = bchar (0x50 + n)
         | otherwise = throw $ TCKRError "op constant value not in range 0-16"
 
-    encode end (OP_IF exp b1 b2) = mconcat [
+    encode end (OP_IF exp _) =
+        bchar $ if exp then 0x63 else 0x64 -- OP_IF or OP_NOTIF
+        {-
+        mconcat [
             -- OP_IF
             bchar $ if exp then 0x63 else 0x64,
 
@@ -115,6 +150,13 @@ instance Encodable ScriptOp where
             -- OP_ENDIF
             bchar 0x68
         ]
+        -}
+    
+    -- OP_ELSE and OP_ENDIF can
+    -- be separately encoded from OP_IF
+    -- but cannot be decoded separately
+    encode _ (OP_ELSE _)  = bchar 0x67
+    encode _ OP_ENDIF = bchar 0x68
 
     -- one-byte ops
     encode _ op
@@ -147,27 +189,37 @@ opConstD = do
             i <= 0x60 then return $ OP_CONST (i - 0x50)
     else fail "OP_CONST invalid first byte"
 
-opIfD :: Decoder ScriptOp
+opIfD :: Decoder [ScriptOp]
 opIfD = do
     i <- byteD
     exp <-
         if i == 0x63 then return True
         else if i == 0x64 then return False
-        else fail "OP_IF/OP_NOTIF invalid first byte"        
+        else fail "OP_IF/OP_NOTIF invalid first byte"
 
     b1 <- decoder
 
+    -- coubld be OP_ELSE or OP_ENDIF
     i <- byteD
     
     b2 <-
-        if i == 0x67 then do
+        if i == 0x67 then do -- ELSE
             ops <- decoder
             beginWithByteD 0x68 -- ends with OP_ENDIF
             return ops
-        else if i == 0x68 then return []
+        else if i == 0x68 then return [] -- ENDIF
         else fail "OP_IF invalid syntax"
 
-    return $ OP_IF exp b1 b2
+    let else_ofs = length b1 + 1 -- (pc of OP_IF + else_ofs) points to OP_ELSE/OP_ENDIF
+        endif_ofs = length b2 + 1 -- (pc of OP_ELSE + endif_ofs) points to OP_ENDIF
+
+        if_op = OP_IF exp else_ofs
+        b2' =
+            if null b2 then []
+            else
+                OP_ELSE endif_ofs : b2
+
+    return ([ if_op ] ++ b1 ++ b2' ++ [ OP_ENDIF ])
 
 oneByteOpD :: Decoder ScriptOp
 oneByteOpD = do
@@ -177,10 +229,13 @@ oneByteOpD = do
         Just op -> return op
         _ -> fail "not a one-byte op"
 
-instance Decodable ScriptOp where
-    decoder = opPushdataD <|> opConstD <|> opIfD <|> oneByteOpD <|> fail "invalid op"
+instance Decodable [ScriptOp] where
+    decoder = concat <$> (many (
+        opIfD <|>
+        ((:[]) <$> (opPushdataD <|> opConstD <|> oneByteOpD)) <|>
+        fail "invalid op"))
 
--- extract code after the last(if exists) OP_CODESEPARATOR
-extractValidCode :: [ScriptOp] -> [ScriptOp]
-extractValidCode ops =
-    last $ splitOn [OP_CODESEPARATOR] ops
+-- -- extract code after the last(if exists) OP_CODESEPARATOR
+-- extractValidCode :: [ScriptOp] -> [ScriptOp]
+-- extractValidCode ops =
+--     last $ splitOn [OP_CODESEPARATOR] ops

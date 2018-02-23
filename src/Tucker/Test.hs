@@ -4,6 +4,7 @@ module Tucker.Test where
 
 import Data.Hex
 import qualified Data.ByteString as BSR
+import qualified Data.ByteString.Char8 as BS
 
 import Debug.Trace
 
@@ -170,15 +171,188 @@ hash256Test = TestCase $ do
 -- tx0 out_idx tx1 in_idx
 generalTxCase :: ScriptResult -> TxPayload -> Int -> TxPayload -> Int -> IO ()    
 generalTxCase should_be tx0 out_idx tx1 in_idx = do
-    let prev_out = tx_out tx0 !! out_idx
-        pk_sc = decodeFailLE (pk_script prev_out)
+    let pk_sc = decodeFailLE (pk_script (tx_out tx0 !! out_idx))
         sig_sc = decodeFailLE (sig_script (tx_in tx1 !! in_idx))
-        state = initState tx1 (fi in_idx) prev_out
+        state = initState tx1 (fi in_idx)
     
-    assertEqual ("wrong checksig result for tx " ++ show (txid tx1))
-        should_be (runEval state (sig_sc ++ pk_sc))
+    -- print pk_sc
 
-txCase1 = do
+    assertEqual ("wrong checksig result for tx " ++ show (txid tx1))
+        should_be (runEval state [ sig_sc, pk_sc ])
+
+{-
+
+dat1 = dat2 = ""
+
+sig_script
+
+OP_PUSHDATA dat1
+OP_PUSHDATA dat2
+OP_PUSHDATA sig1
+OP_PUSHDATA sig2
+
+pk_script
+
+match(sig1, pk1)
+    OP_PUSHDATA pk1
+    OP_CHECKSIG
+    OP_SWAP
+
+match(sig2, pk2)
+    OP_PUSHDATA pk2
+    OP_CHECKSIG
+    OP_SWAP
+
+<----- stack [ match(sig1, pk1), match(sig2, pk2), 0, 0 ]
+
+hash(dat1) == hash1
+    3 OP_PICK
+    OP_SHA256
+    OP_PUSHDATA hash1
+    OP_EQUAL
+
+<----- stack [ hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
+
+hash(dat2) == hash2
+    3 OP_PICK
+    OP_SHA256
+    OP_PUSHDATA hash2
+    OP_EQUAL
+
+<----- stack [ hash(0) == hash2, hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
+
+OP_BOOLAND
+
+<----- stack [ hash(0) == hash2 && hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
+
+size(dat1) == 32 or 33
+    4 OP_PICK
+    OP_SIZE OP_NIP
+    OP_PUSHDATA 0x20
+    OP_PUSHDATA 0x22
+    OP_WITHIN
+
+OP_BOOLAND
+
+size(dat2) == 32 or 33
+    3 OP_PICK
+    OP_SIZE OP_NIP
+    OP_PUSHDATA 0x20
+    OP_PUSHDATA 0x22
+    OP_WITHIN
+
+OP_BOOLAND
+
+<----- stack [ length(0) ~ [32, 34) &&
+               length(0) ~ [32, 34) &&
+               hash(0) == hash2 &&
+               hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
+
+OP_IF True 11
+
+3 OP_PICK
+OP_SIZE OP_NIP
+
+3 OP_PICK
+OP_SIZE OP_NIP
+
+OP_EQUAL
+OP_PICK
+
+OP_ELSE 2
+OP_BOOLAND
+OP_ENDIF
+
+pk1 = 02085C6600657566ACC2D6382A47BC3F324008D2AA10940DD7705A48AA2A5A5E33
+pk2 = 03F5D0FB955F95DD6BE6115CE85661DB412EC6A08ABCBFCE7DA0BA8297C6CC0EC4
+hash1 = D68DF9E32A147CFFA36193C6F7C43A1C8C69CDA530E1C6DB354BFABDCFEFAF3C
+hash2 = F531F3041D3136701EA09067C53E7159C8F9B2746A56C3D82966C54BBC553226
+
+sig1 = 30450221009a29101094b283ae62a6fed68603c554ca3a624b9a78d83e8065edcf97ae231b02202cbed6e796ee6f4caf30edef8f5597a08a6be265d6601ad92283990b55c038fa01
+sig2 = 3044022045d08719828fbd93e49c9223e63f4d2dab2de6c568e1faa2cccb33adf2575d2c02200c00126cb0105275040a963d91e45460147e40451b590485cf438606d3c784cf01
+
+bool pk_script(dat1, dat2, sig1, sig2) {
+    if (hash(dat1) == hash1 &&
+        hash(dat2) == hash2 &&
+        size(dat1) == 32 or 33 &&
+        size(dat2) == 32 or 33) {
+        if (size(dat1) == size(dat2)) {
+            return match(sig2, pk2);
+        } else {
+            return match(sig1, pk1);
+        }
+    } else {
+        return match(sig1, pk1) && match(sig2, pk2);
+    }
+}
+
+constants:
+pk1 = 02085C6600657566ACC2D6382A47BC3F324008D2AA10940DD7705A48AA2A5A5E33
+pk2 = 03F5D0FB955F95DD6BE6115CE85661DB412EC6A08ABCBFCE7DA0BA8297C6CC0EC4
+hash1 = D68DF9E32A147CFFA36193C6F7C43A1C8C69CDA530E1C6DB354BFABDCFEFAF3C
+hash2 = F531F3041D3136701EA09067C53E7159C8F9B2746A56C3D82966C54BBC553226
+
+OP_PUSHDATA <pk1>
+OP_CHECKSIG
+OP_SWAP
+
+OP_PUSHDATA <pk2>
+OP_CHECKSIG
+OP_SWAP
+
+3 OP_PICK
+OP_SHA256
+OP_PUSHDATA <hash1>
+OP_EQUAL
+
+3 OP_PICK
+OP_SHA256
+OP_PUSHDATA <hash2>
+OP_EQUAL
+
+OP_BOOLAND
+
+4 OP_PICK
+OP_SIZE OP_NIP
+OP_PUSHDATA 0x20
+OP_PUSHDATA 0x22
+OP_WITHIN
+
+OP_BOOLAND
+
+3 OP_PICK OP_NIP
+OP_PUSHDATA 0x20
+OP_PUSHDATA 0x22
+OP_WITHIN
+
+OP_BOOLAND
+
+OP_IF
+
+3 OP_PICK
+OP_SIZE OP_NIP
+
+3 OP_PICK
+OP_SIZE OP_NIP
+
+OP_EQUAL
+OP_PICK
+
+OP_ELSE
+OP_BOOLAND
+OP_ENDIF
+
+-}
+
+-- run script on an empty stack with a dummy tx
+runScript :: [ScriptOp] -> IO [StackItem]
+runScript ops = do
+    let tx = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0134ffffffff0100f2052a0100000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
+        state = initState tx 0
+
+    eval_stack <$> assertEitherRight (execEval state ops)
+
+txCase1 = TestCase $ do
     -- tx0 0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9 at block #9
     -- tx1 f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 at block #170
     let tx0 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0134ffffffff0100f2052a0100000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
@@ -186,7 +360,28 @@ txCase1 = do
      
     generalTxCase ValidTx tx0 0 tx1 0
 
-txCase2 = do
+-- same as case 1, but with several extra OP_CODESEPARATORs
+txCase2 = TestCase $ do
+    -- tx0 0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9 at block #9
+    -- tx1 f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 at block #170
+    let tx0 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0134ffffffff0100f2052a0100000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
+        tx1 = hex2tx "0100000001c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd3704000000004847304402204e45e16932b8af514961a1d3a1a25fdf3f4f7732e9d624c6c61548ab5fb8cd410220181522ec8eca07de4860a4acdd12909d831cc56cbbac4622082221a8768d1d0901ffffffff0200ca9a3b00000000434104ae1a62fe09c5f51b13905f07f06b99a2f7159b2225f374cd378d71302fa28414e7aab37397f554a7df5f142c21c1b7303b8a0626f1baded5c72a704f7e6cd84cac00286bee0000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
+    
+        out = tx_out tx0 !! 0
+
+        op_cs = encodeLE OP_CODESEPARATOR
+
+        tx0_edited = tx0 {
+            tx_out = replace 0 (out {
+                -- append/prepend op_cs's
+                pk_script = op_cs <> op_cs <> pk_script out <> op_cs
+            }) (tx_out tx0)
+        }
+
+    -- should have the same result
+    generalTxCase ValidTx tx0_edited 0 tx1 0
+
+txCase3 = TestCase $ do
     -- tx0 4600bf5f3d49660a546c1b9acd3e6b85479ab227115f741cf12e50506ab24b54 at block #119594
     -- tx1 e3d0425ab346dd5b76f44c222a4bb5d16640a4247050ef82462ab17e229c83b4 at block #123456
     let tx0 = hex2tx "01000000017870c6dbf8522cf9c2b3ee1c8c0e3215b1c613e6ae724405459f96bb8f3bd0ae0000000049483045022043df36465eb8854649a62b36e8d9a402bce012267ac8f4857ef3b5ca2f3396b7022100ae120cbba78942b82304c98efecbabc8745be7b8f6358f089344a2c5efe942dc01ffffffff0200127a00000000001976a914a9730a07ea5626f14f7fa304c1309602b10a055388ac00f2052a010000001976a9144d63a4b3b4ae384c44ff5d112a9b87c4c49ff36f88ac00000000"
@@ -194,7 +389,7 @@ txCase2 = do
 
     generalTxCase ValidTx tx0 1 tx1 0
 
-txCase3 = do
+txCase4 = TestCase $ do
     -- tx0 e8b00123999ac110f94b24b440db34ef7448b9136455d04fda67b423d921f457
     -- tx1 8f36d644a4573a72bff7f6a19192159158e123ea8eb24fe2bad90bdaa3e7fb50
     let tx0 = hex2tx "0100000004c09a3e2a9742dd0b375a91eed04950cd98312637f9803d82a2d3ffc651b22684020000004a00483045022100c758a4162eb3793a1f86ddad31388bc8fdbf461b067c4b7c81da27ad7877aa6702203a100856fa7e9105e2c49210ffd3ebd488df01d78128c7ba39a8ffc1d67d7e3701ffffffffee3077463805addd75c615bd44fb6888e058128d86786922385c530316ee334e020000004a004830450221008596c6a127c11d2179e8c9f75ddc5bc3663971ac018d3767a7a3edf8a5e9d7e6022022732b1b63182ddd005e4fd3202e50855ef7398a775affbacda352135c8a438901ffffffff76b7bffc068a153f3a0caab1f13183bd9fd158eb630f78c5a509bb44f1af27813b0000006b48304502210094b439b72d5a478b6e39cb1a89964c80f84e435d3868922baf412e8a1bdce42402203427e433aa0cc727474d492c06241d2dfd1fa61866051d9c4bb245ae83c6c73c0121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d8ffffffff76b7bffc068a153f3a0caab1f13183bd9fd158eb630f78c5a509bb44f1af27813a0000006b483045022100a596a8cc061a0da5a0a66a822220591547a7071c555b939950834729fa71386702202beb7b0a916ea6262440ac5a301a966d4b6c5dd1da3602f8c3841b89fb75a2fa0121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d8ffffffff050000000000000000226a209b5e3d36ab430d2f7da585f6aca0160925e8c60456a46b5041f51aa8f9bb37163075000000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851ae3075000000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851ae3075000000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851aefd9d770000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851ae00000000"
@@ -202,7 +397,8 @@ txCase3 = do
 
     generalTxCase ValidTx tx0 3 tx1 2
 
-txCase4 = do
+-- edited from case 4
+txCase5 = TestCase $ do
     -- tx0 e8b00123999ac110f94b24b440db34ef7448b9136455d04fda67b423d921f457
     -- tx1 8f36d644a4573a72bff7f6a19192159158e123ea8eb24fe2bad90bdaa3e7fb50 (edited)
     let tx0 = hex2tx "0100000004c09a3e2a9742dd0b375a91eed04950cd98312637f9803d82a2d3ffc651b22684020000004a00483045022100c758a4162eb3793a1f86ddad31388bc8fdbf461b067c4b7c81da27ad7877aa6702203a100856fa7e9105e2c49210ffd3ebd488df01d78128c7ba39a8ffc1d67d7e3701ffffffffee3077463805addd75c615bd44fb6888e058128d86786922385c530316ee334e020000004a004830450221008596c6a127c11d2179e8c9f75ddc5bc3663971ac018d3767a7a3edf8a5e9d7e6022022732b1b63182ddd005e4fd3202e50855ef7398a775affbacda352135c8a438901ffffffff76b7bffc068a153f3a0caab1f13183bd9fd158eb630f78c5a509bb44f1af27813b0000006b48304502210094b439b72d5a478b6e39cb1a89964c80f84e435d3868922baf412e8a1bdce42402203427e433aa0cc727474d492c06241d2dfd1fa61866051d9c4bb245ae83c6c73c0121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d8ffffffff76b7bffc068a153f3a0caab1f13183bd9fd158eb630f78c5a509bb44f1af27813a0000006b483045022100a596a8cc061a0da5a0a66a822220591547a7071c555b939950834729fa71386702202beb7b0a916ea6262440ac5a301a966d4b6c5dd1da3602f8c3841b89fb75a2fa0121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d8ffffffff050000000000000000226a209b5e3d36ab430d2f7da585f6aca0160925e8c60456a46b5041f51aa8f9bb37163075000000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851ae3075000000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851ae3075000000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851aefd9d770000000000255121022f17fb42c7a132ca9fa30825b2b0ef2964e4b56335bf89f8e088fd50dc91f9d851ae00000000"
@@ -210,34 +406,65 @@ txCase4 = do
 
     generalTxCase InvalidTx tx0 3 tx1 2
 
+-- a214a2daf91691afdd491fd00d894eb3301e35bc18b5554b14e12843037e954c
+-- ^ this tx contains an OP_IF!!
+txCase6 = TestCase $ do
+    -- tx0 a214a2daf91691afdd491fd00d894eb3301e35bc18b5554b14e12843037e954c
+    -- tx1 e280770f2fdb32ca1b04949e67a211e114c0927f50846b89ab3a78b3e4c469c8
+    let tx0 = hex2tx "0100000002641da415089394236ad2e22bac1b77523a426c5059defb2a793ca6ddfefbe1ba0000000049483045022100bb73c55d3ee7fcb1c29f1618ecc576ca3a0fb7d2dc182bbfdad628a08910c60802206178b02984855c997dfde25b508c7626845ddc18b001b7e1be4d40bdfc60b76901ffffffff42b93a855d7b625728626024f474915981a1527170398d7750d374911ee35123000000006a483045022100b6d488732e8d24bf2cee2036cd3d7ea763b30c9a1233b3340903b8e9eca3e8ea02207a7375ba8cccd9fc94b27ad8dea9010fadc6f02a102843069501deaa64f4783c01201b1b01dc829177da4a14551d2fc96a9db00c6501edfa12f22cd9cefd335c227fffffffff01d0933c0000000000b52102085c6600657566acc2d6382a47bc3f324008d2aa10940dd7705a48aa2a5a5e33ac7c2103f5d0fb955f95dd6be6115ce85661db412ec6a08abcbfce7da0ba8297c6cc0ec4ac7c5379a820d68df9e32a147cffa36193c6f7c43a1c8c69cda530e1c6db354bfabdcfefaf3c875379a820f531f3041d3136701ea09067c53e7159c8f9b2746a56c3d82966c54bbc553226879a5479827701200122a59a5379827701200122a59a6353798277537982778779679a6800000000"
+        tx1 = hex2tx "01000000014c957e034328e1144b55b518bc351e30b34e890dd01f49ddaf9116f9daa214a2000000009300004830450221009a29101094b283ae62a6fed68603c554ca3a624b9a78d83e8065edcf97ae231b02202cbed6e796ee6f4caf30edef8f5597a08a6be265d6601ad92283990b55c038fa01473044022045d08719828fbd93e49c9223e63f4d2dab2de6c568e1faa2cccb33adf2575d2c02200c00126cb0105275040a963d91e45460147e40451b590485cf438606d3c784cf010000000001c06c3c00000000002321039dc85f5fe062d4eef0470fa96d4bbcfff0096c62042333cd05ad491536560443acda538652"
+    
+    generalTxCase ValidTx tx0 0 tx1 0
+
 scriptTest = TestCase $ do
     let sc1 = [ OP_NOP ]
-        sc2 = [ OP_IF True [] [] ]
+        sc2 = [ OP_IF True 1, OP_ENDIF ]
         sc3 = [
-                OP_IF True [
-                    OP_IF True [
-                        OP_IF True [
-                            OP_NOP
-                        ] sc2
-                    ] sc2
-                ] sc2
+                OP_IF True 6,
+                OP_IF False 4,
+                OP_IF True 2,
+                OP_NOP,
+                OP_ENDIF,
+                OP_ENDIF,
+                OP_ELSE 2,
+                OP_NOP,
+                OP_ENDIF
             ]
 
         sc4 = [ OP_PUSHDATA $ BSR.pack [ 0x00 ] ]
 
-    assertEqual "wrong decode result 1" sc1 (decodeFailLE (encodeLE sc1))
-    assertEqual "wrong encode result 2" (BSR.pack [ 0x63, 0x68 ]) (encodeLE sc2)
-    assertEqual "wrong decode result 3" sc3 (decodeFailLE (encodeLE sc3))
-    assertEqual "wrong encode result 4" (BSR.pack [ 0x01, 0x00 ]) (encodeLE sc4)
+        sc5 = [
+                OP_CONST 1,
+                OP_IF True 2,
+                OP_CONST 2,
+                OP_ELSE 3,
+                OP_CONST 3,
+                OP_CONST 3,
+                OP_ENDIF
+            ]
 
-    txCase1
-    txCase2
-    txCase3
-    txCase4
+    assertEqual "wrong script decode result 1" sc1 (decodeFailLE (encodeLE sc1))
+    assertEqual "wrong script encode result 2" (BSR.pack [ 0x63, 0x68 ]) (encodeLE sc2)
+    assertEqual "wrong script decode result 3" sc3 (decodeFailLE (encodeLE sc3))
+    assertEqual "wrong script encode result 4" (BSR.pack [ 0x01, 0x00 ]) (encodeLE sc4)
+    assertEqual "wrong script decode result 3" sc5 (decodeFailLE (encodeLE sc5))
+
+    res <- runScript sc5
+
+    assertEqual "wrong script exec result 5" [
+            intToItem 2
+        ] res
 
 msgTest = TestList [
         TestLabel "hash256 basic" hash256Test,
-        TestLabel "script test" scriptTest
+        TestLabel "script test" scriptTest,
+
+        TestLabel "tx case 1" txCase1,
+        TestLabel "tx case 2" txCase2,
+        TestLabel "tx case 3" txCase3,
+        TestLabel "tx case 4" txCase4,
+        TestLabel "tx case 5" txCase5,
+        TestLabel "tx case 6" txCase6
     ]
 
 allTest = TestList [

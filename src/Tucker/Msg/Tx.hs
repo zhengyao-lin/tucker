@@ -198,7 +198,7 @@ instance Encodable TxPayload where
             encodeVList end tx_out,
 
             if flag == 0 then BSR.empty else
-                encodeVList end tx_witness,
+                encode end tx_witness, -- just an ordinary list, not vlist
             
             e lock_time
         ]
@@ -225,8 +225,10 @@ instance Decodable TxPayload where
         tx_out <- vlistD decoder
         -- traceM "output finished"
 
+        -- tx_witness is NOT a vlist because the size of it
+        -- is implied by the size of tx_in
         tx_witness <-
-            if flag /= 0 then vlistD decoder
+            if flag /= 0 then listD (length tx_in) decoder
             else return []
 
         lock_time <- decoder
@@ -332,26 +334,6 @@ updateIds tx =
 -- 4. construct a final tx body with sig_script all equaling to the script above
 -- 5. note that in a tx_in, previous hash is the DOUBLE-sha256 of the previous transaction
 
--- generate a standard public key script
-stdPkScript :: TCKRConf
-            -> Address {- alas String, base58check encoded -}
-            -> Either TCKRError ByteString
-stdPkScript conf addr = do
-    pub_hash <- addr2hash conf addr
-    return $ encodeLE [
-            OP_DUP,
-            OP_HASH160,
-            OP_PUSHDATA pub_hash,
-            OP_EQUALVERIFY,
-            OP_CHECKSIG
-        ]
-
--- -- get matching outpoint from each previous transaction
--- getOutputs :: [TxPayload] -> TxPayload -> [TxOutput]
--- getOutputs prevs tx =
---     flip map (tx_in tx `zip` prevs) \(inp, prev) ->
---         tx_out prev !! out_idx (prev_out inp)
-
 -- get the raw hashes used as signature content
 -- arg 1: current transaction
 -- arg 2: input index that is currently checking/signing
@@ -359,52 +341,26 @@ stdPkScript conf addr = do
 -- arg 4: hash type used
 -- return: hash for signature of the current input
 
-{-
-
-01000000
-
-tx_in
-01
-544BB26A50502EF11C745F1127B29A47856B3ECD9A1B6C540A66493D5FBF0046 01000000 (outpoint 1)
-19
-76A9144D63A4B3B4AE384C44FF5D112A9B87C4C49FF36F88AC (script)
-FFFFFFFF (sequence)
-
-tx_out
-02
-
-out1
-4094EF0301000000
-19
-76A9146C8DE651F8B92F87FF43FB9732BABEC784BDB6F588AC
-
-out2
-C05D162600000000
-19
-76A9144F006767FEEBF6438AAF51EF86AE4286A1C571B988AC
-
-00000000
-
-01000000
-
--------------------------------
-
-0100000001C997A5E56E104102FA209C6A852DD90660A20B2D9C352423EDCE25857FCD37040000000043410411DB93E1DCDB8A016B49840F8C53BC1EB68A382E97B1482ECAD7B148A6909A5CB2E0EADDFB84CCF9744464F82E160BFA9B8B64F9D4C03F999B8643F656B412A3ACFFFFFFFF0200CA9A3B00000000434104AE1A62FE09C5F51B13905F07F06B99A2F7159B2225F374CD378D71302FA28414E7AAB37397F554A7DF5F142C21C1B7303B8A0626F1BADED5C72A704F7E6CD84CAC00286BEE0000000043410411DB93E1DCDB8A016B49840F8C53BC1EB68A382E97B1482ECAD7B148A6909A5CB2E0EADDFB84CCF9744464F82E160BFA9B8B64F9D4C03F999B8643F656B412A3AC0000000001000000
-0100000001C997A5E56E104102FA209C6A852DD90660A20B2D9C352423EDCE25857FCD37040000000043410411DB93E1DCDB8A016B49840F8C53BC1EB68A382E97B1482ECAD7B148A6909A5CB2E0EADDFB84CCF9744464F82E160BFA9B8B64F9D4C03F999B8643F656B412A3ACFFFFFFFF0200CA9A3B00000000434104AE1A62FE09C5F51B13905F07F06B99A2F7159B2225F374CD378D71302FA28414E7AAB37397F554A7DF5F142C21C1B7303B8A0626F1BADED5C72A704F7E6CD84CAC00286BEE0000000043410411DB93E1DCDB8A016B49840F8C53BC1EB68A382E97B1482ECAD7B148A6909A5CB2E0EADDFB84CCF9744464F82E160BFA9B8B64F9D4C03F999B8643F656B412A3AC0000000001000000
-
--}
+-- remove the witness data
+stripWitness :: TxPayload -> TxPayload
+stripWitness tx =
+    tx {
+        -- wtxid = txid tx,
+        flag = 0,
+        tx_witness = []
+    }
 
 -- raw tx to be signed
-sigRawTx :: TxPayload -> Word32 -> TxOutput -> HashType -> ByteString
-sigRawTx tx idx' prev htype =
-    let tx_copy = tx {
+sigRawTx :: TxPayload -> Word32 -> [ScriptOp] -> HashType -> ByteString
+sigRawTx tx idx' subscript htype =
+    let tx_copy = stripWitness $ tx {
                 -- remove all sig_script
                 tx_in = map (\inp -> inp { sig_script = BSR.empty }) (tx_in tx)
             }
 
         idx = fi idx'
         
-        subscript = extractValidCode $ decodeFailLE $ pk_script prev
+        -- subscript = decodeFailLE subscript' -- extractValidCode $ decodeFailLE $ pk_script prev
 
         inp = tx_in tx !! idx
 
@@ -423,6 +379,20 @@ sigRawTx tx idx' prev htype =
         encodeLE final_tx <> encodeLE raw_htype
         -- trace (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ ba2bs $ sha256 $ sha256 final_str
+
+-- generate a standard public key script
+-- stdPkScript :: TCKRConf
+--             -> Address {- alas String, base58check encoded -}
+--             -> Either TCKRError ByteString
+-- stdPkScript conf addr = do
+--     pub_hash <- addr2hash conf addr
+--     return $ encodeLE [
+--             OP_DUP,
+--             OP_HASH160,
+--             OP_PUSHDATA pub_hash,
+--             OP_EQUALVERIFY,
+--             OP_CHECKSIG
+--         ]
 
 -- sign a raw transaction
 -- signRawTx :: ECCKeyPair -> TxPayload -> IO ByteString
@@ -523,75 +493,6 @@ sigRawTx tx idx' prev htype =
 
 -- encodeTxPayload btc_testnet3 "933qtT8Ct7rGh29Eyb5gG69QrWmwGein85F1kuoShaGjJFFBSjk" [ OutPoint (((!! 0) . unhex) "beb7822fe10241c3c7bb69bd6866487bcaff85ce2dd5cec9b41624eabb1804b5") 0 ] [ (1000, "miro9ZNPjcLnqvnJpSm8P6CUf1WPU98jET"), (129899000, "mvU2ysD322amhCeCPMhPc3L7hKDGGWSBz7") ]
 
--- 0100000001B50418BBEA2416B4C9CED52DCE85FFCA7B486668BD69BBC7C34102E12F82B7BE000000008C4930460221009273528BBBDFF9952604BB495D1E0379B62719B5ADA94F128956CD59B158C32F022100A0CD8FAF9DF0923CBAC413D9379E3ED2B92EF56D2927C300672969E6460452BB014104F789605ECABF791B719B4D0AA911E4EF80010904AA32E37C2B7BF427E6BC2ED40CC21568E7C5AED188E58CF7CF25B3C540FC8B3D20EEC49D967416D755944740FFFFFFFF02E8030000000000001976A91424A90FBE7E852F1C233CFABA9E473F801A5E790A88ACF819BE07000000001976A914A3FC8D07B59B4137BFEE2D4E0CF940A3B656B50C88AC00000000
-
--- output
-
--- 01000000
--- 01
-
--- output hash
--- 484D40D45B9EA0D652FCA8258AB7CAA42541EB52975857F96FB50CD732C8B481
--- output index
--- 00000000
-
--- 8B
--- 48
--- 30
--- 45
--- 02
--- 20
--- 47AC97D5B0D5BA90A62ADDC49A02A049EFAF9AF8B1B913D2F45504A6B7EDA4C8
--- 02
--- 21
--- 00A43C08DC716628C4E5847996585E16E80F7C2A3FFE9321FF51F0E2319192021B
-
--- 01
--- 41
--- 04
--- 14E301B2328F17442C0B8310D787BF3D8A404CFBD0704F135B6AD4B2D3EE7513
--- 10F981926E53A6E8C39BD7D3FEFD576C543CCE493CBAC06388F2651D1AACBFCD
-
--- FFFFFFFF
-
--- 01
--- 6264010000000000
-
--- 1A
-
--- -- pk_script
--- 76A914C8E90996C7C6080EE06284600C684ED904D14C5C88AC
-
--- 00000000
-
 -- dehex v = case unhex v :: Maybe String of
 --     Just str -> str
 --     Nothing -> error "illegal hex"
-
--- test = TxPayload {
---     version = 1,
---     flag = 0,
-
---     tx_in = [
---         TxInput {
---             prev_out =
---                 OutPoint
---                     (dehex "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48")
---                     0,
-
---             sig_script = BSR.empty,
---             seqn = -1
---         }
---     ],
-
---     tx_out = [
---         TxOutput {
---             value = 123,
---             pk_script = BSR.empty
---         }
---     ],
-
---     tx_witness = [],
-
---     lock_time = 0
--- }

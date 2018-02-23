@@ -302,6 +302,11 @@ allD = Decoder $ \_ bs -> (Right bs, BSR.empty)
 allD' :: Decoder ByteString
 allD' = Decoder $ \_ bs -> (Right bs, bs)
 
+getD = allD'
+
+putD :: ByteString -> Decoder ()
+putD bs = Decoder $ \_ _ -> (Right (), bs)
+
 instance Decodable Placeholder where
     decoder = return Placeholder
 
@@ -346,6 +351,6 @@ instance Decodable Word256 where
 instance (Decodable t1, Decodable t2) => Decodable (t1, t2) where
     decoder = (,) <$> decoder <*> decoder
 
--- decode as many t as possible
-instance Decodable t => Decodable [t] where
-    decoder = many decoder
+-- -- decode as many t as possible
+-- instance Decodable t => Decodable [t] where
+--     decoder = many decoder
