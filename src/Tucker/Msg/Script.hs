@@ -5,6 +5,7 @@ import Data.List
 import Data.Word
 import qualified Data.ByteString as BSR
 
+import Control.Monad
 import Control.Monad.State
 import Control.Monad.Except
 
@@ -97,22 +98,49 @@ popS :: EvalState StackItem
 popS = do
     es@(ScriptState { eval_stack = stack }) <- get
 
-    if null stack then failT "pop on an empty stack"
-    else do
-        put (es { eval_stack = tail stack })
-        return $ head stack
+    assertT (not (null stack)) "pop on an empty stack"
+
+    put (es { eval_stack = tail stack })
+    return $ head stack
 
 pop2S :: EvalState (StackItem, StackItem)
 pop2S = (,) <$> popS <*> popS
 
+popNS :: Int -> EvalState [StackItem]
+popNS = (`replicateM` popS)
+
 dupS :: EvalState ()
 dupS = do
     s@(ScriptState { eval_stack = stack }) <- get
-    if null stack then failT "dup on an empty stack"
-    else put (s { eval_stack = head stack : stack })
+
+    assertT (not (null stack)) "dup on an empty stack"
+
+    put (s { eval_stack = head stack : stack })
 
 txS :: EvalState TxPayload
 txS = tx_body <$> get
+
+-- ONE time SHA256 hash of the raw tx body for signature
+-- require the raw signature with the htype byte appended
+rawSigHashS :: ByteString -> EvalState ByteString
+rawSigHashS sig_raw = do
+    cur_tx <- txS
+    in_idx <- tx_in_idx <$> get
+    prev_out <- tx_prev_out <$> get
+
+    let htype = intToHashType (BSR.last sig_raw)
+        rawtx = sigRawTx cur_tx in_idx prev_out htype
+        hash = ba2bs $ sha256 rawtx
+        -- NOTE: only sha256 it ONCE because there's another
+        -- hashing in the verification process
+
+    return hash
+
+-- verifyFail public_key_encoded message signature_encoded
+verifyFail :: ByteString -> ByteString -> ByteString -> Bool
+verifyFail pub msg sig =
+    -- NOTE: final hash is encoded in big-endian
+    verifySHA256DER (decodeFailBE pub) msg sig == Right True
 
 evalOpS :: ScriptOp -> EvalState ()
 evalOpS (OP_PUSHDATA dat) = pushS $ bsToItem dat
@@ -156,34 +184,50 @@ evalOpS OP_HASH256 = do
 
 evalOpS OP_CHECKSIG = do
     (pub', sig') <- pop2S
-    -- hash <- wtxid <$> txS
-
-    cur_tx <- txS
-    in_idx <- tx_in_idx <$> get
-    prev_out <- tx_prev_out <$> get
-
-    let htype = intToHashType (BSR.last sig')
-        rawtx = sigRawTx cur_tx in_idx prev_out htype
-        hash = ba2bs $ sha256 rawtx
-        -- NOTE: only sha256 it ONCE because there's another hashing in the verify process
-
-    -- traceM (show $ hex $ encodeBE hash)
-    -- traceShowM (hex sig')
-
-    let -- NOTE: final hash is encoded in big-endian
-        -- there is one byte(hash type) appended to the signature
-        Right res = verifySHA256DER (decodeFailBE pub') hash (BSR.init sig')
-
-    -- e3d0425ab346dd5b76f44c222a4bb5d16640a4247050ef82462ab17e229c83b4
-    -- e3d0425ab346dd5b76f44c222a4bb5d16640a4247050ef82462ab17e229c83b4
-    -- traceShowM (hex pub', hex hash, hex sig', res)
-
-    -- d8fe7a642dc67002891562c550b7cde57f6cfffd6959c0aa40ad70ea4c9551b6
-
-    pushS $ boolToItem res
+    msg <- rawSigHashS sig'
+    -- there is one byte(hash type) appended to the signature
+    pushS $ boolToItem (verifyFail pub' msg (BSR.init sig'))
 
 evalOpS OP_CHECKSIGVERIFY =
     evalOpS OP_CHECKSIG >>
+    evalOpS OP_VERIFY
+
+evalOpS OP_CHECKMULTISIG = do
+    n' <- popS -- total number of possible keys
+    let n = decodeFailLE n' :: Word8
+    assertT (BSR.length n' == 1 && n > 0 && n <= 16) "illegal n in checkmultisig"
+
+    pub's <- popNS $ fi n
+
+    m' <- popS -- number of signatures must be provided
+    let m = decodeFailLE m' :: Word8
+    assertT (BSR.length m' == 1 && m > 0 && m <= 16) "illegal m in checkmultisig"
+
+    sig's <- popNS $ fi m
+
+    -- messages for signing
+    msgs <- mapM rawSigHashS sig's
+
+    -- traceM (show (pub's, sig's))
+
+    let sigs = map BSR.init sig's
+
+        -- indices of successful match of public keys
+        match =
+            flip map (zip msgs sigs) $ \(msg, sig) ->
+                findIndex (\pub' -> verifyFail pub' msg sig) pub's
+
+        final = maybeCat match
+
+        succ = length final == length match &&
+               ascending final -- public keys are in the right order
+    
+    popS -- for compatibility with a historical bug
+
+    pushS $ boolToItem succ
+
+evalOpS OP_CHECKMULTISIGVERIFY =
+    evalOpS OP_CHECKMULTISIG >>
     evalOpS OP_VERIFY
 
 evalOpS (OP_PRINT msg) = traceM msg
@@ -210,9 +254,23 @@ isValidStack :: ScriptState -> Bool
 isValidStack (ScriptState { eval_stack = top:_ }) = itemToBool top
 isValidStack _ = False
 
+data ScriptResult =
+    ValidTx | InvalidTx | ExecError TCKRError deriving (Show)
+
+instance Eq ScriptResult where
+    ValidTx == ValidTx             = True
+    InvalidTx == InvalidTx         = True
+    (ExecError _) == (ExecError _) = True
+    _ == _                         = False
+
+eitherToResult :: Either TCKRError Bool -> ScriptResult
+eitherToResult (Right True) = ValidTx
+eitherToResult (Right False) = InvalidTx
+eitherToResult (Left err) = ExecError err
+
 -- return Right res for successful execution
 -- return Left err for unsuccessful exec
 -- Left err | Right False -> invalid
 -- Right True -> valid
-runEval :: ScriptState -> [ScriptOp] -> Either TCKRError Bool
-runEval s ops = isValidStack <$> execEval s ops
+runEval :: ScriptState -> [ScriptOp] -> ScriptResult -- Either TCKRError Bool
+runEval s ops = eitherToResult (isValidStack <$> execEval s ops)

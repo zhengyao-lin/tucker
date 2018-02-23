@@ -410,15 +410,17 @@ sigRawTx tx idx' prev htype =
 
         raw_htype = hashTypeToInt htype :: Word32
 
-        final_tx = tx {
-            tx_in = replace idx ((tx_in tx !! idx) {
+        final_tx = tx_copy {
+            tx_in = replace idx ((tx_in tx_copy !! idx) {
                 -- replace the corresponding sig_script
                 -- with pk_script after OP_CODESEPARATOR
                 sig_script = encodeLE subscript
-            }) (tx_in tx)
+            }) (tx_in tx_copy)
         }
 
-    in encodeLE final_tx <> encodeLE raw_htype
+    in
+        -- trace (show final_tx) $
+        encodeLE final_tx <> encodeLE raw_htype
         -- trace (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ ba2bs $ sha256 $ sha256 final_str
 

@@ -204,3 +204,8 @@ modExp b 0 m = 1
 modExp b e m =
     t * modExp ((b * b) `mod` m) (shiftR e 1) m `mod` m
     where t = if testBit e 0 then b `mod` m else 1
+
+ascending :: Ord a => [a] -> Bool
+ascending [] = True
+ascending [_] = True
+ascending (x:y:xs) = x <= y && ascending (y:xs)
