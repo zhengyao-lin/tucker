@@ -25,7 +25,7 @@ instance NFData TCKRError where
 
 wrapError :: TCKRError -> String -> TCKRError
 wrapError (TCKRError err) prep =
-    TCKRError (prep ++ ": " ++ err)
+    TCKRError (prep ++ ", " ++ err)
 
 failT :: MonadError TCKRError m => String -> m a
 failT = throwError . TCKRError

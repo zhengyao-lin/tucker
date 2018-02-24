@@ -225,6 +225,8 @@ rawSigHashS sig_raw = do
         -- NOTE: only sha256 it ONCE because there's another
         -- hashing in the verification process
 
+    -- traceShowM (hex rawtx)
+
     return hash
 
 incPcS :: EvalState ()
@@ -312,6 +314,10 @@ evalOpS OP_HASH256 = do
 evalOpS OP_CHECKSIG = do
     (pub', sig') <- pop2BSS
     msg <- rawSigHashS sig'
+
+    -- tx <- encodeLE <$> txS
+    -- traceShowM (hex pub', hex msg, hex tx, hex $ BSR.init sig')
+
     -- there is one byte(hash type) appended to the signature
     pushBoolS (verifyFail pub' msg (BSR.init sig'))
 

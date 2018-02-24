@@ -201,7 +201,11 @@ instance Alternative Decoder where
         Decoder $ \end bs ->
             case d1 end bs of
                 r@(Right _, rest) -> r
-                _ -> d2 end bs
+                (Left e1, _) ->
+                    case d2 end bs of
+                        r@(Right _, rest) -> r
+                        (Left e2, rest) ->
+                            (Left $ wrapError e2 (show e1), rest)
 
 class Decodable t where
     decoder :: Decoder t
