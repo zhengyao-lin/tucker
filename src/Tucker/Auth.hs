@@ -20,9 +20,10 @@ import Crypto.PubKey.ECC.Types
 import Crypto.PubKey.ECC.ECDSA
 import Crypto.PubKey.ECC.Generate
 
+import Data.ASN1.Types
+import Data.ASN1.BitArray
 import Data.ASN1.Encoding
 import Data.ASN1.BinaryEncoding
-import Data.ASN1.Types
 
 -- import Data.ByteString.Base58
 import Data.List
@@ -232,6 +233,21 @@ addr2hash conf addr = do
         Left $ TCKRError "illegal address"
     else
         return (BSR.drop 1 pub_hash_raw)
+
+-- encode public key to ASN.1 encoding
+-- specification at https://www.secg.org/SEC1-Ver-1.0.pdf
+pub2der :: ECCPublicKey -> ByteString
+pub2der pub =
+    let raw = encodeBE pub
+        id = OID [ 1, 2, 840, 10045, 2, 1 ] -- TODO: specific for secp256k1
+        param = OID [ 1, 3, 132, 0, 10 ] in
+
+    encodeASN1' DER [
+            Start Sequence,
+                Start Sequence, id, param, End Sequence,
+                BitString (BitArray (fi $ BSR.length raw * 8) raw),
+            End Sequence
+        ]
 
 genRaw :: IO (ECCPublicKey, ECCPrivateKey)
 genRaw = do

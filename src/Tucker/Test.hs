@@ -6,6 +6,11 @@ import Data.Hex
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
+import Data.ASN1.Types
+import Data.ASN1.BitArray
+import Data.ASN1.Encoding
+import Data.ASN1.BinaryEncoding
+
 import Debug.Trace
 
 import Network.Socket hiding (send, recv)
