@@ -304,6 +304,8 @@ updateIds tx =
 -- 5. pay to script hash
 --     reason: the length of UTXO of type 3 is too long(because it needs to contain many long public keys)
 --     using P2SH, the script(redeem script) is presented later to save some memory on full nodes(maybe?)
+--    sig_script: <sig> [sig] [sig...] <redeem_script>
+--     pk_script: OP_HASH160 <hash160(redeem_script)> OP_EQUAL
 
 -- what do we want:
 -- given

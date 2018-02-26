@@ -1,3 +1,4 @@
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-overlapping-patterns #-}
 
 module Tucker.Msg.Script where
@@ -476,3 +477,51 @@ runEval s scripts =
         -- eval each script in order in the script list
     let exec = foldl' (>>=) (return s) . map (flip execEval) in
     eitherToResult (isValidStack <$> exec scripts)
+
+-- types of script
+data ScriptType
+    = SCRIPT_P2PKH
+    | SCRIPT_P2PK
+    | SCRIPT_P2SH
+    | SCRIPT_P2MULTISIG
+    | SCRIPT_NONSTD deriving (Eq, Show)
+
+allPush :: [ScriptOp] -> Bool
+allPush [] = True
+allPush (OP_PUSHDATA _:rst) = allPush rst
+allPush _ = False
+
+-- (sig script, pub key script)
+getScriptType :: ([ScriptOp], [ScriptOp]) -> ScriptType
+
+-- P2PKH
+-- sig_script: <signature> <public key>
+--  pk_script: OP_DUP OP_HASH160 <public key hash> OP_EQUALVERIFY OP_CHECKSIG
+getScriptType
+    ([ OP_PUSHDATA _, OP_PUSHDATA _ ],
+     [ OP_DUP, OP_HASH160, OP_PUSHDATA _, OP_EQUALVERIFY, OP_CHECKSIG ])
+    = SCRIPT_P2PKH
+
+-- P2PK
+-- sig_script: <signature>
+--  pk_script: <public key> OP_CHECKSIG
+getScriptType
+    ([ OP_PUSHDATA _ ], [ OP_PUSHDATA _, OP_CHECKSIG ])
+    = SCRIPT_P2PK
+
+-- P2SH
+-- sig_script: just OP_PUSHDATA's
+--  pk_script: OP_HASH160 <hash160(redeem script)> OP_EQUAL
+getScriptType
+    (allPush -> True, [ OP_HASH160, OP_PUSHDATA _, OP_EQUAL ])
+    = SCRIPT_P2SH
+
+-- P2MULTISIG
+-- sig_script: OP_0 <signature 1> <signature 2>
+--  pk_script: M <public key 1> <public key 2> ... <public key N> N OP_CHECKMULTISIG
+getScriptType
+    (OP_CONST _:(allPush -> True),
+     OP_CONST _:(reverse -> OP_CHECKMULTISIG:OP_CONST _:(allPush -> True)))
+    = SCRIPT_P2MULTISIG
+
+getScriptType _ = SCRIPT_NONSTD
