@@ -25,7 +25,6 @@ data ScriptOp
     -- constant ops
     = OP_PUSHDATA ByteString
     | OP_CONST Word8
-    | OP_0
 
     -- flow-control
     | OP_NOP
@@ -141,13 +140,13 @@ data ScriptOp
     | OP_PRINT String deriving (Eq, Show)
 
 -- constant ops
--- OP_PUSHDATA(can have 4 forms each with different maximum sizes of data)
+-- OP_PUSHDATA(can have 5 forms each with different maximum sizes of data)
 -- OP_NEG(push 0/1/-1 to the stack)
--- OP_0-OP_16(the number 0-16 is pushed into the stack)
+-- OP_1-OP_16(the number 0-16 is pushed into the stack)
 
 one_byte_op_map :: [(ScriptOp, Word8)]
 one_byte_op_map = [
-        (OP_0,                   0x00),
+        (OP_PUSHDATA BSR.empty,  0x00),
         (OP_NOP,                 0x61),
 
         (OP_VERIFY,              0x69),
@@ -302,7 +301,7 @@ opPushdataD = do
     i <- byteD
 
     len <-
-        if i == 0 then fail "OP_PUSHDATA starts with a non-zero byte"
+        if i == 0 then return 0 -- fail "OP_PUSHDATA starts with a non-zero byte"
         else if i <= 0x4b then return $ fi i
         else if i == 0x4c then fi <$> (decoder :: Decoder Word8)
         else if i == 0x4d then fi <$> (decoder :: Decoder Word16)
@@ -317,8 +316,7 @@ opConstD :: Decoder ScriptOp
 opConstD = do
     i <- byteD
 
-    if i == 0    then return $ OP_CONST 0
-    else if i == 0x4f then return $ OP_CONST (-1)
+    if i == 0x4f then return $ OP_CONST (-1)
     else if i >= 0x51 &&
             i <= 0x60 then return $ OP_CONST (i - 0x50)
     else fail "OP_CONST invalid first byte"

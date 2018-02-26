@@ -268,7 +268,6 @@ verifyFail pub msg sig =
 evalOpS :: ScriptOp -> EvalState ()
 evalOpS (OP_PUSHDATA dat) = pushBSS dat
 evalOpS (OP_CONST v) = pushBSS (bchar v)
-evalOpS OP_0 = pushBSS BSR.empty
 
 evalOpS OP_NOP = return ()
 evalOpS (OP_IF exp ofs) = do
@@ -476,15 +475,41 @@ runEval :: ScriptState -> [[ScriptOp]] -> ScriptResult -- Either TCKRError Bool
 runEval s scripts =
         -- eval each script in order in the script list
     let exec = foldl' (>>=) (return s) . map (flip execEval) in
-    eitherToResult (isValidStack <$> exec scripts)
+    eitherToResult $ do
+        state <- exec scripts
+         
+        if isValidStack state then
+            -- special cases e.g. P2SH
+            isValidStack <$> specialScript state scripts
+        else
+            return False
+
+specialScript :: ScriptState -> [[ScriptOp]] -> Either TCKRError ScriptState
+
+-- P2SH
+specialScript s (getScriptType -> SCRIPT_P2SH redeem) = do
+    redeem_script <- decodeAllLE redeem
+    ns <- execStateT popS s -- pop out result first
+    execEval ns redeem_script -- exec on redeem script
+
+-- no change in state
+specialScript s _ = return s
 
 -- types of script
 data ScriptType
     = SCRIPT_P2PKH
     | SCRIPT_P2PK
-    | SCRIPT_P2SH
+    | SCRIPT_P2SH ByteString -- redeem script
     | SCRIPT_P2MULTISIG
-    | SCRIPT_NONSTD deriving (Eq, Show)
+    | SCRIPT_NONSTD deriving (Show)
+
+instance Eq ScriptType where
+    SCRIPT_P2PKH == SCRIPT_P2PKH = True
+    SCRIPT_P2PK == SCRIPT_P2PK = True
+    (SCRIPT_P2SH _) == (SCRIPT_P2SH _) = True
+    SCRIPT_P2MULTISIG == SCRIPT_P2MULTISIG = True
+    SCRIPT_NONSTD == SCRIPT_NONSTD = True
+    _ == _ = False
 
 allPush :: [ScriptOp] -> Bool
 allPush [] = True
@@ -492,36 +517,37 @@ allPush (OP_PUSHDATA _:rst) = allPush rst
 allPush _ = False
 
 -- (sig script, pub key script)
-getScriptType :: ([ScriptOp], [ScriptOp]) -> ScriptType
+getScriptType :: [[ScriptOp]] -> ScriptType
 
 -- P2PKH
 -- sig_script: <signature> <public key>
 --  pk_script: OP_DUP OP_HASH160 <public key hash> OP_EQUALVERIFY OP_CHECKSIG
 getScriptType
-    ([ OP_PUSHDATA _, OP_PUSHDATA _ ],
-     [ OP_DUP, OP_HASH160, OP_PUSHDATA _, OP_EQUALVERIFY, OP_CHECKSIG ])
+    [ [ OP_PUSHDATA _, OP_PUSHDATA _ ],
+      [ OP_DUP, OP_HASH160, OP_PUSHDATA _, OP_EQUALVERIFY, OP_CHECKSIG ] ]
     = SCRIPT_P2PKH
 
 -- P2PK
 -- sig_script: <signature>
 --  pk_script: <public key> OP_CHECKSIG
 getScriptType
-    ([ OP_PUSHDATA _ ], [ OP_PUSHDATA _, OP_CHECKSIG ])
+    [ [ OP_PUSHDATA _ ], [ OP_PUSHDATA _, OP_CHECKSIG ] ]
     = SCRIPT_P2PK
 
 -- P2SH
 -- sig_script: just OP_PUSHDATA's
 --  pk_script: OP_HASH160 <hash160(redeem script)> OP_EQUAL
 getScriptType
-    (allPush -> True, [ OP_HASH160, OP_PUSHDATA _, OP_EQUAL ])
-    = SCRIPT_P2SH
+    [ reverse -> OP_PUSHDATA redeem:(allPush -> True),
+      [ OP_HASH160, OP_PUSHDATA _, OP_EQUAL ] ]
+    = SCRIPT_P2SH redeem
 
 -- P2MULTISIG
 -- sig_script: OP_0 <signature 1> <signature 2>
 --  pk_script: M <public key 1> <public key 2> ... <public key N> N OP_CHECKMULTISIG
 getScriptType
-    (OP_CONST _:(allPush -> True),
-     OP_CONST _:(reverse -> OP_CHECKMULTISIG:OP_CONST _:(allPush -> True)))
+    [ OP_PUSHDATA _:(allPush -> True),
+      OP_CONST _:(reverse -> OP_CHECKMULTISIG:OP_CONST _:(allPush -> True)) ]
     = SCRIPT_P2MULTISIG
 
 getScriptType _ = SCRIPT_NONSTD

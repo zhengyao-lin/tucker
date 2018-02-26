@@ -190,8 +190,10 @@ instance Decodable ECCSignature where
     decoder = do
         all <- allD
         case decodeASN1' DER all of
-            Right ((Start Sequence):(IntVal r):(IntVal s):(End Sequence):[])
+            Right [ Start Sequence, IntVal r, IntVal s, End Sequence ]
                 -> return $ ECCSignature r s
+            Right res
+                -> fail ("wrong DER encoding result: " ++ show res)
             Left err -> fail ("illegal DER encoding: " ++ show err)
 
 priv2pub :: ECCPrivateKey -> ECCPublicKey

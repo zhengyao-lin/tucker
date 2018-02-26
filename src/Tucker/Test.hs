@@ -182,8 +182,10 @@ generalTxCase stype should_be tx0 out_idx tx1 in_idx = do
     
     -- print pk_sc
 
-    assertEqual ("wrong script type for tx " ++ show (txid tx1))
-        stype (getScriptType (sig_sc, pk_sc))
+    -- print ([ sig_sc, pk_sc ])
+
+    assertBool ("wrong script type for tx " ++ show (txid tx1))
+        (stype == getScriptType [ sig_sc, pk_sc ])
 
     assertEqual ("wrong checking result for tx " ++ show (txid tx1))
         should_be (runEval state [ sig_sc, pk_sc ])
@@ -424,6 +426,23 @@ txCase6 = TestCase $ do
     
     generalTxCase SCRIPT_NONSTD ValidTx tx0 0 tx1 0
 
+txCase7 = TestCase $ do
+    -- tx0 40eee3ae1760e3a8532263678cdf64569e6ad06abc133af64f735e52562bccc8
+    -- tx1 7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe6209fc45
+    let tx0 = hex2tx "0100000001da75479f893cccfaa8e4558b28ec7cb4309954389f251f2212eabad7d7fda342000000006a473044022048d1468895910edafe53d4ec4209192cc3a8f0f21e7b9811f83b5e419bfb57e002203fef249b56682dbbb1528d4338969abb14583858488a3a766f609185efe68bca0121031a455dab5e1f614e574a2f4f12f22990717e93899695fb0d81e4ac2dcfd25d00ffffffff01301b0f000000000017a914e9c3dd0c07aac76179ebc76a6c78d4d67c6c160a8700000000"
+        tx1 = hex2tx "0100000001c8cc2b56525e734ff63a13bc6ad06a9e5664df8c67632253a8e36017aee3ee40000000009000483045022100ad0851c69dd756b45190b5a8e97cb4ac3c2b0fa2f2aae23aed6ca97ab33bf88302200b248593abc1259512793e7dea61036c601775ebb23640a0120b0dba2c34b79001455141042f90074d7a5bf30c72cf3a8dfd1381bdbd30407010e878f3a11269d5f74a58788505cdca22ea6eab7cfb40dc0e07aba200424ab0d79122a653ad0c7ec9896bdf51aefeffffff0120f40e00000000001976a9141d30342095961d951d306845ef98ac08474b36a088aca7270400"
+
+    generalTxCase (SCRIPT_P2SH undefined) ValidTx tx0 0 tx1 0
+
+-- edited from case 7
+txCase8 = TestCase $ do
+    -- tx0 40eee3ae1760e3a8532263678cdf64569e6ad06abc133af64f735e52562bccc8
+    -- tx1 7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe6209fc45
+    let tx0 = hex2tx "0100000001da75479f893cccfaa8e4558b28ec7cb4309954389f251f2212eabad7d7fda342000000006a473044022048d1468895910edafe53d4ec4209192cc3a8f0f21e7b9811f83b5e419bfb57e002203fef249b56682dbbb1528d4338969abb14583858488a3a766f609185efe68bca0121031a455dab5e1f614e574a2f4f12f22990717e93899695fb0d81e4ac2dcfd25d00ffffffff01301b0f000000000017a914e9c3dd0c07aac76179ebc76a6c78d4d67c6c160a8700000000"
+        tx1 = hex2tx "0200000001c8cc2b56525e734ff63a13bc6ad06a9e5664df8c67632253a8e36017aee3ee40000000009000483045022100ad0851c69dd756b45190b5a8e97cb4ac3c2b0fa2f2aae23aed6ca97ab33bf88302200b248593abc1259512793e7dea61036c601775ebb23640a0120b0dba2c34b79001455141042f90074d7a5bf30c72cf3a8dfd1381bdbd30407010e878f3a11269d5f74a58788505cdca22ea6eab7cfb40dc0e07aba200424ab0d79122a653ad0c7ec9896bdf51aefeffffff0120f40e00000000001976a9141d30342095961d951d306845ef98ac08474b36a088aca7270400"
+
+    generalTxCase (SCRIPT_P2SH undefined) InvalidTx tx0 0 tx1 0
+
 scriptTest = TestCase $ do
     let sc1 = [ OP_NOP ]
         sc2 = [ OP_IF True 1, OP_ENDIF ]
@@ -472,7 +491,9 @@ msgTests = TestList [
         TestLabel "tx case 3" txCase3,
         TestLabel "tx case 4" txCase4,
         TestLabel "tx case 5" txCase5,
-        TestLabel "tx case 6" txCase6
+        TestLabel "tx case 6" txCase6,
+        TestLabel "tx case 7" txCase7,
+        TestLabel "tx case 8" txCase8
     ]
 
 allTests = TestList [
