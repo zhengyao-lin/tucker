@@ -32,6 +32,8 @@ import Tucker.Conf
 import Tucker.Error
 import Tucker.DeepSeq
 
+import Tucker.Chain.Tx
+
 -- data BlockTree = BlockTree [[Block]] deriving (Eq, Show)
 -- data Block
 
@@ -86,14 +88,17 @@ data Chain =
         std_conf      :: TCKRConf,
 
         db_global     :: Database,
+        db_subs       :: [Database],
         
         bucket_block  :: DBBucket Hash256 (Height, Block),
         bucket_chain  :: DBBucket Height Hash256,
 
+        tx_set        :: TxSet,
+
         saved_height  :: Height, -- hight of the lowest block stored in memory
 
         orphan_pool   :: OSET.OSet Block,
-        buffer_chain  :: Maybe Branch,
+        buffer_chain  :: Maybe Branch, -- NEVER use buffer_chain alone
         -- replace the old buffer chain when a new buffer chain is formed
         -- the length of the buffer chain should >= tckr_max_tree_insert_depth
         edge_branches :: [Branch]
@@ -109,6 +114,7 @@ instance NFData Chain where
 initChain :: TCKRConf -> ResIO Chain
 initChain conf@(TCKRConf {
     tckr_db_path = db_path,
+    tckr_tx_db_path = tx_db_path,
     tckr_bucket_block_name = block_name,
     tckr_bucket_chain_name = chain_name,
 
@@ -116,16 +122,23 @@ initChain conf@(TCKRConf {
     tckr_max_tree_insert_depth = max_depth
 }) = do
     db_global <- openDB def db_path
+    db_tx     <- openDB def tx_db_path
 
     bucket_block <- lift $ openBucket db_global block_name
     bucket_chain <- lift $ openBucket db_global chain_name
+
+    tx_set <- lift $ initTxSet conf db_tx
 
     let chain = Chain {
             std_conf = conf,
 
             db_global = db_global,
+            db_subs = [ db_tx ],
+
             bucket_block = bucket_block,
             bucket_chain = bucket_chain,
+
+            tx_set = tx_set,
 
             saved_height = 0,
 
@@ -285,42 +298,73 @@ branchToBlockList' cur (Just (BlockNode {
 branchToBlockList = branchToBlockList' [] . Just
 
 -- search and return a block node
-searchBranch :: Branch -> (Branch -> Bool) -> Maybe Branch
-searchBranch node@(BlockNode {
-    prev_node = prev
-}) pred =
-    if pred node then Just node
-    else prev >>= (`searchBranch` pred)
+-- return (previous node, result)
+searchBranch' :: (Branch -> Bool) -> Branch -> (Branch, Maybe Branch)
+searchBranch' pred node@(BlockNode {
+    prev_node = mprev
+}) =
+    if pred node then (node, Just node)
+    else case mprev of
+        Nothing -> (node, Nothing)
+        Just prev -> searchBranch' pred prev
 
-searchBranchHash node hash =
-    searchBranch node ((== hash) . block_hash . block_data)
+-- edge_branches and buffer_chain are the only place
+-- to store BlockNode
+searchBranch :: Chain -> (Branch -> Bool) -> Branch -> Maybe Branch
+searchBranch (Chain {
+    edge_branches = branches,
+    buffer_chain = mbuffer_chain
+}) pred branch =
+    let (prev, res) = searchBranch' pred branch in
+    
+    case res of
+        Just _ -> res -- found, no problem
+        Nothing -> do -- maybe monad
+            -- if not found, we have to consider two situations
+            -- 1. the search has reached the real end(end of buffer chain)
+            --    so no further search for block in memory is possible
+            -- 2. the search reached the end of edge_branches, but has not
+            --    reached the buffer chain, in this way, the search can be continued
+            --    by researching on the buffer chain
 
-searchBranchHeight node height =
-    searchBranch node ((== height) . cur_height)
+            -- we have to compare the height of the end block
+            -- and the height of the buffer chain to determine
+            -- the situation
+
+            bufc@(BlockNode {
+                cur_height = bufc_height
+            }) <- mbuffer_chain
+
+            if cur_height prev == bufc_height + 1 then
+                -- it is connected to the buffer chain
+                -- search on the buffer chain & return the
+                -- final result
+                snd (searchBranch' pred bufc)
+            else
+                -- not connected, end search
+                Nothing
+
+searchBranchHash chain hash =
+    searchBranch chain ((== hash) . block_hash . block_data)
+
+searchBranchHeight chain height =
+    searchBranch chain ((== height) . cur_height)
 
 insertToEdge :: Chain -> Block -> Maybe (Branch, Chain)
 insertToEdge chain@(Chain {
-    buffer_chain = buffer_chain,
     edge_branches = edge_branches
 }) block@(Block {
     hash_target = hash_target,
     prev_hash = prev_hash
 }) = do
-    let search_res =
-            maybeCat $ map (`searchBranchHash` prev_hash) edge_branches
+    let search = searchBranchHash chain prev_hash
 
     -- trace "inserting!" $ return 0
 
-    prev_bn <-
-        if null search_res then
-            case buffer_chain of
-                Just bufc -> searchBranchHash bufc prev_hash
-                Nothing -> Nothing
-        else
-            Just $ head search_res
-    -- if nothing is found in edge branches and the buffer chain
-    -- Nothing is returned here
+    -- find the first appearing branch node
+    prev_bn <- foldl (<|>) Nothing (map search edge_branches)
 
+    -- construct new node
     let new_node =
             BlockNode {
                 prev_node = Just prev_bn,
@@ -333,6 +377,7 @@ insertToEdge chain@(Chain {
     -- previous block found, inserting to the tree
     let new_branches =
             case elemIndex prev_bn edge_branches of
+                -- check if the prev_bn is at the top of branches
                 Just leaf_idx -> replace leaf_idx new_node edge_branches
                 Nothing -> new_node : edge_branches
     
@@ -344,11 +389,10 @@ blocksAtHeight chain height =
         \b -> blockAtHeight chain b height
 
 blockAtHeight :: Chain -> Branch -> Height -> IO (Maybe Block)
-blockAtHeight (Chain {
+blockAtHeight chain@(Chain {
     bucket_chain = bucket_chain,
     bucket_block = bucket_block,
-    saved_height = saved_height,
-    buffer_chain = buffer_chain
+    saved_height = saved_height
 }) branch@(BlockNode {
     cur_height = max_height
 }) height =
@@ -357,21 +401,19 @@ blockAtHeight (Chain {
         return Nothing
     else if height >= saved_height then do
         -- the block should be in memory
-        let search branch =
-                -- trace "should be two of me" $
-                searchBranchHeight branch height >>=
-                (return . block_data)
-
-        return $ search branch <|> (buffer_chain >>= search)
+        return (block_data <$> searchBranchHeight chain height branch)
     else do
-        res <- getB bucket_chain height :: IO (Maybe Hash256)
+        -- the block should be in the db
+        -- getB bucket_chain height :: IO (Maybe Hash256)
+        -- getB bucket_block hash :: IO (Maybe (Height, Block))
 
-        case res of
+        mhash <- getB bucket_chain height
+        
+        case mhash of
             Nothing -> return Nothing
             Just hash -> do
-                Just (_, block) <- getB bucket_block hash
-                                :: IO  (Maybe (Height, Block))
-                return $ Just block
+                mpair <- getB bucket_block hash
+                return (snd <$> mpair)
 
 corrupt = reject "corrupted data base"
 
@@ -724,78 +766,3 @@ merkleRoot :: Block -> Hash256
 merkleRoot (Block {
     txns = txns
 }) = head $ merkleRoot' (map txid (FD.toList txns))
-
---------------------------------------------------------
-
--- data BlockTreePartInfo =
---     BlockTreePartInfo {
---         tree_height :: TreeHeight
---     } deriving (Show)
-
--- -- BlockTreePart prev_hash 
--- data BlockTreePart = BlockTreePart {
---         prev_hashes :: [Hash256], -- if prev_hashes == [], the layers starts from genesis
---         layers      :: [[Block]]
---     } deriving (Eq, Show)
-
--- instance Monoid BlockTreePart where
---     mempty = emptyTreePart
---     mappend a b =
---         case linkTreePart a b of
---             -- hopefully somebody will catch it
---             Nothing -> throw $ TCKRError "tree part not connectable"
---             Just c -> c
-
--- instance Encodable BlockTreePart where
---     encode end (BlockTreePart hashes layers) =
---         encodeVList end hashes <>
---         encodeVList end (map (encodeVList end) layers)
-
--- instance Decodable BlockTreePart where
---     decoder = do
---         hashes <- vlistD decoder
---         layers <- vlistD (vlistD decoder)
-
---         return $ BlockTreePart hashes layers
-
--- -- break from genesis
--- splitTreePart :: Int -> BlockTreePart -> (BlockTreePart, BlockTreePart)
--- splitTreePart n (BlockTreePart hashes layers) =
---     (BlockTreePart hashes prev,
---      BlockTreePart (lastHash prev) (next))
---     where
---         (prev, next) = splitAt n layers
-
---         lastHash layers =
---             if null layers then []
---             else map block_hash $ last prev
-
--- linkTreePart :: BlockTreePart -> BlockTreePart -> Maybe BlockTreePart
--- linkTreePart (BlockTreePart h1 l1) (BlockTreePart h2 l2) =
---     if null l1 then
---         Just $ BlockTreePart h2 l2
---     else if null l2 then
---         Just $ BlockTreePart h1 l1
---     else if sort h2 == sort last_l1_hash then
---         -- check if hash matches
---         Just $ BlockTreePart h1 (l1 ++ l2)
---     else
---         Nothing
---     where
---         last_l1_hash = map block_hash $ last l1
-
--- emptyTreePart = BlockTreePart [] []
-
--- treePartHeight :: BlockTreePart -> TreeHeight
--- treePartHeight (BlockTreePart { layers = layers }) = fromIntegral $ length layers
-
--- treePartInfo :: BlockTreePart -> BlockTreePartInfo
--- treePartInfo part =
---     BlockTreePartInfo {
---         tree_height = treePartHeight part
---     }
-
--- treePartLatestHash :: BlockTreePart -> [Hash256]
--- treePartLatestHash (BlockTreePart prev_hashes layers) =
---     if null layers then prev_hashes
---     else map (block_hash) $ last layers

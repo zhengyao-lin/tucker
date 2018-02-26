@@ -74,7 +74,10 @@ data TxPayload =
                               -- if lock_time < 500,000,000, treat it as a block height
                               -- if lock_time >= 500,000,000, treat it as an unix timestamp
         -- tx_cache    :: Maybe ByteString
-    } deriving (Eq, Show)
+    } deriving (Show)
+
+instance Eq TxPayload where
+    tx1 == tx2 = txid tx1 == txid tx2
 
 instance NFData TxPayload where
     rnf (TxPayload txid wtxid version flag tx_in tx_out tx_witness lock_time) =

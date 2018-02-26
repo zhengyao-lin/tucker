@@ -63,7 +63,7 @@ openDB :: DBOption -> FilePath -> ResIO Database
 openDB opt path = do
     lift $
         if D.createIfMissing opt then
-            createDirectoryIfMissing False path
+            createDirectoryIfMissing True path
         else
             return ()
 
