@@ -396,7 +396,6 @@ blockAtHeight chain@(Chain {
 }) branch@(BlockNode {
     cur_height = max_height
 }) height =
-    -- trace ("height!!!!" ++ show (height, max_height, saved_height)) $
     if height > max_height then
         return Nothing
     else if height >= saved_height then do
@@ -404,9 +403,6 @@ blockAtHeight chain@(Chain {
         return (block_data <$> searchBranchHeight chain height branch)
     else do
         -- the block should be in the db
-        -- getB bucket_chain height :: IO (Maybe Hash256)
-        -- getB bucket_block hash :: IO (Maybe (Height, Block))
-
         mhash <- getB bucket_chain height
         
         case mhash of
@@ -415,7 +411,38 @@ blockAtHeight chain@(Chain {
                 mpair <- getB bucket_block hash
                 return (snd <$> mpair)
 
-corrupt = reject "corrupted data base"
+-- get the block height in a given branch by a given hash
+blockHeightByHash :: Chain -> Branch -> Hash256 -> IO (Maybe Height)
+blockHeightByHash chain@(Chain {
+    bucket_chain = bucket_chain,
+    bucket_block = bucket_block,
+    saved_height = saved_height
+}) branch@(BlockNode {
+    cur_height = max_height
+}) hash =
+    case searchBranchHash chain hash branch of
+        Just (BlockNode {
+            cur_height = height
+        }) -> return $ Just height
+
+        Nothing -> do
+            mpair <- getAsB bucket_block hash :: IO (Maybe (Height, Placeholder))
+            
+            case fst <$> mpair of
+                Nothing -> return Nothing
+                Just height -> do
+                    -- extra check to make sure the block is indeed exist
+                    mhash <- getB bucket_chain height
+                    
+                    case mhash of
+                        Nothing -> return Nothing -- is not in the chain
+                        Just hash' ->
+                            if height < saved_height &&
+                               hash' == hash then return $ Just height
+                            else
+                                return Nothing -- not in the chain due to data lost
+
+corrupt = reject "corrupted database"
 
 hashTargetValid :: Chain -> Branch -> IO Bool
 hashTargetValid chain@(Chain {
@@ -586,26 +613,8 @@ latestBlocks maxn (Chain {
            (concatMap (takeBranch maxn) branches)
 
 addBlock :: Chain -> Block -> IO (Either TCKRError Chain)
-addBlock chain block = do
-    -- traceM $
-    --    "chain status: heights: " ++ show (branchHeights chain) ++
-    --    ", orphan pool: " ++ show (OSET.size (orphan_pool chain)) ++
-    --    ", buffer chain: " ++ show (length (maybe [] branchToBlockList (buffer_chain chain))) 
-
+addBlock chain block =
     force <$> ioToEitherIO (addBlockFail chain block)
-    -- res <- ioToEitherIO (addBlockFail chain block)
-    -- return $ force res
-
--- add blocks with a error handler
--- addBlocks :: Chain -> [Block] -> (Block -> Either TCKRError Chain -> IO ()) -> IO Chain
--- addBlocks chain blocks proc =
---     let fold_proc chain block =
---             addBlock chain block >>= \r ->
---                 proc block r >> case r of
---                     Left _ -> return chain
---                     Right chain -> return chain
-
---     in foldM' fold_proc chain blocks
 
 addBlocks :: (Block -> Either TCKRError Chain -> IO ()) -> Chain -> [Block] -> IO Chain
 addBlocks proc chain [] = return chain
@@ -623,6 +632,7 @@ addBlocks proc chain (block:blocks) = do
 addBlockFail :: Chain -> Block -> IO Chain
 addBlockFail chain@(Chain {
     std_conf = conf,
+    tx_set = tx_set,
     bucket_block = bucket_block,
     orphan_pool = orphan_pool
 }) block@(Block {
@@ -688,7 +698,53 @@ addBlockFail chain@(Chain {
 
             -- TODO: reject if timestamp is the median time of the last 11 blocks or before(MTP?)
             -- TODO: further block checks
-            
+
+            {-
+                1. input exists(the input points to a valid block and a valid index)
+                2. if referenced transaction is a coinbase, make sure the depth of the input block is >= 100
+                3. verify signature(involves script)
+                4. referenced output is not spent
+                5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
+            -}
+
+            forM_ (zip [0..] txns) $ \(idx, tx) -> do
+                let is_coinbase = isCoinbase tx
+
+                expectTrue "more than one coinbase txns" $
+                    idx == 0 || not is_coinbase
+
+                if not is_coinbase then do
+                    in_values <- forM (map prev_out (tx_in tx)) $ \outp@(OutPoint txid _) -> do
+                        value <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
+                            lookupUTXO tx_set outp
+
+                        locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
+                            findTxId tx_set txid
+
+                        mheight <- blockHeightByHash chain branch (locatorToHash locator)
+
+                        height <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+                            blockHeightByHash chain branch (locatorToHash locator)
+
+                        -- if the tx is coinbase(idx == 0), check coinbase maturity
+                        expectTrue "coinbase maturity not met" $
+                            locatorToIdx locator /= 0 ||
+                            cur_height branch - height > fi (tckr_coinbase_maturity conf)
+
+                        return value
+
+                    -- validity of values
+                    expectTrue "sum of inputs less than the sum of output" $
+                        sum (in_values) >= getOutputValue tx
+                else
+                    -- omitting coinbase value check
+                    return ()
+
+                addTx tx_set block idx
+
+            -- add tx to tx and utxo pool
+            -- mapM_ (addTx tx_set block) [ 0 .. length txns - 1 ]
+             
             -- all check passed
             -- write the block into the block database
             setB bucket_block block_hash (cur_height branch, block)
@@ -730,7 +786,8 @@ hasBlockInOrhpan chain block =
 -- search two places for the block: block db and the orphan pool
 hasBlock :: Chain -> Block -> IO Bool
 hasBlock chain block =
-    (||) <$> hasBlockInChain chain block <*> hasBlockInOrhpan chain block
+    (||) <$> hasBlockInChain chain block
+         <*> hasBlockInOrhpan chain block
 
 reject :: String -> a
 reject msg = throw $ TCKRError msg
@@ -747,6 +804,11 @@ expectTrueIO msg cond = expect msg True cond
 expectFalseIO msg cond = expect msg False cond
 expectTrue msg cond = expect msg True $ pure cond
 expectFalse msg cond = expect msg False $ pure cond
+
+expectMaybe msg (Just v) = return v
+expectMaybe msg Nothing = reject msg
+
+expectMaybeIO msg m = m >>= expectMaybe msg
 
 merkleParents :: [Hash256] -> [Hash256]
 merkleParents [] = []

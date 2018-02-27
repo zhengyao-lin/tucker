@@ -290,6 +290,11 @@ updateIds tx =
         wtxid = getWtxId tx
     }
 
+-- get output value
+getOutputValue :: TxPayload -> Value
+getOutputValue tx =
+    sum (map value (tx_out tx))
+
 -- update on Jan 14, 2018
 -- there are(maybe) 5 standard transactions
 -- 1. P2PKH(currently implemented)

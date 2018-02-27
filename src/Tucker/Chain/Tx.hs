@@ -15,6 +15,9 @@ type TxLocator = (Hash256, Word32)
 txLocator :: Hash256 -> Word32 -> TxLocator
 txLocator = (,)
 
+locatorToHash = fst
+locatorToIdx = snd
+
 -- a giant structure handling all transactions(orphans, mempool, ...)
 data TxSet =
     TxSet {
@@ -26,7 +29,7 @@ data TxSet =
 
         -- a set of unspent tx output
         -- tx in this set must be included in blocks
-        bucket_utxo    :: DBBucket OutPoint Placeholder,
+        bucket_utxo    :: DBBucket OutPoint Value,
 
         -- currently useless without mining
         -- valid yet not included in blocks
@@ -62,17 +65,22 @@ addTx (TxSet {
     let tx = FD.toList (txns block) !! idx
         spent = map prev_out (tx_in tx)
         len_out = length (tx_out tx)
-        unspent = map (uncurry OutPoint) (replicate len_out (txid tx) `zip` [0..])
+
+        -- :: [(OutPoint, Value)]
+        unspent =
+            map (uncurry OutPoint) (replicate len_out (txid tx) `zip` [0..])
+            `zip`
+            map value (tx_out tx)
 
     setB bucket_tx (txid tx) (txLocator (block_hash block) (fi idx))
 
     -- remove/add spent/unspent outpoint
     mapM_ (deleteB bucket_utxo) spent
-    mapM_ (flip (setB bucket_utxo) Placeholder) unspent
+    mapM_ (uncurry (setB bucket_utxo)) unspent
 
 -- lookup for a utxo
-lookupUTXO :: TxSet -> OutPoint -> IO Bool
-lookupUTXO = hasB . bucket_utxo
+lookupUTXO :: TxSet -> OutPoint -> IO (Maybe Value)
+lookupUTXO = getB . bucket_utxo
 
 -- lookup for a accepted txid
 findTxId :: TxSet -> Hash256 -> IO (Maybe TxLocator)
