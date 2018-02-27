@@ -27,7 +27,7 @@ import Tucker.Atom
 import Tucker.Util
 import Tucker.Transport
 
-import Tucker.Chain.Object
+import Tucker.Storage.Chain
 
 -- two parts
 -- 1. main old tree, most common chain for all blocks
@@ -47,7 +47,7 @@ data MainLoopEnv =
         io_buf        :: Atom [String],
 
         chain_lock    :: LK.Lock,
-        block_chain   :: Atom Chain
+        block_chain   :: Atom BlockChain
     }
 
 data RouterAction
@@ -171,7 +171,7 @@ initEnv conf = do
     -- db_chain <- openDB def (tckr_db_path conf) (tckr_ks_chain conf)
 
     chain_lock <- lift $ LK.new
-    block_chain <- initChain conf >>= (lift . newA)
+    block_chain <- initBlockChain conf >>= (lift . newA)
 
     return $ MainLoopEnv {
         global_conf = conf,

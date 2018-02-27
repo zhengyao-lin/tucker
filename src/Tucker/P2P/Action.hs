@@ -33,7 +33,7 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 import Tucker.P2P.Scheduler
 
-import Tucker.Chain.Object
+import Tucker.Storage.Chain
 
 -- data CoroAction msg = CoroAction { doAction :: MainLoopEnv -> Node -> msg -> IO [RouterAction] }
 
@@ -189,7 +189,7 @@ syncChain callback env node msg = do
 
     nodeMsg env node $ "start fetching inventory"
 
-    latest <- getA (block_chain env) >>= latestBlocks (tckr_known_inv_count conf)
+    latest <- getA (block_chain env) >>= flip latestBlocks (tckr_known_inv_count conf)
 
     nodeMsg env node $ "latest known blocks" ++ show (map block_hash latest)
 

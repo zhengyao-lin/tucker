@@ -22,7 +22,7 @@ import Tucker.P2P.Util
 import Tucker.P2P.Action
 import Tucker.P2P.Server
 
-import Tucker.Chain.Object
+import Tucker.Storage.Chain
 
 import System.Mem
 

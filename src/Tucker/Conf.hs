@@ -24,7 +24,7 @@ data TCKRConf =
         tckr_node_service    :: NodeServiceType,
 
         -- keyspaces: block, tx, 
-        tckr_db_path         :: FilePath,
+        tckr_block_db_path   :: FilePath,
         tckr_tx_db_path      :: FilePath,
         tckr_bucket_block_name :: String,
         tckr_bucket_chain_name :: String,
@@ -111,12 +111,12 @@ tucker_default_conf_mainnet = do
         tckr_net_version = 60002,
         tckr_node_service = NodeServiceType [ TCKR_NODE_NETWORK ],
 
-        tckr_db_path = tucker_path </> "db" </> "chain",
+        tckr_block_db_path = tucker_path </> "db" </> "chain",
         tckr_tx_db_path = tucker_path </> "db" </> "tx",
         tckr_bucket_block_name = "block",
         tckr_bucket_chain_name = "chain",
         tckr_bucket_tx_name = "tx",
-        tckr_bucket_utxo_name = "uxto",
+        tckr_bucket_utxo_name = "utxo",
 
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 

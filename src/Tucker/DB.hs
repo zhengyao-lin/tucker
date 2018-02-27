@@ -4,7 +4,9 @@
 
 module Tucker.DB where
 
+import Data.Hex
 import Data.Word
+import qualified Data.Map.Strict as MP
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -13,6 +15,7 @@ import qualified Database.LevelDB as D
 import System.FilePath
 import System.Directory
 
+import Control.Monad
 import Control.Monad.Morph
 import Control.Monad.Loops
 import Control.Monad.Trans.Resource
@@ -21,6 +24,7 @@ import Debug.Trace
 
 import Tucker.Enc
 import Tucker.Util
+import Tucker.Atom
 
 type Database = D.DB
 
@@ -95,7 +99,7 @@ getAs db key = do
                 (Right v, _) -> Just v
                 _ -> fail "db decode failure"
 
-countWith :: Integral t => Database -> (ByteString -> Bool) -> IO t
+countWith :: Integral t => Database -> (ByteString -> IO Bool) -> IO t
 countWith db pred = runResourceT $ do
     iter <- D.iterOpen db (def { D.fillCache = False })
 
@@ -106,11 +110,13 @@ countWith db pred = runResourceT $ do
             \(count, valid) -> do
                 -- valid <- D.iterValid iter
                 mkey <- D.iterKey iter
-                let next =
-                        if (pred <$> mkey) == Just True then
-                            count + 1
-                        else
-                            count
+
+                accept <- case mkey of
+                    Nothing -> return False
+                    Just key -> pred key
+
+                let next = if accept then count + 1
+                           else count
 
                 D.iterNext iter
 
@@ -118,9 +124,19 @@ countWith db pred = runResourceT $ do
 
     return $ fi (fst res)
 
-count db = countWith db (const True)
+count db = countWith db (const (pure True))
 
-data DBBucket k v = DBBucket ByteString Database
+data DBBucket k v =
+    DBBucket {
+        bucket_pref :: ByteString,
+        raw_db      :: Database,
+
+        -- use buffer map if present
+        buffer_map  :: Atom (Maybe (MP.Map ByteString (Maybe ByteString)))
+    }
+
+instance Show (DBBucket k v) where
+    show bucket = "Bucket " ++ show (hex (bucket_pref bucket))
 
 withPrefix :: [Word32] -> String -> ByteString
 withPrefix prefs name =
@@ -151,27 +167,129 @@ openBucket db name = do
 
             return pref
 
-    return $ DBBucket pref db
+    buffer_map <- newA Nothing
+
+    return $ DBBucket {
+        bucket_pref = pref,
+        raw_db = db,
+        buffer_map = buffer_map
+    }
+
+-- init buffer map if not present
+bufferizeB :: DBBucket k v -> IO ()
+bufferizeB bucket = do
+    bmap <- getA (buffer_map bucket)
+
+    case bmap of
+        Just _ -> return ()
+        Nothing -> setA (buffer_map bucket) (Just MP.empty)
+
+syncB :: DBBucket k v -> IO ()
+syncB bucket = do
+    buffered <- hasBufferB bucket
+
+    if buffered then do
+        Just bmap <- appA_ (const (Just MP.empty)) (buffer_map bucket)
+
+        forM_ (MP.toList bmap) $ \(k, mv) ->
+            case mv of
+                Nothing -> delete (raw_db bucket) k
+                Just v -> set (raw_db bucket) k v
+    else
+        return ()
+
+hasBufferB :: DBBucket k v -> IO Bool
+hasBufferB bucket = maybeToBool <$> getA (buffer_map bucket)
+
+no_buffer_error = error "no buffer map present"
+
+setBMap :: DBBucket k v -> ByteString -> ByteString -> IO ()
+setBMap bucket k v =
+    appA (Just . MP.insert k (Just v) . maybe no_buffer_error id)
+         (buffer_map bucket) >> return ()
+
+-- Nothing -> no such key in buffer map -> lookup in raw db
+-- Just _ -> has the pair -> return the value
+getBMap :: DBBucket k v -> ByteString -> IO (Maybe (Maybe ByteString))
+getBMap bucket k =
+    (MP.lookup k . maybe no_buffer_error id) <$> getA (buffer_map bucket)
+
+-- note delete here sets the value to Nothing
+-- instead of deleting the entry
+deleteBMap :: DBBucket k v -> ByteString -> IO ()
+deleteBMap bucket k =
+    appA (Just . MP.insert k Nothing . maybe no_buffer_error id)
+         (buffer_map bucket) >> return ()
 
 setB :: (Encodable k, Encodable v) => DBBucket k v -> k -> v -> IO ()
-setB (DBBucket pref db) key val = set db (pref <> encodeLE key) (encodeLE val)
+setB bucket key val = do
+    buffered <- hasBufferB bucket
 
-setB' :: (Encodable k, Encodable v) => DBBucket k v -> k -> v -> IO ()
-setB' (DBBucket pref db) key val = set' db (pref <> encodeLE key) (encodeLE val)
+    if buffered then
+        setBMap bucket k v
+    else
+        set (raw_db bucket) k v
+
+    where
+        k = bucket_pref bucket <> encodeLE key
+        v = encodeLE val
+
+-- setB' :: (Encodable k, Encodable v) => DBBucket k v -> k -> v -> IO ()
+-- setB' bucket key val =
+--     set' (raw_db bucket) (bucket_pref bucket <> encodeLE key) (encodeLE val)
 
 getB :: (Encodable k, Decodable v) => DBBucket k v -> k -> IO (Maybe v)
-getB (DBBucket pref db) key = getAs db (pref <> encodeLE key)
+getB = getAsB
 
 -- return type can be different as the one declared in bucket type
 getAsB :: (Encodable k, Decodable v) => DBBucket k v' -> k -> IO (Maybe v)
-getAsB (DBBucket pref db) key = getAs db (pref <> encodeLE key)
+getAsB bucket key = do
+    buffered <- hasBufferB bucket
+
+    if buffered then do
+        mres <- getBMap bucket k
+        case mres of
+            Just res -> return (decodeFailLE <$> res)
+            Nothing -> getAs (raw_db bucket) k
+    else
+        getAs (raw_db bucket) k
+
+    where k = bucket_pref bucket <> encodeLE key
 
 hasB :: Encodable k => DBBucket k v -> k -> IO Bool
-hasB (DBBucket pref db) key = has db (pref <> encodeLE key)
+hasB bucket key =
+    maybeToBool <$> (getAsB bucket key :: IO (Maybe Placeholder))
 
 deleteB :: Encodable k => DBBucket k v -> k -> IO ()
-deleteB (DBBucket pref db) key = delete db (pref <> encodeLE key)
+deleteB bucket key = do
+    buffered <- hasBufferB bucket
+
+    if buffered then
+        deleteBMap bucket k
+    else
+        delete (raw_db bucket) k
+
+    where k = bucket_pref bucket <> encodeLE key
 
 countB :: Integral t => DBBucket k v -> IO t
-countB (DBBucket pref db) =
-    countWith db (pref `BSR.isPrefixOf`)
+countB bucket = do
+    buffered <- hasBufferB bucket
+    bmap <- maybe no_buffer_error id <$> getA (buffer_map bucket)
+
+    bmap_var <- newA bmap
+
+    if buffered then
+        countWith (raw_db bucket) $ \key -> do
+            let pref = bucket_pref bucket `BSR.isPrefixOf` key
+    
+            if pref then do
+                bmap <- getA bmap_var
+
+                case MP.lookup key bmap of
+                    Nothing -> return True       -- not present in bmap, fine
+                    Just Nothing -> return False -- deleted in bmap, don't count in
+                    Just (Just _) -> return True -- may be altered but not deleted
+            else
+                return False
+    else
+        countWith (raw_db bucket) (return . BSR.isPrefixOf (bucket_pref bucket))

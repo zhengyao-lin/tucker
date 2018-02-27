@@ -43,6 +43,11 @@ appA :: (t -> t) -> Atom t -> IO t
 appA f x =
     atomicModifyIORef' x (dup . f)
 
+-- return the original value
+appA_ :: (t -> t) -> Atom t -> IO t
+appA_ f x =
+    atomicModifyIORef' x $ \x -> (f x, x)
+
 lseq :: [a] -> b -> b
 lseq []     w = w
 lseq (x:xs) w = x `seq` lseq xs w

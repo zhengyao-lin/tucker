@@ -14,6 +14,8 @@ import System.CPUTime
 import Control.Monad
 import Control.Exception
 import Control.Monad.Loops
+import Control.Monad.Trans
+import qualified Control.Monad.Trans.Maybe as MT
 
 import Tucker.Error
 import Tucker.DeepSeq
@@ -209,3 +211,17 @@ ascending :: Ord a => [a] -> Bool
 ascending [] = True
 ascending [_] = True
 ascending (x:y:xs) = x <= y && ascending (y:xs)
+
+type MaybeIO = MT.MaybeT IO
+
+runMaybeT = MT.runMaybeT
+maybeT = MT.MaybeT
+
+index :: FD.Foldable t => t a -> Int -> a
+lst `index` i = FD.toList lst !! i
+
+(!!!) :: FD.Foldable t => t a -> Int -> Maybe a
+lst' !!! i =
+    if i >= 0 && i < length lst then Just (lst !! i)
+    else Nothing
+    where lst = FD.toList lst'

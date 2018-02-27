@@ -12,6 +12,7 @@ import Data.LargeWord
 import qualified Data.Monoid as MND
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
+import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
 import Control.Exception
@@ -354,6 +355,9 @@ instance Decodable Word256 where
 
 instance (Decodable t1, Decodable t2) => Decodable (t1, t2) where
     decoder = (,) <$> decoder <*> decoder
+
+instance Decodable String where
+    decoder = BS.unpack <$> allD
 
 -- -- decode as many t as possible
 -- instance Decodable t => Decodable [t] where

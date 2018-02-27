@@ -19,6 +19,7 @@ import Network.Socket.ByteString
 import System.IO
 import System.Mem
 import System.Random
+import System.FilePath
 import System.Directory
 
 import Test.HUnit
@@ -47,8 +48,10 @@ import Tucker.P2P.Util
 import Tucker.P2P.Node
 import Tucker.P2P.Action
 
-import Tucker.Chain.Object
+import Tucker.Storage.Chain
 -- import Tucker.Chain.Cached
+
+test_db_path = "tucker-testdb"
 
 simpleBlock :: Hash256 -> IO Block
 simpleBlock prev_hash = do
@@ -83,10 +86,10 @@ assertEitherLeft :: Either TCKRError t -> IO ()
 assertEitherLeft (Right _) = assertFailure "expecting error"
 assertEitherLeft (Left err) = return ()
 
-withChain :: TCKRConf -> (Chain -> IO a) -> IO a
+withChain :: TCKRConf -> (BlockChain -> IO a) -> IO a
 withChain conf proc = runResourceT $ do
-    chain <- initChain conf
-    lift $ proc chain
+    bc <- initBlockChain conf
+    lift $ proc bc
 
 hex2block :: String -> Block
 hex2block = decodeFailLE . hex2bs
@@ -97,9 +100,9 @@ hex2tx = decodeFailLE . hex2bs
 blockChainTest = TestCase $ do
     def_conf <- tucker_default_conf_mainnet
 
-    let test_db_path = "tucker-testdb"
-        conf = def_conf {
-            tckr_db_path = test_db_path
+    let conf = def_conf {
+            tckr_block_db_path = test_db_path </> "chain",
+            tckr_tx_db_path = test_db_path </> "tx"
             -- tckr_max_tree_insert_depth = 10
         }
 
@@ -115,14 +118,9 @@ blockChainTest = TestCase $ do
             ]
         -- "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d010bffffffff0100f2052a010000004341047211a824f55b505228e4c3d5194c1fcfaa15a456abdf37f9b9d97a4040afc073dee6c89064984f03385237d92167c13e236446b417ab79a0fcae412ae3316b77ac00000000"
 
-    exist <- doesDirectoryExist test_db_path
-    if exist then
-        removeDirectoryRecursive test_db_path
-    else return ()
-
     -- putStrLn ""
-    withChain conf $ \chain -> do
-        chain <- addBlocks add_block_common_proc chain blocks
+    withChain conf $ \bc -> do
+        bc <- addBlocks add_block_common_proc bc blocks
 
         -- assertEqual "wrong resulting chain"
         --     (zip [1..] blocks)
@@ -496,8 +494,50 @@ msgTests = TestList [
         TestLabel "tx case 8" txCase8
     ]
 
+bucketTest = TestCase $ do
+    withDB def (test_db_path </> "bucket-test") $ \db -> do
+        b1 <- openBucket db "bucket1" :: IO (DBBucket String String)
+        b1_raw <- openBucket db "bucket1" :: IO (DBBucket String String)
+
+        bufferizeB b1
+
+        setB b1 "hi" "yeah"
+
+        res <- getB b1_raw "hi"
+        assertEqual "buffered value should not be stored"
+            Nothing res
+
+        syncB b1
+
+        res <- getB b1_raw "hi"
+        assertEqual "sync value should be stored"
+            (Just "yeah") res
+
+        deleteB b1 "hi"
+
+        res <- getB b1_raw "hi"
+        assertEqual "buffered value should not be deleted"
+            (Just "yeah") res
+
+        syncB b1
+
+        res <- getB b1_raw "hi"
+        assertEqual "sync value should be deleted"
+            Nothing res
+
+dbTests = TestList [
+        TestLabel "bucket test" bucketTest
+    ]
+
 allTests = TestList [
-        blockTests, msgTests
+        TestLabel "init" $ TestCase $ do
+            exist <- doesDirectoryExist test_db_path
+            if exist then
+                removeDirectoryRecursive test_db_path
+            else
+                return (),
+
+        dbTests, blockTests, msgTests
     ]
 
 tmp :: IO ()

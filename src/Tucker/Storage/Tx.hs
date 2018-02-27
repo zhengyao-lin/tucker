@@ -1,4 +1,4 @@
-module Tucker.Chain.Tx where
+module Tucker.Storage.Tx where
 
 import Data.Word
 import qualified Data.Set as SET
@@ -9,6 +9,7 @@ import Tucker.Msg
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Conf
+import Tucker.DeepSeq
 
 type TxLocator = (Hash256, Word32)
 
@@ -37,6 +38,9 @@ data TxSet =
         -- input not found but may be valid in the near future
         tx_orphan_pool :: SET.Set TxPayload
     }
+
+instance NFData TxSet where
+    rnf _ = ()
 
 initTxSet :: TCKRConf -> Database -> IO TxSet
 initTxSet conf@(TCKRConf {
