@@ -50,6 +50,13 @@ initTxSet conf@(TCKRConf {
     bucket_tx <- openBucket db tx_name
     bucket_utxo <- openBucket db utxo_name
 
+    -- utxo is buffered because we need to
+    -- sync it at the same time when chain is
+    -- flushed back,
+    -- otherwise some outpoint in utxo may be
+    -- lost due to sudden exit(blockchain may be younger than utxo)
+    bufferizeB bucket_utxo
+
     return $ TxSet {
         tx_set_conf = conf,
         bucket_tx = bucket_tx,
@@ -89,3 +96,6 @@ lookupUTXO = getB . bucket_utxo
 -- lookup for a accepted txid
 findTxId :: TxSet -> Hash256 -> IO (Maybe TxLocator)
 findTxId = getB . bucket_tx
+
+syncUTXO :: TxSet -> IO ()
+syncUTXO = syncB . bucket_utxo

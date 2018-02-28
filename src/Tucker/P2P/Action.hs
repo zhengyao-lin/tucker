@@ -18,6 +18,7 @@ import Control.Concurrent.Thread.Delay
 import qualified Control.Concurrent.Lock as LK
 
 -- import System.IO
+import System.Exit
 import System.Random
 
 import Tucker.Msg
@@ -272,12 +273,24 @@ scheduleFetch env init_hashes callback = do
                             Nothing ->
                                 nodeMsg env node $ "irrelavent block " ++ show block
 
-                    forkIO $ refreshBlock sched node
+                    forkFinally (refreshBlock sched node) (refreshFinal node)
                     return ()
+                    -- return ()
                     -- nodeMsg env node $ "task decoding finished"
                 else do
                     -- task already finished
                     nodeMsg env node $ "duplicated assignment"
+
+        refreshFinal node res =
+            case res of
+                Right _ -> nodeMsg env node "refresh finished"
+                Left err ->
+                    if Nothing == (fromException err :: Maybe ErrorCall) then
+                        -- not error
+                        nodeMsg env node ("refresh failed with: " ++ show err)
+                    else do
+                        nodeMsg env node "killing the main thread(bug)"
+                        envExit env err
 
         -- refresh block inventory
         refreshBlock sched node = do

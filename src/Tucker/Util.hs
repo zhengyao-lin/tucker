@@ -113,7 +113,7 @@ eitherToIO = either (fail . show) (pure . id)
 
 ioToEitherIO :: IO a -> IO (Either TCKRError a)
 ioToEitherIO =
-    (`catch` \e -> return $ Left $ TCKRError $ show (e :: SomeException)) .
+    (`catch` \e -> return $ Left $ TCKRError $ show (e :: TCKRError)) .
     (Right <$>)
 
 divCeiling :: Integral a => a -> a -> a

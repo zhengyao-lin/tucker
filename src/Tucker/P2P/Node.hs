@@ -10,6 +10,7 @@ import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
+import Control.Exception
 import Control.Concurrent
 import Control.Monad.Morph
 import Control.Monad.Trans.Resource
@@ -36,6 +37,7 @@ import Tucker.Storage.Chain
 -- an environment shared among a main loop
 data MainLoopEnv =
     MainLoopEnv {
+        main_proc_tid :: ThreadId,
         global_conf   :: TCKRConf,
 
         timeout_s     :: Int, -- timeout in sec
@@ -162,6 +164,8 @@ envMsg env msg = do
 
 initEnv :: TCKRConf -> ResIO MainLoopEnv
 initEnv conf = do
+    tid <- lift myThreadId
+
     node_list <- lift $ newA []
     io_lock <- lift $ LK.new
     io_buf <- lift $ newA []
@@ -174,6 +178,7 @@ initEnv conf = do
     block_chain <- initBlockChain conf >>= (lift . newA)
 
     return $ MainLoopEnv {
+        main_proc_tid = tid,
         global_conf = conf,
 
         timeout_s = tckr_trans_timeout conf,
@@ -234,6 +239,9 @@ envConf env field = field $ global_conf env
 
 envAllNode :: MainLoopEnv -> IO [Node]
 envAllNode = getA . node_list
+
+envExit :: Exception e => MainLoopEnv -> e -> IO ()
+envExit env e = throwTo (main_proc_tid env) e
 
 nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
 nodeMsg env node msg = do

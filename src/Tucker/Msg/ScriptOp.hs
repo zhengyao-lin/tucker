@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# OPTIONS_GHC -Wno-overflowed-literals #-}
 
 module Tucker.Msg.ScriptOp where
 
@@ -24,7 +23,7 @@ type ScriptPc = Int
 data ScriptOp
     -- constant ops
     = OP_PUSHDATA ByteString
-    | OP_CONST Word8
+    | OP_CONST Int8
 
     -- flow-control
     | OP_NOP
@@ -318,7 +317,7 @@ opConstD = do
 
     if i == 0x4f then return $ OP_CONST (-1)
     else if i >= 0x51 &&
-            i <= 0x60 then return $ OP_CONST (i - 0x50)
+            i <= 0x60 then return $ OP_CONST (fi (i - 0x50))
     else fail "OP_CONST invalid first byte"
 
 opIfD :: Decoder [ScriptOp]

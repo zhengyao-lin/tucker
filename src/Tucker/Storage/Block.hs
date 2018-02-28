@@ -13,6 +13,9 @@ module Tucker.Storage.Block (
     blockAtHeight,
     blockWithHash,
 
+    hasFullBlock,
+    toFullBlockNode,
+
     insertBlock,
     tryFixBranch,
 
@@ -59,7 +62,10 @@ data Branch
         block_data :: Block, -- NOTE: block_data only contains a block header
         cur_height :: Height,
         acc_diff   :: Difficulty
-    } deriving (Show)
+    } -- deriving (Show)
+
+instance Show Branch where
+    show node = "BlockNode " ++ show (block_data node)
 
 instance NFData Branch where
     rnf (BlockNode prev_node block_data cur_height acc_diff) =
@@ -311,12 +317,14 @@ blockWithHash chain@(Chain {
     case searchBranchHash chain hash branch of
         Just bn -> return (Just bn)
         Nothing -> do
-            mres <- getAsB bucket_block hash
+            mres <- getB bucket_block hash
 
             case mres of
                 Nothing -> return Nothing
                 Just (height, block) -> do
                     mhash <- getB bucket_chain height
+
+                    -- print (isPartial (txns block))
         
                     -- the block is indeed in the chain
                     if height < saved_height && mhash == Just hash then
@@ -330,6 +338,25 @@ blockWithHash chain@(Chain {
                     else
                         return Nothing -- not in the chain(probably due to data lost)
 
+hasFullBlock :: Branch -> Bool
+hasFullBlock = isFullBlock . block_data
+
+toFullBlockNode :: Chain -> Branch -> IO (Maybe Branch)
+toFullBlockNode (Chain {
+    bucket_block = bucket_block
+}) node@(BlockNode {
+    block_data = block
+}) =
+    if isFullBlock block then return (Just node)
+    else do
+        mres <- getB bucket_block (block_hash block)
+
+        case mres of
+            Nothing -> return Nothing -- full block not found
+            Just (_, block) ->
+                -- replace with full block
+                return (Just (node { block_data = block }))
+
 -- find prev block and insert the block to the chain
 insertBlock :: Chain -> Block -> Maybe (Branch, Chain)
 insertBlock chain@(Chain {
@@ -339,8 +366,6 @@ insertBlock chain@(Chain {
     prev_hash = prev_hash
 }) = do
     let search = searchBranchHash chain prev_hash
-
-    -- trace "inserting!" $ return 0
 
     -- find the first appearing branch node
     prev_bn <- foldl (<|>) Nothing (map search edge_branches)
@@ -413,7 +438,7 @@ saveBlock chain branch =
         hash = block_hash block
 
 -- try to fix the highest branch to save some memory
-tryFixBranch :: Chain -> IO Chain
+tryFixBranch :: Chain -> IO (Maybe Chain)
 tryFixBranch chain@(Chain {
     chain_conf = conf,
     buffer_chain = buffer_chain,
@@ -435,29 +460,29 @@ tryFixBranch chain@(Chain {
     if fi depth > tckr_max_tree_insert_depth conf then
         case mprev of
             -- only one node in the branch -> keep the original chain
-            Nothing -> return chain
+            Nothing -> return Nothing
 
             -- remove loser branches and replace the buffer chain
             Just prev -> do
-                -- write old buffer_chain to db_chain
-                saved_height <-
-                    case buffer_chain of
-                        Nothing ->
-                            return $ saved_height chain
+                -- save the whole winner chain
+                -- so that everything have now is in
+                -- the db, and utxo can be saved as well
+                saveBranch chain winner
 
-                        Just bufc -> do
-                            saveBranch chain bufc
-                            return $ cur_height bufc + 1
+                return $ Just $ chain {
+                    -- update saved_height
+                    saved_height =
+                        case buffer_chain of
+                            Nothing -> saved_height chain
+                            Just bufc -> cur_height bufc + 1,
 
-                return $ chain {
-                    saved_height = saved_height,
                     buffer_chain = Just prev,
                     edge_branches = [winner {
                         prev_node = Nothing
                     }]
                 }
 
-    else return chain
+    else return Nothing
 
 takeBranch' :: Int -> Maybe Branch -> [Branch]
 takeBranch' n Nothing = []

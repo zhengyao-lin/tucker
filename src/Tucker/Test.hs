@@ -65,7 +65,7 @@ simpleBlock prev_hash = do
         prev_hash = prev_hash,
         merkle_root = nullHash256,
 
-        timestamp = timestamp,
+        btimestamp = timestamp,
 
         hash_target = -1,
  
@@ -176,7 +176,7 @@ generalTxCase :: ScriptType -> ScriptResult -> TxPayload -> Int -> TxPayload -> 
 generalTxCase stype should_be tx0 out_idx tx1 in_idx = do
     let pk_sc = decodeFailLE (pk_script (tx_out tx0 !! out_idx))
         sig_sc = decodeFailLE (sig_script (tx_in tx1 !! in_idx))
-        state = initState tx1 (fi in_idx)
+        state = initState def tx1 (fi in_idx)
     
     -- print pk_sc
 
@@ -356,7 +356,7 @@ OP_ENDIF
 runScript :: [ScriptOp] -> IO [StackItem]
 runScript ops = do
     let tx = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0134ffffffff0100f2052a0100000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
-        state = initState tx 0
+        state = initState def tx 0
 
     eval_stack <$> assertEitherRight (execEval state ops)
 
@@ -441,6 +441,22 @@ txCase8 = TestCase $ do
 
     generalTxCase (SCRIPT_P2SH undefined) InvalidTx tx0 0 tx1 0
 
+txCase9 = TestCase $ do
+    -- tx0 3edd74f3823df9befa3671a6dba5d7691a6cf0c92ac242e04a35ba9cab5e41ce
+    -- tx1 5e1a524781d2118047c8593ac4d5c43b004360d0745b7cf710fe85da00044500
+    let tx0 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0e0401134a4d015e062f503253482fffffffff0100f2052a01000000232103ba5005bc23e3217618c9d31e4bd1f2f46831195d453173e18de5d3e1302c5b08ac00000000"
+        tx1 = hex2tx "0100000001ce415eab9cba354ae042c22ac9f06c1a69d7a5dba67136fabef93d82f374dd3e000000004948304502207735303efb716fe5ab13a4241e3d5c76556b8be53a02f3029b8628788ae4bc8a022100c672344b9fbf613c291a3e75f25f9b304b79ebe97bdaf254b8a1030e0d2a22e201ffffffff0100f2052a0100000017a914290bba32a49315789a030bb40b0047f8fb90ff668700000000"
+
+    generalTxCase SCRIPT_P2PK ValidTx tx0 0 tx1 0
+
+txCase10 = TestCase $ do
+    -- tx0 c08053db370893765c88c93e2fe4db0aa8ebc02c70b2c91109a6081b06b5e060
+    -- tx1 dc3aad51b4b9ea1ef40755a38b0b4d6e08c72d2ac5e95b8bebe9bd319b6aed7e
+    let tx0 = hex2tx "01000000017ae001aef566f8273a7cd14dcbc1d2bcd7927de792c5042375033991ef5523c3000000006a47304402200bb34283458a6f141fbea8dd9c3f4db0abb8dea2282364821886e60f313be94502201198397af91be19622e8ec1e52e2e7cb5ce21640d490f1ca7fb22452e01e1fee012103e4d7f9492784fc6b3439607be821148e0d4f11ca35de74521d277500203492eaffffffff024073a574000000001976a91457722497e036129a643d767d3a9559b9dea58d0788ac809698000000000001a500000000"
+        tx1 = hex2tx "010000000560e0b5061b08a60911c9b2702cc0eba80adbe42f3ec9885c76930837db5380c001000000054f01e40164ffffffff0d2fe5749c96f15e37ceed29002c7f338df4f2781dd79f4d4eea7a08aa69b959000000000351519bffffffff0d2fe5749c96f15e37ceed29002c7f338df4f2781dd79f4d4eea7a08aa69b959020000000452018293ffffffff0d2fe5749c96f15e37ceed29002c7f338df4f2781dd79f4d4eea7a08aa69b95903000000045b5a5193ffffffff0d2fe5749c96f15e37ceed29002c7f338df4f2781dd79f4d4eea7a08aa69b95904000000045b5a5193ffffffff06002d310100000000029f91002d3101000000000401908f87002d31010000000001a0002d3101000000000705feffffff808730d39700000000001976a9140467f85e06a2ef0a479333b47258f4196fb94b2c88ac002d3101000000000604ffffff7f9c00000000"
+
+    generalTxCase SCRIPT_NONSTD ValidTx tx0 1 tx1 0
+
 scriptTest = TestCase $ do
     let sc1 = [ OP_NOP ]
         sc2 = [ OP_IF True 1, OP_ENDIF ]
@@ -491,7 +507,9 @@ msgTests = TestList [
         TestLabel "tx case 5" txCase5,
         TestLabel "tx case 6" txCase6,
         TestLabel "tx case 7" txCase7,
-        TestLabel "tx case 8" txCase8
+        TestLabel "tx case 8" txCase8,
+        TestLabel "tx case 9" txCase9,
+        TestLabel "tx case 10" txCase10
     ]
 
 bucketTest = TestCase $ do

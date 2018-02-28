@@ -26,6 +26,14 @@ import Tucker.Msg.Common
 import Tucker.Msg.Hash256
 import Tucker.Msg.ScriptOp
 
+data ScriptConf =
+    ScriptConf {
+        script_enable_p2sh :: Bool
+    } deriving (Show)
+
+instance Default ScriptConf where
+    def = ScriptConf { script_enable_p2sh = True }
+
 type StackItem = ByteString
 
 bsToItem = id
@@ -79,6 +87,7 @@ intToItem int =
 
 data ScriptState =
     ScriptState {
+        script_conf :: ScriptConf,
         eval_stack  :: [StackItem],
 
         prog_code   :: [ScriptOp],
@@ -96,7 +105,7 @@ type EvalState v = StateT ScriptState TCKRErrorM v
 {-
 
 - OP_PUSHDATA ByteString
-- OP_CONST Word8
+- OP_CONST Int8
 
 -- flow-control
 - OP_NOP
@@ -267,7 +276,7 @@ verifyFail pub msg sig =
 
 evalOpS :: ScriptOp -> EvalState ()
 evalOpS (OP_PUSHDATA dat) = pushBSS dat
-evalOpS (OP_CONST v) = pushBSS (bchar v)
+evalOpS (OP_CONST v) = pushIntS (fi v)
 
 evalOpS OP_NOP = return ()
 evalOpS (OP_IF exp ofs) = do
@@ -315,6 +324,9 @@ evalOpS OP_CHECKSIG = do
     (pub', sig') <- pop2BSS
     msg <- rawSigHashS sig'
 
+    -- there is one byte(hash type) appended to the signature
+    pushBoolS (verifyFail pub' msg (BSR.init sig'))
+
     -- tx <- encodeLE <$> txS
     -- traceShowM (hex $ encodeBE ((decodeFailBE pub') { compressed = False }), hex $ ba2bs $ sha256 msg, hex tx, hex $ BSR.init sig')
 
@@ -331,9 +343,6 @@ evalOpS OP_CHECKSIG = do
     -- 03F5D0FB955F95DD6BE6115CE85661DB412EC6A08ABCBFCE7DA0BA8297C6CC0EC4
     -- 4EB4DCCD727E81315A9FF801C205EFC62635471CF8668E42C1C8AEBFB51500A3
     -- 30450221009A29101094B283AE62A6FED68603C554CA3A624B9A78D83E8065EDCF97AE231B02202CBED6E796EE6F4CAF30EDEF8F5597A08A6BE265D6601AD92283990B55C038FA
-
-    -- there is one byte(hash type) appended to the signature
-    pushBoolS (verifyFail pub' msg (BSR.init sig'))
 
 evalOpS OP_CHECKSIGVERIFY =
     evalOpS OP_CHECKSIG >>
@@ -422,9 +431,11 @@ execOneS = curOpS >>= evalOpS >> incPcS
 execS :: EvalState ()
 execS = execOneS `untilM_` eocS
 
-initState :: TxPayload -> Word32 -> ScriptState
-initState tx idx =
+initState :: ScriptConf -> TxPayload -> Word32 -> ScriptState
+initState conf tx idx =
     ScriptState {
+        script_conf = conf,
+
         eval_stack = [],
 
         prog_code = [],
@@ -487,10 +498,14 @@ runEval s scripts =
 specialScript :: ScriptState -> [[ScriptOp]] -> Either TCKRError ScriptState
 
 -- P2SH
-specialScript s (getScriptType -> SCRIPT_P2SH redeem) = do
-    redeem_script <- decodeAllLE redeem
-    ns <- execStateT popS s -- pop out result first
-    execEval ns redeem_script -- exec on redeem script
+specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
+    if script_enable_p2sh (script_conf s) then do
+        redeem_script <- decodeAllLE redeem
+        ns <- execStateT popS s -- pop out result first
+        execEval ns redeem_script -- exec on redeem script
+    else
+        -- p2sh not enabled
+        return s
 
 -- no change in state
 specialScript s _ = return s

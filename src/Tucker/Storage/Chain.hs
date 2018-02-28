@@ -9,10 +9,9 @@ import Data.Word
 import qualified Data.Foldable as FD
 
 import Control.Monad
+import Control.Exception
 import Control.Monad.Morph
 import Control.Monad.Trans.Resource
-
-import Control.Exception
 
 import Debug.Trace
 
@@ -155,7 +154,7 @@ hashTargetValid bc@(BlockChain {
     -- previous block
     Just (Block {
         hash_target = old_target,
-        timestamp = t2
+        btimestamp = t2
     }) <- blockAtHeight chain branch (height - 1)
 
     target <-
@@ -163,7 +162,7 @@ hashTargetValid bc@(BlockChain {
             -- TODO: non-standard special-min-diff
             return $ fi tucker_bdiff_diff1
         else if shouldDiffChange conf height then do
-            Just (Block { timestamp = t1 }) <-
+            Just (Block { btimestamp = t1 }) <-
                 blockAtHeight chain branch (height - 2016)
 
             return $ calNewTarget conf old_target (t2 - t1)
@@ -208,6 +207,28 @@ addBlocks proc bc (block:blocks) = do
     
     new_bc `seq` addBlocks proc new_bc blocks
 
+-- test & save chain to the disk
+trySyncChain :: BlockChain -> IO BlockChain
+trySyncChain bc@(BlockChain {
+    bc_chain = chain,
+    bc_tx_set = tx_set
+}) = do
+    mres <- tryFixBranch chain
+
+    case mres of
+        Nothing -> return bc -- no change
+        Just chain -> do
+            -- blockchain flushed back to disk
+            -- sync utxo
+            syncUTXO tx_set
+            return $ bc { bc_chain = chain }
+
+genScriptConf :: TCKRConf -> Block -> IO ScriptConf
+genScriptConf conf out_block =
+    return $ def {
+        script_enable_p2sh = btimestamp out_block >= tckr_p2sh_enable_time conf
+    }
+
 -- locatorToTx :: Chain -> TxLocator -> IO (Maybe TxPayload)
 -- locatorToTx (Chain {
 --     bucket_block = bucket_block
@@ -227,14 +248,14 @@ addBlockFail bc@(BlockChain {
 }) block@(Block {
     block_hash = block_hash,
     hash_target = hash_target,
-    timestamp = timestamp,
+    btimestamp = timestamp,
     merkle_root = merkle_root,
     txns = txns'
 }) = do
     expectTrue "require full block" $
         isFullBlock block
 
-    let txns = FD.toList txns'
+    let all_txns = FD.toList txns'
 
     expectFalseIO "block already exists" $
         chain `hasBlockInChain` block
@@ -242,7 +263,7 @@ addBlockFail bc@(BlockChain {
     -- don't check if the block is in orphan pool
 
     expectTrue "empty tx list" $
-        not (null txns)
+        not (null all_txns)
 
     expectTrue "hash target not met" $
         hash_target > block_hash
@@ -253,7 +274,7 @@ addBlockFail bc@(BlockChain {
         timestamp <= cur_time + tckr_max_block_future_diff conf
 
     expectTrue "first transaction is not coinbase" $
-        isCoinbase (head txns)
+        isCoinbase (head all_txns)
 
     -- TODO:
     -- for each transaction, apply "tx" checks 2-4
@@ -265,7 +286,8 @@ addBlockFail bc@(BlockChain {
 
     case insertBlock chain block of
         Nothing -> do -- no previous hash found
-            traceIO "orphan block!"
+            -- traceIO "orphan block!"
+            error ("block orphaned " ++ show block)
             return $ bc { bc_chain = addOrphan chain block }
 
         Just (branch, chain) -> do
@@ -288,27 +310,59 @@ addBlockFail bc@(BlockChain {
                 5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
             -}
 
-            forM_ (zip [0..] txns) $ \(idx, tx) -> do
+            forM_ (zip [0..] all_txns) $ \(idx, tx) -> do
                 let is_coinbase = isCoinbase tx
 
                 expectTrue "more than one coinbase txns" $
                     idx == 0 || not is_coinbase
 
                 if not is_coinbase then do
-                    in_values <- forM (map prev_out (tx_in tx)) $ \outp@(OutPoint txid _) -> do
+                    in_values <- forM ([0..] `zip` tx_in tx) $ \(in_idx, inp@(TxInput {
+                            prev_out = outp@(OutPoint txid out_idx)
+                        })) -> do
+
                         value <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
                             lookupUTXO tx_set outp
 
                         locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
                             findTxId tx_set txid
 
-                        node <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+                        bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
                             blockWithHash chain branch (locatorToHash locator)
+                        
+                        bnode <-
+                            -- special case -> outpoint is in the current block
+                            if bnode == branch then return bnode
+                            else expectMaybeIO ("failed to load full block for " ++ show bnode) $
+                                toFullBlockNode chain bnode
+
+                        let prev_tx_idx = locatorToIdx locator
+                            prev_tx_body =
+                                (if bnode == branch then
+                                     FullList all_txns
+                                 else
+                                     txns (block_data bnode)) `index` fi prev_tx_idx
+
+                            prev_tx_out = tx_out prev_tx_body !! fi out_idx
 
                         -- if the tx is coinbase(idx == 0), check coinbase maturity
-                        expectTrue ("coinbase maturity not met for tx " ++ show txid) $
-                            locatorToIdx locator /= 0 ||
-                            cur_height branch - cur_height node >= fi (tckr_coinbase_maturity conf)
+                        expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
+                            prev_tx_idx /= 0 ||
+                            cur_height branch - cur_height bnode >= fi (tckr_coinbase_maturity conf)
+
+                        script_conf <- genScriptConf conf (block_data bnode)
+
+                        let pk_sc = decodeFailLE (pk_script prev_tx_out)
+                            sig_sc = decodeFailLE (sig_script inp)
+                            state = initState script_conf tx in_idx
+                            check_res = runEval state [ sig_sc, pk_sc ]
+
+                        -- traceShowM (out_idx, prev_tx_out)
+
+                        expectTrue ("invalid script/signature for outpoint tx " ++
+                                    show txid ++ ": " ++ show check_res ++
+                                    ": " ++ show [ sig_sc, pk_sc ]) $
+                            check_res == ValidTx
 
                         return value
 
@@ -332,9 +386,7 @@ addBlockFail bc@(BlockChain {
                 return $ bc { bc_chain = removeOrphan chain block }
             else do
                 -- not orphan, collect other orphan
-                bc <- collectOrphan bc
-                chain <- tryFixBranch (bc_chain bc)
-                return $ bc { bc_chain = chain }
+                collectOrphan bc >>= trySyncChain
 
 reject :: String -> a
 reject msg = throw $ TCKRError msg

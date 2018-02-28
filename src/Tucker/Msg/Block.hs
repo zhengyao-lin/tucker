@@ -31,7 +31,7 @@ data Block =
         prev_hash   :: Hash256,
         merkle_root :: Hash256,
 
-        timestamp   :: Word32,
+        btimestamp  :: Word32,
         -- diff_bits   :: Word32,
         hash_target :: Hash256,
 
@@ -48,7 +48,7 @@ instance NFData Block where
         vers = vers,
         prev_hash = prev_hash,
         merkle_root = merkle_root,
-        timestamp = timestamp,
+        btimestamp = btimestamp,
         hash_target = hash_target,
         nonce = nonce,
         txns = txns,
@@ -58,7 +58,7 @@ instance NFData Block where
         rnf vers `seq`
         rnf prev_hash `seq`
         rnf merkle_root `seq`
-        rnf timestamp `seq`
+        rnf btimestamp `seq`
         rnf hash_target `seq`
         rnf nonce `seq`
         rnf txns `seq`
@@ -98,7 +98,7 @@ instance Encodable BlockHeader where
         prev_hash = prev_hash,
         merkle_root = merkle_root,
 
-        timestamp = timestamp,
+        btimestamp = btimestamp,
         hash_target = hash_target,
         nonce = nonce,
 
@@ -109,7 +109,7 @@ instance Encodable BlockHeader where
             e prev_hash,
             e merkle_root,
 
-            e timestamp,
+            e btimestamp,
             e $ packHash256 hash_target,
             e nonce,
 
@@ -125,7 +125,7 @@ instance Decodable BlockHeader where
         prev_hash <- decoder
         merkle_root <- decoder
 
-        timestamp <- decoder
+        btimestamp <- decoder
         packed_target <- decoder
         nonce <- decoder
 
@@ -138,7 +138,7 @@ instance Decodable BlockHeader where
             prev_hash = prev_hash,
             merkle_root = merkle_root,
 
-            timestamp = timestamp,
+            btimestamp = btimestamp,
             hash_target = unpackHash256 packed_target,
             nonce = nonce,
 
@@ -200,7 +200,7 @@ hashBlock (Block {
     vers = vers,
     prev_hash = prev_hash,
     merkle_root = merkle_root,
-    timestamp = timestamp,
+    btimestamp = btimestamp,
     hash_target = hash_target,
     nonce = nonce
 }) =
@@ -210,7 +210,7 @@ hashBlock (Block {
         encodeLE prev_hash,
         encodeLE merkle_root,
 
-        encodeLE timestamp,
+        encodeLE btimestamp,
 
         encodeLE $ packHash256 hash_target,
 
