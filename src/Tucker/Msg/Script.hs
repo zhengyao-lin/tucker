@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, ExtendedDefaultRules #-}
 {-# OPTIONS_GHC -Wno-overlapping-patterns #-}
 
 module Tucker.Msg.Script where
@@ -28,67 +28,76 @@ import Tucker.Msg.ScriptOp
 
 data ScriptConf =
     ScriptConf {
-        script_enable_p2sh :: Bool
+        script_enable_strict :: Bool,
+        script_enable_p2sh   :: Bool
     } deriving (Show)
 
 instance Default ScriptConf where
-    def = ScriptConf { script_enable_p2sh = True }
+    def = ScriptConf {
+        script_enable_strict = False,
+        script_enable_p2sh = True
+    }
 
 type StackItem = ByteString
 
-bsToItem = id
-itemToBS = id
+class StackItemValue t where
+    toItem :: t -> StackItem
+    fromItem :: StackItem -> t
 
-itemToBool :: StackItem -> Bool
-itemToBool item =
-    if is_null || is_zero then False
-    else True
-    where
-        tail = BSR.init item
-        head = BSR.last item
+instance StackItemValue BSR.ByteString where
+    toItem = id
+    fromItem = id
 
-        is_null = BSR.null item
-        is_zero = BSR.all (== 0) tail && (head == 0x00 || head == 0x80)
+instance StackItemValue Bool where
+    toItem bool =
+        if bool then toItem $ bchar 1
+        else toItem BSR.empty -- to the shortest form
 
-boolToItem :: Bool -> StackItem
-boolToItem bool =
-    if bool then trueS
-    else falseS
+    fromItem item =
+        if is_null || is_zero then False
+        else True
+        where
+            tail = BSR.init item
+            head = BSR.last item
 
--- when an item is interpreted as an integer
--- it's little-endian and the highest bit of the last byte is the sign
--- (not 2's complement)
-itemToInt :: StackItem -> Integer
-itemToInt item =
-    if BSR.null item then 0
-    else (if sign == 1 then negate else id) (bs2vintLE unsigned)
-    where
-        last_byte = BSR.last item
-        sign = last_byte `shiftR` 7 -- 1 or 0
-        -- clear the highest bit
-        unsigned = BSR.init item <> bchar (last_byte .&. 0x7f)
+            is_null = BSR.null item
+            is_zero = BSR.all (== 0) tail && (head == 0x00 || head == 0x80)
 
-intToItem :: Integer -> StackItem
-intToItem int =
-    if int < 0 then
-        if last_byte .&. 0x80 /= 0 then
+instance StackItemValue Integer where
+    -- when an item is interpreted as an integer
+    -- it's little-endian and the highest bit of the last byte is the sign
+    -- (not 2's complement)
+
+    toItem int =
+        if BSR.null raw then raw -- empty string
+        else if last_byte .&. 0x80 /= 0 then
             -- sign bit already occupied, append one more byte
             raw <> bchar sign_mask
         else
+            -- set sign
             BSR.init raw <> bchar (last_byte .|. sign_mask)
-    else raw
-    where
-        sign_mask =
-            if int < 0 then 0x80
-            else 0x00
+        where
+            sign_mask =
+                if int < 0 then 0x80
+                else 0x00
+    
+            Right raw = vint2bsLE (abs int)
+            last_byte = BSR.last raw
 
-        Right raw = vint2bsLE (abs int)
-        last_byte = BSR.last raw
-
+    fromItem item =
+        if BSR.null item then 0
+        else (if sign == 1 then negate else id) (bs2vintLE unsigned)
+        where
+            last_byte = BSR.last item
+            sign = last_byte `shiftR` 7 -- 1 or 0
+            -- clear the highest bit
+            unsigned = BSR.init item <> bchar (last_byte .&. 0x7f)
+    
 data ScriptState =
     ScriptState {
         script_conf :: ScriptConf,
         eval_stack  :: [StackItem],
+        alt_stack   :: [StackItem],
 
         prog_code   :: [ScriptOp],
         prog_count  :: ScriptPc,
@@ -97,127 +106,102 @@ data ScriptState =
         -- tx_prev_out :: TxOutput, -- previous tx output point
         tx_in_idx   :: Word32,
 
-        tx_body     :: TxPayload
+        out_tx      :: TxPayload,
+        cur_tx      :: TxPayload
     } deriving (Show)
 
 type EvalState v = StateT ScriptState TCKRErrorM v
 
-{-
-
-- OP_PUSHDATA ByteString
-- OP_CONST Int8
-
--- flow-control
-- OP_NOP
-
--- if <expected value> true_branch false_branch
-- OP_IF Bool [ScriptOp] [ScriptOp]
-
-- OP_VERIFY
-- OP_RETURN
-
--- stack ops
-- OP_DUP
-
--- bitwise ops
-- OP_EQUAL
-- OP_EQUALVERIFY
-
--- crypto ops
-- OP_HASH160
-- OP_HASH256
-- OP_CHECKSIG
-- OP_CHECKSIGVERIFY
-- OP_CHECKMULTISIG
-- OP_CHECKMULTISIGVERIFY
-
--}
-
 invalidTx = failT "invalid transaction"
 
-trueS = bsToItem $ bchar 1
-falseS = bsToItem $ bchar 0
+confS :: (ScriptConf -> t) -> EvalState t
+confS c = (c . script_conf) <$> get
 
-pushS :: StackItem -> EvalState ()
-pushS item =
-    modify $ \s ->
-        s { eval_stack = item : eval_stack s }
+modifyS :: ([StackItem] -> EvalState ([StackItem], a)) -> EvalState a
+modifyS f = do
+    es@(ScriptState { eval_stack = stack }) <- get
+    (nstack, ret) <- f stack
+    put (es { eval_stack = nstack })
+    return ret
 
-pushBSS = pushS . bsToItem
-pushBoolS = pushS . boolToItem
-pushIntS = pushS . intToItem
+modifyAltS :: ([StackItem] -> EvalState ([StackItem], a)) -> EvalState a
+modifyAltS f = do
+    es@(ScriptState { alt_stack = stack }) <- get
+    (nstack, ret) <- f stack
+    put (es { alt_stack = nstack })
+    return ret
 
-peekS :: EvalState StackItem
+pushS :: StackItemValue t => t -> EvalState ()
+pushS v = modifyS $ \s -> return (toItem v : s, ())
+
+pushNS :: StackItemValue t => [t] -> EvalState ()
+pushNS vs = modifyS $ \s -> return (map toItem vs ++ s, ())
+
+pushAltS :: StackItemValue t => t -> EvalState ()
+pushAltS v = modifyAltS $ \s -> return (toItem v : s, ())
+
+peekS :: StackItemValue t => EvalState t
 peekS = do
     es@(ScriptState { eval_stack = stack }) <- get
+    assertT "peek on an empty stack" (not (null stack))
+    return $ fromItem $ head stack
 
-    assertT (not (null stack)) "peek on an empty stack"
+popS :: StackItemValue t => EvalState t
+popS = modifyS $ \s -> do
+    assertT "pop on an empty stack" (not (null s))
+    return (tail s, fromItem (head s))
 
-    return $ head stack
+popAltS :: StackItemValue t => EvalState t
+popAltS = modifyAltS $ \s -> do
+    assertT "pop on an empty stack" (not (null s))
+    return (tail s, fromItem (head s))
 
-peekBSS = itemToBS <$> peekS
-
-popS :: EvalState StackItem
-popS = do
-    es@(ScriptState { eval_stack = stack }) <- get
-
-    assertT (not (null stack)) "pop on an empty stack"
-
-    put (es { eval_stack = tail stack })
-    return $ head stack
-
-pop2S :: EvalState (StackItem, StackItem)
+pop2S :: StackItemValue t => EvalState (t, t)
 pop2S = (,) <$> popS <*> popS
 
-popNS :: Int -> EvalState [StackItem]
+popNS :: StackItemValue t => Int -> EvalState [t]
 popNS = (`replicateM` popS)
 
-popConvS :: (StackItem -> t) -> EvalState t
-popConvS = (<$> popS)
-
-pop2ConvS :: (StackItem -> t) -> EvalState (t, t)
-pop2ConvS conv =
-    (,) <$> popConvS conv <*> popConvS conv
-
-popNConvS :: (StackItem -> t) -> Int -> EvalState [t]
-popNConvS conv n = map conv <$> popNS n
-
-popBSS = popConvS itemToBS
-pop2BSS = pop2ConvS itemToBS
-popNBSS = popNConvS itemToBS
-
-popBoolS = popConvS itemToBool
-pop2BoolS = pop2ConvS itemToBool
-popNBoolS = popNConvS itemToBool
-
-popIntS = popConvS itemToInt
-pop2IntS = pop2ConvS itemToInt
-popNIntS = popNConvS itemToInt
+pushS' = pushS :: ByteString -> EvalState ()
+peekS' = peekS :: EvalState ByteString
+popS'  = popS  :: EvalState ByteString
+pop2S' = pop2S :: EvalState (ByteString, ByteString)
+popNS' = popNS :: Int -> EvalState [ByteString]
 
 pickS :: Int -> EvalState ()
-pickS n = do
-    es@(ScriptState { eval_stack = stack }) <- get
+pickS n = modifyS $ \s -> do
+    assertT "illegal pick range" (n >= 0 && n < length s)
+    return ((s !! n) : s, ())
 
-    assertT (n >= 0 && n < length stack) "illegal pick range"
-
-    pushS (stack !! n)
+-- copy the nth item to the top
+-- and remove the original item
+rollS :: Int -> EvalState ()
+rollS n = modifyS $ \s -> do
+    assertT "illegal pick range" (n >= 0 && n < length s)
+    return ((s !! n) : take n s ++ drop (n + 1) s, ())
 
 dupS :: EvalState ()
 dupS = do
     s@(ScriptState { eval_stack = stack }) <- get
 
-    assertT (not (null stack)) "dup on an empty stack"
+    assertT "dup on an empty stack" (not (null stack))
 
     put (s { eval_stack = head stack : stack })
 
-txS :: EvalState TxPayload
-txS = tx_body <$> get
+depthS :: EvalState Int
+depthS = (length . eval_stack) <$> get
+
+curTxS :: EvalState TxPayload
+curTxS = cur_tx <$> get
+
+outTxS :: EvalState TxPayload
+outTxS = out_tx <$> get
 
 -- ONE time SHA256 hash of the raw tx body for signature
 -- require the raw signature with the htype byte appended
 rawSigHashS :: ByteString -> EvalState ByteString
 rawSigHashS sig_raw = do
-    cur_tx   <- txS
+    cur_tx   <- curTxS
     in_idx   <- tx_in_idx <$> get
     cs_op    <- last_cs_op <$> get
     code     <- prog_code <$> get
@@ -231,7 +215,7 @@ rawSigHashS sig_raw = do
          
         htype = intToHashType (BSR.last sig_raw)
         rawtx = sigRawTx cur_tx in_idx (subscr code) htype
-        hash = ba2bs $ sha256 rawtx
+        hash = sha256 rawtx
         -- NOTE: only sha256 it ONCE because there's another
         -- hashing in the verification process
 
@@ -254,7 +238,7 @@ curOpS = do
         prog_count = pc
     } <- get
 
-    assertT (pc < length code) "counter has reached the end"
+    assertT "counter has reached the end" (pc < length code)
 
     return (code !! pc)
 
@@ -274,15 +258,27 @@ verifyFail pub msg sig =
     -- NOTE: final hash is encoded in big-endian
     verifySHA256DER (decodeFailBE pub) msg sig == Right True
 
+unaryOpS :: (StackItemValue a, StackItemValue b)
+         => (a -> b) -> EvalState ()
+unaryOpS f = fmap f popS >>= pushS
+
+binaryOpS :: (StackItemValue a, StackItemValue b, StackItemValue c)
+          => (a -> b -> c) -> EvalState ()
+binaryOpS f = (flip f <$> popS <*> popS) >>= pushS
+
+shiftL' a b = shiftL a (fi b) :: Integer
+shiftR' a b = shiftR a (fi b) :: Integer
+
 evalOpS :: ScriptOp -> EvalState ()
-evalOpS (OP_PUSHDATA dat) = pushBSS dat
-evalOpS (OP_CONST v) = pushIntS (fi v)
+
+evalOpS (OP_PUSHDATA dat) = pushS dat
+evalOpS (OP_CONST v) = pushS (fi v)
 
 evalOpS OP_NOP = return ()
 evalOpS (OP_IF exp ofs) = do
     top <- popS
 
-    if itemToBool top == exp then
+    if top == exp then
         -- main branch
         return ()
     else -- jump to the next OP_ELSE/OP_ENDIF
@@ -294,72 +290,47 @@ evalOpS OP_ENDIF = return ()
 evalOpS OP_VERIFY = do
     top <- popS
 
-    if itemToBool top then return ()
+    if top then return ()
     else invalidTx
 
 evalOpS OP_RETURN = invalidTx
 evalOpS OP_DUP = dupS
 
-evalOpS OP_EQUAL = do
-    (a, b) <- pop2S
-    pushBoolS (a == b)
+evalOpS OP_EQUAL = binaryOpS ((==) :: ByteString -> ByteString -> Bool)
 
 evalOpS OP_EQUALVERIFY =
     evalOpS OP_EQUAL >>
     evalOpS OP_VERIFY
 
-evalOpS OP_SHA256 = do
-    val <- popBSS
-    pushBSS $ ba2bs $ sha256 val
-
-evalOpS OP_HASH160 = do
-    val <- popBSS
-    pushBSS $ ba2bs $ ripemd160 $ sha256 val
-
-evalOpS OP_HASH256 = do
-    val <- popBSS
-    pushBSS $ ba2bs $ sha256 $ sha256 val
+evalOpS OP_RIPEMD160 = unaryOpS ripemd160
+evalOpS OP_SHA1 = unaryOpS sha1
+evalOpS OP_SHA256 = unaryOpS sha256
+evalOpS OP_HASH160 = unaryOpS (ripemd160 . sha256)
+evalOpS OP_HASH256 = unaryOpS (sha256 . sha256)
 
 evalOpS OP_CHECKSIG = do
-    (pub', sig') <- pop2BSS
+    (pub', sig') <- pop2S
     msg <- rawSigHashS sig'
 
     -- there is one byte(hash type) appended to the signature
-    pushBoolS (verifyFail pub' msg (BSR.init sig'))
-
-    -- tx <- encodeLE <$> txS
-    -- traceShowM (hex $ encodeBE ((decodeFailBE pub') { compressed = False }), hex $ ba2bs $ sha256 msg, hex tx, hex $ BSR.init sig')
-
-    -- traceShowM (decodeFailBE pub' :: ECCPublicKey)
-
-    -- magic prefix 3056 301006072 300CA00706052B8104000AA144034200
-
-    -- 3056 301006072A8648CE3D020106052B8104000A 034200 04085C6600657566ACC2D6382A47BC3F324008D2AA10940DD7705A48AA2A5A5E33A726DD7E88D4C03086E19122A8350F82CF7FFF16D8111B48FD82D9DBD07B374C
-
-    -- 02085C6600657566ACC2D6382A47BC3F324008D2AA10940DD7705A48AA2A5A5E33
-    -- 4EB4DCCD727E81315A9FF801C205EFC62635471CF8668E42C1C8AEBFB51500A3
-    -- 3044022045D08719828FBD93E49C9223E63F4D2DAB2DE6C568E1FAA2CCCB33ADF2575D2C02200C00126CB0105275040A963D91E45460147E40451B590485CF438606D3C784CF
-
-    -- 03F5D0FB955F95DD6BE6115CE85661DB412EC6A08ABCBFCE7DA0BA8297C6CC0EC4
-    -- 4EB4DCCD727E81315A9FF801C205EFC62635471CF8668E42C1C8AEBFB51500A3
-    -- 30450221009A29101094B283AE62A6FED68603C554CA3A624B9A78D83E8065EDCF97AE231B02202CBED6E796EE6F4CAF30EDEF8F5597A08A6BE265D6601AD92283990B55C038FA
+    pushS (verifyFail pub' msg (BSR.init sig'))
 
 evalOpS OP_CHECKSIGVERIFY =
     evalOpS OP_CHECKSIG >>
     evalOpS OP_VERIFY
 
 evalOpS OP_CHECKMULTISIG = do
-    n' <- popBSS -- total number of possible keys
+    n' <- popS -- total number of possible keys
     let n = decodeFailLE n' :: Word8
-    assertT (BSR.length n' == 1 && n > 0 && n <= 16) "illegal n in checkmultisig"
+    assertT "illegal n in checkmultisig" (BSR.length n' == 1 && n > 0 && n <= 16)
 
-    pub's <- popNBSS $ fi n
+    pub's <- popNS $ fi n
 
-    m' <- popBSS -- number of signatures must be provided
+    m' <- popS -- number of signatures must be provided
     let m = decodeFailLE m' :: Word8
-    assertT (BSR.length m' == 1 && m > 0 && m <= 16) "illegal m in checkmultisig"
+    assertT "illegal m in checkmultisig" (BSR.length m' == 1 && m > 0 && m <= 16)
 
-    sig's <- popNBSS $ fi m
+    sig's <- popNS $ fi m
 
     -- messages for signing
     msgs <- mapM rawSigHashS sig's
@@ -378,65 +349,207 @@ evalOpS OP_CHECKMULTISIG = do
         succ = length final == length match &&
                ascending final -- public keys are in the right order
     
-    popS -- for compatibility with a historical bug
+    -- for compatibility with a historical bug
+    popS :: EvalState ByteString
 
-    pushBoolS succ
+    pushS succ
 
 evalOpS OP_CHECKMULTISIGVERIFY =
     evalOpS OP_CHECKMULTISIG >>
     evalOpS OP_VERIFY
 
 -- remove the 2nd-to-top item
-evalOpS OP_NIP =
-    pop2S >>= (pushS . fst)
+evalOpS OP_NIP = pop2S' >>= (pushS . fst)
+evalOpS OP_PICK = popS >>= (pickS . fi)
+evalOpS OP_SWAP = popNS' 2 >>= mapM_ pushS
 
-evalOpS OP_PICK =
-    popIntS >>= (pickS . fi)
+evalOpS OP_TOALTSTACK = popS' >>= pushAltS
+evalOpS OP_FROMALTSTACK = popAltS >>= pushS'
 
-evalOpS OP_SWAP =
-    popNS 2 >>= mapM_ pushS
+evalOpS OP_IFDUP = do
+    b <- peekS
+    if b then pushS b
+    else return ()
 
-evalOpS OP_SIZE =
-    peekBSS >>= (pushIntS . fi . BSR.length)
+evalOpS OP_DEPTH = depthS >>= (pushS . fi)
+evalOpS OP_DROP = popS' >> return ()
+evalOpS OP_OVER = pickS 1 -- second-to-top item
 
-evalOpS OP_BOOLAND = do
-    (a, b) <- pop2BoolS
-    pushBoolS (b && a)
+evalOpS OP_ROLL = popS >>= (rollS . fi)
+evalOpS OP_ROT = rollS 2
+evalOpS OP_TUCK = do
+    (a, b) <- pop2S'
+    pushNS [ a, b, a ]
 
-evalOpS OP_BOOLOR = do
-    (a, b) <- pop2BoolS
-    pushBoolS (b || a)
+evalOpS OP_2DROP = pop2S' >> return ()
+
+evalOpS OP_2DUP = do
+    (a, b) <- pop2S'
+    pushNS [ a, b, a, b ]
+
+evalOpS OP_3DUP = do
+    [ a, b, c ] <- popNS' 3
+    pushNS [ a, b, c, a, b, c ]
+
+evalOpS OP_2OVER = do
+    [ a, b, c, d ] <- popNS' 4
+    pushNS [ c, d, a, b, c, d ]
+
+evalOpS OP_2ROT = do
+    [ a, b, c, d, e, f ] <- popNS' 6
+    pushNS [ e, f, a, b, c, d ]
+
+evalOpS OP_2SWAP = do
+    [ a, b, c, d ] <- popNS' 4
+    pushNS [ c, d, a, b ]
+
+evalOpS OP_CAT = binaryOpS (BSR.append)
+evalOpS OP_SUBSTR = do
+    (size, begin) <- pop2S :: EvalState (Integer, Integer)
+    str <- popS
+
+    assertT "illegal OP_SUBSTR range" $
+        begin >= 0 && size >= 0 && fi (begin + size) <= BSR.length str
+
+    pushS (BSR.take (fi size) $ BSR.drop (fi begin) str)
+
+evalOpS OP_LEFT = do
+    size <- popS :: EvalState Integer
+    str <- popS
+
+    assertT "illegal OP_LEFT size" (fi size <= BSR.length str)
+
+    pushS (BSR.take (fi size) str)
+
+evalOpS OP_RIGHT = do
+    size <- popS :: EvalState Integer
+    str <- popS
+
+    let len = BSR.length str
+    assertT "illegal OP_RIGHT size" (fi size <= len)
+
+    pushS (BSR.drop (len - fi size) str)
+
+evalOpS OP_SIZE = unaryOpS (fi . BSR.length)
+
+evalOpS OP_BOOLAND = binaryOpS (&&)
+evalOpS OP_BOOLOR = binaryOpS (||)
 
 evalOpS OP_WITHIN = do
-    (max, min) <- pop2IntS
-    val <- popIntS
-    pushBoolS (val >= min && val < max)
+    (max, min) <- pop2S
+    val <- popS
+    pushS (val >= min && val < max)
+
+evalOpS OP_1ADD = unaryOpS (\x -> x + 1)
+evalOpS OP_1SUB = unaryOpS (\x -> x - 1)
+evalOpS OP_2MUL = unaryOpS (*2)
+evalOpS OP_2DIV = unaryOpS half
+    
+evalOpS OP_NEGATE = unaryOpS negate
+evalOpS OP_ABS = unaryOpS abs
+    
+evalOpS OP_NOT = unaryOpS not
+evalOpS OP_0NOTEQUAL = unaryOpS (id :: Bool -> Bool)
+
+evalOpS OP_ADD = binaryOpS (+)
+evalOpS OP_SUB = binaryOpS (-)
+evalOpS OP_MUL = binaryOpS (*)
+evalOpS OP_DIV = binaryOpS div
+evalOpS OP_MOD = binaryOpS mod
+
+evalOpS OP_LSHIFT = binaryOpS shiftL'
+evalOpS OP_RSHIFT = binaryOpS shiftR'
+
+evalOpS OP_NUMEQUAL = binaryOpS (==)
+evalOpS OP_NUMNOTEQUAL = binaryOpS (/=)
+evalOpS OP_NUMEQUALVERIFY = evalOpS OP_NUMEQUAL >> evalOpS OP_VERIFY
+
+evalOpS OP_LESSTHAN = binaryOpS (<)
+evalOpS OP_GREATERTHAN = binaryOpS (>)
+evalOpS OP_LESSTHANOREQUAL = binaryOpS (<=)
+evalOpS OP_GREATERTHANOREQUAL = binaryOpS (>=)
+
+evalOpS OP_MIN = binaryOpS min
+evalOpS OP_MAX = binaryOpS max
 
 evalOpS OP_CODESEPARATOR =
     modify' (\s -> s {
         last_cs_op = prog_count s
     })
 
+evalOpS OP_CHECKLOCKTIMEVERIFY = return ()
+    -- lt <- peekS
+    -- in_idx <- tx_in_idx <$> get
+    -- cur_tx <- curTxS
+
+    -- let lt1 = lock_time cur_tx
+    --     sequence = seqn (tx_in cur_tx !! fi in_idx)
+
+    -- assertT "invalid locktime value" $ not $
+    --     lt < 0 ||
+    --     ((lt <= 500000000) /= (lt1 <= 500000000)) ||
+    --     sequence == 0xffffffff
+
+    -- assertT "unmatched locktime" $
+    --     fi lt <= lt1
+
+evalOpS OP_CHECKSEQUENCEVERIFY = return ()
+    -- in_idx <- tx_in_idx <$> get
+    -- cur_tx <- curTxS
+    -- out_tx <- outTxS
+    -- span   <- peekS
+    
+    -- let sequence = seqn (tx_in cur_tx !! fi in_idx)
+    --     lt0 = lock_time out_tx
+    --     lt1 = lock_time cur_tx
+
+    -- assertT "invalid span/locktime" $ not $
+    --     span < 0 ||
+    --     not (span .&. (1 `shiftL` 31) == 0 &&
+    --          (version cur_tx < 2 ||
+    --           sequence .&. (1 `shiftL` 31) /= 0 ||
+    --           (lt0 <= 500000000) /= (lt1 <= 500000000) ||
+    --           fi span > lt1 - lt0))
+
 evalOpS (OP_PRINT msg) = traceM msg
+
+evalOpS OP_NOP1 = return ()
+evalOpS OP_NOP4 = return ()
+evalOpS OP_NOP5 = return ()
+evalOpS OP_NOP6 = return ()
+evalOpS OP_NOP7 = return ()
+evalOpS OP_NOP8 = return ()
+evalOpS OP_NOP9 = return ()
+evalOpS OP_NOP10 = return ()
 
 -- end of code
 evalOpS OP_EOC = return ()
 
 evalOpS op = error $ "unimplemented " ++ show op
 
+checkValidOp :: ScriptOp -> EvalState ScriptOp
+checkValidOp op = do
+    strict <- confS script_enable_strict
+
+    if strict && op `elem` disabled_ops then
+        failT ("(strict mode)disabled op " ++ show op)
+    else
+        return op
+
 -- execute the current op and increment the pc
-execOneS = curOpS >>= evalOpS >> incPcS
+execOneS = curOpS >>= checkValidOp >>= evalOpS >> incPcS
 
 -- exec all
 execS :: EvalState ()
 execS = execOneS `untilM_` eocS
 
-initState :: ScriptConf -> TxPayload -> Word32 -> ScriptState
-initState conf tx idx =
+initState :: ScriptConf -> TxPayload -> TxPayload -> Word32 -> ScriptState
+initState conf out_tx cur_tx idx =
     ScriptState {
         script_conf = conf,
 
         eval_stack = [],
+        alt_stack = [],
 
         prog_code = [],
         last_cs_op = -1,
@@ -444,7 +557,8 @@ initState conf tx idx =
 
         -- tx_prev_out = out,
         tx_in_idx = idx,
-        tx_body = tx
+        out_tx = out_tx,
+        cur_tx = cur_tx
     }
 
 execEval :: ScriptState -> [ScriptOp] -> Either TCKRError ScriptState
@@ -457,7 +571,7 @@ execEval init ops =
 
 -- whether the exec result means a positive result
 isValidStack :: ScriptState -> Bool
-isValidStack (ScriptState { eval_stack = top:_ }) = itemToBool top
+isValidStack (ScriptState { eval_stack = top:_ }) = fromItem top
 isValidStack _ = False
 
 data ScriptResult =
@@ -501,7 +615,7 @@ specialScript :: ScriptState -> [[ScriptOp]] -> Either TCKRError ScriptState
 specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     if script_enable_p2sh (script_conf s) then do
         redeem_script <- decodeAllLE redeem
-        ns <- execStateT popS s -- pop out result first
+        ns <- execStateT popS' s -- pop out result first
         execEval ns redeem_script -- exec on redeem script
     else
         -- p2sh not enabled

@@ -246,6 +246,15 @@ one_byte_op_map = [
 one_byte_op_index = map fst one_byte_op_map
 one_byte_op_map_r = map (\(a, b) -> (b, a)) one_byte_op_map
 
+disabled_ops = [
+        OP_CAT, OP_SUBSTR, OP_LEFT,
+        OP_RIGHT, OP_INVERT, OP_AND,
+        OP_OR, OP_XOR,
+        OP_2MUL, OP_2DIV,
+        OP_MUL, OP_DIV, OP_MOD,
+        OP_LSHIFT, OP_RSHIFT
+    ]
+
 instance Encodable ScriptOp where
     encode _ (OP_PUSHDATA dat) =
         if len /= 0 && len <= 0x4b then

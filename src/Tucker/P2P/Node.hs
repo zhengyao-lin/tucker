@@ -45,7 +45,7 @@ data MainLoopEnv =
 
         gc_interv     :: Integer, -- in ms
 
-        io_lock       :: LK.Lock,
+        -- io_lock       :: LK.Lock,
         io_buf        :: Atom [String],
 
         chain_lock    :: LK.Lock,
@@ -155,9 +155,11 @@ instance NodeTask NullTask where
 envMsg :: MainLoopEnv -> String -> IO ()
 envMsg env msg = do
     -- force eval
-    let msg' = BS.pack ("env: " ++ msg)
+    -- let msg' = BS.pack ("env: " ++ msg)
 
-    LK.with (io_lock env) $ BS.putStrLn msg'
+    traceM ("env: " ++ msg)
+
+    -- LK.with (io_lock env) $ BS.putStrLn msg'
 
     -- appA (++ [ "env: " ++ msg ]) (io_buf env)
     -- putStrLn' $ "env: " ++ msg
@@ -167,7 +169,7 @@ initEnv conf = do
     tid <- lift myThreadId
 
     node_list <- lift $ newA []
-    io_lock <- lift $ LK.new
+    -- io_lock <- lift $ LK.new
     io_buf <- lift $ newA []
 
     -- db_block <- openDB def (tckr_db_path conf) (tckr_ks_block conf)
@@ -185,7 +187,7 @@ initEnv conf = do
         node_list = node_list,
         gc_interv = tckr_gc_interval conf,
 
-        io_lock = io_lock,
+        -- io_lock = io_lock,
         io_buf = io_buf,
 
         chain_lock = chain_lock,

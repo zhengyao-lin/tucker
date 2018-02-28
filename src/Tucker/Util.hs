@@ -225,3 +225,5 @@ lst' !!! i =
     if i >= 0 && i < length lst then Just (lst !! i)
     else Nothing
     where lst = FD.toList lst'
+
+half = (`div` 2)

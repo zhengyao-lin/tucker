@@ -176,7 +176,7 @@ generalTxCase :: ScriptType -> ScriptResult -> TxPayload -> Int -> TxPayload -> 
 generalTxCase stype should_be tx0 out_idx tx1 in_idx = do
     let pk_sc = decodeFailLE (pk_script (tx_out tx0 !! out_idx))
         sig_sc = decodeFailLE (sig_script (tx_in tx1 !! in_idx))
-        state = initState def tx1 (fi in_idx)
+        state = initState def tx0 tx1 (fi in_idx)
     
     -- print pk_sc
 
@@ -356,7 +356,7 @@ OP_ENDIF
 runScript :: [ScriptOp] -> IO [StackItem]
 runScript ops = do
     let tx = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0134ffffffff0100f2052a0100000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000"
-        state = initState def tx 0
+        state = initState def undefined tx 0
 
     eval_stack <$> assertEitherRight (execEval state ops)
 
@@ -493,7 +493,7 @@ scriptTest = TestCase $ do
     res <- runScript sc5
 
     assertEqual "wrong script exec result 5" [
-            intToItem 2
+            toItem (2 :: Integer)
         ] res
 
 msgTests = TestList [

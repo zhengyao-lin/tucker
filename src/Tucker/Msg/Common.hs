@@ -266,7 +266,7 @@ encodeVList end list =
     encode end (VInt $ fi $ length list) <> encode end list
 
 payloadCheck :: ByteString -> ByteString
-payloadCheck = BS.take 4 . ba2bs . sha256 . sha256
+payloadCheck = BS.take 4 . sha256 . sha256
 
 padnull :: Int -> String -> ByteString
 padnull full str =

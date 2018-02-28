@@ -17,6 +17,8 @@ import Control.Monad.Loops
 import Control.Concurrent.Thread.Delay
 import qualified Control.Concurrent.Lock as LK
 
+import Debug.Trace
+
 -- import System.IO
 import System.Exit
 import System.Random
@@ -294,6 +296,7 @@ scheduleFetch env init_hashes callback = do
 
         -- refresh block inventory
         refreshBlock sched node = do
+            traceM "enter refreshing"
             LK.with var_lock $ do
                 old_added <- getA added_var
 
@@ -304,6 +307,8 @@ scheduleFetch env init_hashes callback = do
                 new_succ_count <- length <$> new_succ
         
                 new_added <- appA (+ new_succ_count) added_var
+
+                traceM (show new_succ_count ++ " block(s) to add")
 
                 if new_succ_count /= 0 then do
                     -- NOTE: the downloaded part is cleared first

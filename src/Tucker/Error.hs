@@ -30,7 +30,7 @@ wrapError (TCKRError err) prep =
 failT :: MonadError TCKRError m => String -> m a
 failT = throwError . TCKRError
 
-assertT :: MonadError TCKRError m => Bool -> String -> m ()
-assertT cond msg =
+assertT :: MonadError TCKRError m => String -> Bool -> m ()
+assertT msg cond =
     if cond then return ()
     else failT msg

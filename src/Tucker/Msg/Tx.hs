@@ -36,7 +36,7 @@ data TxInput =
     TxInput {
         prev_out        :: OutPoint,
         sig_script      :: RawScript,
-        seqn            :: Int32 -- sequence, currently not used
+        seqn            :: Word32 -- sequence, currently not used
     } deriving (Eq, Show, Read)
 
 instance NFData TxInput where
@@ -388,7 +388,7 @@ sigRawTx tx idx' subscript htype =
         -- trace (show final_tx) $
         encodeLE final_tx <> encodeLE raw_htype
         -- trace (show (prev, final_tx, hex final_str)) $
-        -- bsToHash256 $ ba2bs $ sha256 $ sha256 final_str
+        -- bsToHash256 $ sha256 $ sha256 final_str
 
 -- generate a standard public key script
 -- stdPkScript :: TCKRConf
@@ -410,7 +410,7 @@ sigRawTx tx idx' subscript htype =
 --     let
 --         raw = encodeLE tx
 --         -- the first sha256 performed here
---         hash_raw = ba2bs $ sha256 $ raw <> BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
+--         hash_raw = sha256 $ raw <> BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
 
 --     -- another sha256 is performed here
 --     -- seq (trace (show $ sha256 $ sha256 raw) 0) $

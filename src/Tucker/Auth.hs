@@ -40,13 +40,16 @@ import Tucker.Util
 import Tucker.Error
 
 ba2bs :: BA.ByteArrayAccess a => a -> ByteString
-ba2bs = BSR.pack . BA.unpack
+ba2bs = BA.convert
 
-sha256 :: BA.ByteArrayAccess a => a -> Digest SHA256
-sha256 = hash
+sha256 :: ByteString -> ByteString -- BA.ByteArrayAccess a => a -> Digest SHA256
+sha256 = ba2bs . (hash :: BA.ByteArrayAccess a => a -> Digest SHA256)
 
-ripemd160 :: BA.ByteArrayAccess a => a -> Digest RIPEMD160
-ripemd160 = hash
+sha1 :: ByteString -> ByteString
+sha1 = ba2bs . (hash :: BA.ByteArrayAccess a => a -> Digest SHA1)
+
+ripemd160 :: ByteString -> ByteString
+ripemd160 = ba2bs . (hash :: BA.ByteArrayAccess a => a -> Digest RIPEMD160)
 
 base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -89,8 +92,7 @@ base58dec enc = do
 base58encCheck :: ByteString -> ByteString
 base58encCheck raw =
     base58enc $ raw <> BS.take 4 digest
-    where
-        digest = ba2bs $ sha256 $ sha256 raw
+    where digest = sha256 $ sha256 raw
 
 base58decCheck :: ByteString -> Either TCKRError ByteString
 base58decCheck enc = do
@@ -99,7 +101,7 @@ base58decCheck enc = do
         len = BS.length dec
         check = BS.drop (len - 4) dec
         orig = BS.take (len - 4) dec
-        digest = BS.take 4 $ ba2bs $ sha256 $ sha256 orig
+        digest = BS.take 4 $ sha256 $ sha256 orig
 
     if digest == check then
         pure orig
@@ -225,7 +227,7 @@ pub2addr conf pub =
     where
         pub_raw = encodeBE pub
                             -- main TCKRConf byte
-        pub_hash = BSR.cons (tckr_pub_pref conf) $ ba2bs $ ripemd160 $ sha256 pub_raw
+        pub_hash = BSR.cons (tckr_pub_pref conf) $ ripemd160 $ sha256 pub_raw
 
 addr2hash :: TCKRConf -> Address -> Either TCKRError ByteString
 addr2hash conf addr = do

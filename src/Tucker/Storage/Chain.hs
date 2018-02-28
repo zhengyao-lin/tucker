@@ -316,6 +316,8 @@ addBlockFail bc@(BlockChain {
                 expectTrue "more than one coinbase txns" $
                     idx == 0 || not is_coinbase
 
+                traceM $ "checking tx " ++ show idx
+
                 if not is_coinbase then do
                     in_values <- forM ([0..] `zip` tx_in tx) $ \(in_idx, inp@(TxInput {
                             prev_out = outp@(OutPoint txid out_idx)
@@ -354,7 +356,7 @@ addBlockFail bc@(BlockChain {
 
                         let pk_sc = decodeFailLE (pk_script prev_tx_out)
                             sig_sc = decodeFailLE (sig_script inp)
-                            state = initState script_conf tx in_idx
+                            state = initState script_conf prev_tx_body tx in_idx
                             check_res = runEval state [ sig_sc, pk_sc ]
 
                         -- traceShowM (out_idx, prev_tx_out)
