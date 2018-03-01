@@ -135,7 +135,7 @@ tucker_default_conf_mainnet = do
         tckr_seek_min = 8, -- if node_count < min_seek then seek for more nodes
         tckr_seek_max = 16, -- if node_count >= max_seek then stop seeking
 
-        tckr_max_node = 25, -- max number of nodes in total
+        tckr_max_node = 32, -- max number of nodes in total
         
         tckr_node_blacklist = [
                 ip4 (127, 0, 0, 1),
@@ -148,7 +148,7 @@ tucker_default_conf_mainnet = do
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min
-        tckr_reping_time = 60, -- 1 min
+        tckr_reping_time = 30, -- 30sec
 
         tckr_known_inv_count = 8,
 

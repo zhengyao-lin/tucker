@@ -14,7 +14,6 @@ import Control.Exception
 import Control.Concurrent
 import Control.Monad.Morph
 import Control.Monad.Trans.Resource
-import qualified Control.Concurrent.Lock as LK
 
 import Network.Socket
 
@@ -27,6 +26,7 @@ import Tucker.Conf
 import Tucker.Atom
 import Tucker.Util
 import Tucker.Transport
+import qualified Tucker.Lock as LK
 
 import Tucker.Storage.Chain
 
@@ -275,6 +275,13 @@ nodeNetAddr = return . net_addr
 
 nodeNetDelay :: Node -> IO Word
 nodeNetDelay = getA . ping_delay
+
+-- this function will filter out uninit nodes
+envAllNetDelay :: Integral t => MainLoopEnv -> IO [t]
+envAllNetDelay env =
+    getA (node_list env) >>=
+    mapM (getA . ping_delay) >>=
+    (return . map fi . filter (/= maxBound))
 
 -- spread actions to nodes except the ones in the black list
 -- return [] if no available node is found

@@ -178,179 +178,13 @@ generalTxCase stype should_be tx0 out_idx tx1 in_idx = do
         sig_sc = decodeFailLE (sig_script (tx_in tx1 !! in_idx))
         state = initState def tx0 tx1 (fi in_idx)
     
-    -- print pk_sc
-
     -- print ([ sig_sc, pk_sc ])
 
-    assertBool ("wrong script type for tx " ++ show (txid tx1))
+    assertBool ("wrong script type for tx " ++ show (txid tx1) ++ " from tx " ++ show (txid tx0))
         (stype == getScriptType [ sig_sc, pk_sc ])
 
-    assertEqual ("wrong checking result for tx " ++ show (txid tx1))
+    assertEqual ("wrong checking result for tx " ++ show (txid tx1) ++ " from tx " ++ show (txid tx0))
         should_be (runEval state [ sig_sc, pk_sc ])
-
-{-
-
-dat1 = dat2 = ""
-
-sig_script
-
-OP_PUSHDATA dat1
-OP_PUSHDATA dat2
-OP_PUSHDATA sig1
-OP_PUSHDATA sig2
-
-pk_script
-
-match(sig1, pk1)
-    OP_PUSHDATA pk1
-    OP_CHECKSIG
-    OP_SWAP
-
-match(sig2, pk2)
-    OP_PUSHDATA pk2
-    OP_CHECKSIG
-    OP_SWAP
-
-<----- stack [ match(sig1, pk1), match(sig2, pk2), 0, 0 ]
-
-hash(dat1) == hash1
-    3 OP_PICK
-    OP_SHA256
-    OP_PUSHDATA hash1
-    OP_EQUAL
-
-<----- stack [ hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
-
-hash(dat2) == hash2
-    3 OP_PICK
-    OP_SHA256
-    OP_PUSHDATA hash2
-    OP_EQUAL
-
-<----- stack [ hash(0) == hash2, hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
-
-OP_BOOLAND
-
-<----- stack [ hash(0) == hash2 && hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
-
-size(dat1) == 32 or 33
-    4 OP_PICK
-    OP_SIZE OP_NIP
-    OP_PUSHDATA 0x20
-    OP_PUSHDATA 0x22
-    OP_WITHIN
-
-OP_BOOLAND
-
-size(dat2) == 32 or 33
-    3 OP_PICK
-    OP_SIZE OP_NIP
-    OP_PUSHDATA 0x20
-    OP_PUSHDATA 0x22
-    OP_WITHIN
-
-OP_BOOLAND
-
-<----- stack [ length(0) ~ [32, 34) &&
-               length(0) ~ [32, 34) &&
-               hash(0) == hash2 &&
-               hash(0) == hash1, match(sig1, pk1), match(sig2, pk2), 0, 0 ]
-
-OP_IF True 11
-
-3 OP_PICK
-OP_SIZE OP_NIP
-
-3 OP_PICK
-OP_SIZE OP_NIP
-
-OP_EQUAL
-OP_PICK
-
-OP_ELSE 2
-OP_BOOLAND
-OP_ENDIF
-
-pk1 = 02085C6600657566ACC2D6382A47BC3F324008D2AA10940DD7705A48AA2A5A5E33
-pk2 = 03F5D0FB955F95DD6BE6115CE85661DB412EC6A08ABCBFCE7DA0BA8297C6CC0EC4
-hash1 = D68DF9E32A147CFFA36193C6F7C43A1C8C69CDA530E1C6DB354BFABDCFEFAF3C
-hash2 = F531F3041D3136701EA09067C53E7159C8F9B2746A56C3D82966C54BBC553226
-
-sig1 = 30450221009a29101094b283ae62a6fed68603c554ca3a624b9a78d83e8065edcf97ae231b02202cbed6e796ee6f4caf30edef8f5597a08a6be265d6601ad92283990b55c038fa01
-sig2 = 3044022045d08719828fbd93e49c9223e63f4d2dab2de6c568e1faa2cccb33adf2575d2c02200c00126cb0105275040a963d91e45460147e40451b590485cf438606d3c784cf01
-
-bool pk_script(dat1, dat2, sig1, sig2) {
-    if (hash(dat1) == hash1 &&
-        hash(dat2) == hash2 &&
-        size(dat1) == 32 or 33 &&
-        size(dat2) == 32 or 33) {
-        if (size(dat1) == size(dat2)) {
-            return match(sig2, pk2);
-        } else {
-            return match(sig1, pk1);
-        }
-    } else {
-        return match(sig1, pk1) && match(sig2, pk2);
-    }
-}
-
-constants:
-pk1 = 02085C6600657566ACC2D6382A47BC3F324008D2AA10940DD7705A48AA2A5A5E33
-pk2 = 03F5D0FB955F95DD6BE6115CE85661DB412EC6A08ABCBFCE7DA0BA8297C6CC0EC4
-hash1 = D68DF9E32A147CFFA36193C6F7C43A1C8C69CDA530E1C6DB354BFABDCFEFAF3C
-hash2 = F531F3041D3136701EA09067C53E7159C8F9B2746A56C3D82966C54BBC553226
-
-OP_PUSHDATA <pk1>
-OP_CHECKSIG
-OP_SWAP
-
-OP_PUSHDATA <pk2>
-OP_CHECKSIG
-OP_SWAP
-
-3 OP_PICK
-OP_SHA256
-OP_PUSHDATA <hash1>
-OP_EQUAL
-
-3 OP_PICK
-OP_SHA256
-OP_PUSHDATA <hash2>
-OP_EQUAL
-
-OP_BOOLAND
-
-4 OP_PICK
-OP_SIZE OP_NIP
-OP_PUSHDATA 0x20
-OP_PUSHDATA 0x22
-OP_WITHIN
-
-OP_BOOLAND
-
-3 OP_PICK OP_NIP
-OP_PUSHDATA 0x20
-OP_PUSHDATA 0x22
-OP_WITHIN
-
-OP_BOOLAND
-
-OP_IF
-
-3 OP_PICK
-OP_SIZE OP_NIP
-
-3 OP_PICK
-OP_SIZE OP_NIP
-
-OP_EQUAL
-OP_PICK
-
-OP_ELSE
-OP_BOOLAND
-OP_ENDIF
-
--}
 
 -- run script on an empty stack with a dummy tx
 runScript :: [ScriptOp] -> IO [StackItem]
@@ -457,6 +291,31 @@ txCase10 = TestCase $ do
 
     generalTxCase SCRIPT_NONSTD ValidTx tx0 1 tx1 0
 
+-- all combinations of SIGHASH
+txCase11 = TestCase $ do
+    -- NOTE: in this case tx0 is the current tx
+    -- tx0 8ccc87b72d766ab3128f03176bb1c98293f2d1f85ebfaf07b82cc81ea6891fa9
+    -- tx1 0030d82bb8ad9dd7664fd9e2bc14d0ae3d9cb34d2cd56d5868e5bf899ab24f2c
+    -- tx2 0140c05b57e9a52808cd280bfb7e0ad00b8c38c8e022c0425e2825731815105b
+    -- tx3 014ad0823a977cb5a8a54bfdc9aa27ce4967c83fd15c4f9f27025886725de1c0
+    -- tx4 025c7fb450f45c9c127e876d10633e9b8faa52b8d3e5dcea82ee86da512b1b4a
+    -- tx5 030f68eefffe66ba36410bc76971cf47d08b259bc2a2d997ea125130d8e0a361
+    -- tx6 0326b97c2e497926e0ef2dc2359644e2e4638cf8d3fb778b8d5649513e93d6c7
+    let tx0 = hex2tx "01000000062c4fb29a89bfe568586dd52c4db39c3daed014bce2d94f66d79dadb82bd83000000000004847304402202ea9d51c7173b1d96d331bd41b3d1b4e78e66148e64ed5992abd6ca66290321c0220628c47517e049b3e41509e9d71e480a0cdc766f8cdec265ef0017711c1b5336f01ffffffff5b1015187325285e42c022e0c8388c0bd00a7efb0b28cd0828a5e9575bc040010000000049483045022100bf8e050c85ffa1c313108ad8c482c4849027937916374617af3f2e9a881861c9022023f65814222cab09d5ec41032ce9c72ca96a5676020736614de7b78a4e55325a81ffffffffc0e15d72865802279f4f5cd13fc86749ce27aac9fd4ba5a8b57c973a82d04a01000000004a493046022100839c1fbc5304de944f697c9f4b1d01d1faeba32d751c0f7acb21ac8a0f436a72022100e89bd46bb3a5a62adc679f659b7ce876d83ee297c7a5587b2011c4fcc72eab4502ffffffff4a1b2b51da86ee82eadce5d3b852aa8f9b3e63106d877e129c5cf450b47f5c02000000004a493046022100eaa5f90483eb20224616775891397d47efa64c68b969db1dacb1c30acdfc50aa022100cf9903bbefb1c8000cf482b0aeeb5af19287af20bd794de11d82716f9bae3db182ffffffff61a3e0d8305112ea97d9a2c29b258bd047cf7169c70b4136ba66feffee680f030000000049483045022047d512bc85842ac463ca3b669b62666ab8672ee60725b6c06759e476cebdc6c102210083805e93bd941770109bcc797784a71db9e48913f702c56e60b1c3e2ff379a6003ffffffffc7d6933e5149568d8b77fbd3f88c63e4e2449635c22defe02679492e7cb926030000000048473044022023ee4e95151b2fbbb08a72f35babe02830d14d54bd7ed1320e4751751d1baa4802206235245254f58fd1be6ff19ca291817da76da65c2f6d81d654b5185dd86b8acf83ffffffff0700e1f505000000001976a914c311d13cfbaa1fc8d364a8e89feb1985de58ae3988ac80d1f008000000001976a914eb907923b86af59d3fd918478546c7a234586caf88ac00c2eb0b000000001976a9141c88b9d44e5fc327025157c75af73774758ba68088ac80b2e60e000000001976a914142c0947df1df159b2367a0e1328efb5b76b62bd88ac00a3e111000000001976a914616bffc03acbb416ccf76a048a9bbb974c0504c488ac8093dc14000000001976a9141d5e6e993d168384864c3a92216b9b77560d436488ac804eacab060000001976a914aa9da4a3a4ddc7398ae467eddaf80d743349d6e988ac00000000"
+        tx1 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0e0424324a4d0125062f503253482fffffffff0100f2052a01000000232102715e91d37d239dea832f1460e91e368115d8ca6cc23a7da966795abad9e3b699ac00000000"
+        tx2 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0e041d244a4d0165062f503253482fffffffff0100f2052a01000000232102f71546fc597e63e2a72dadeeeb50c0ca64079a5a530cb01dd939716d41e9d480ac00000000"
+        tx3 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0e047d764a4d017b062f503253482fffffffff0100f2052a010000002321031ee99d2b786ab3b0991325f2de8489246a6a3fdb700f6d0511b1d80cf5f4cd43ac00000000"
+        tx4 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0f04480c4a4d020901062f503253482fffffffff0100f2052a0100000023210249c6a76e37c2fcd56687dde6b75bbdf72fcdeeab6fe81561a9c41ac90d9d1f48ac00000000"
+        tx5 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0f04b56a4a4d02c100062f503253482fffffffff0100f2052a010000002321035c100972ff8c572dc80eaa15a958ab99064d7c6b9e55f0e6408dec11edd4debbac00000000"
+        tx6 = hex2tx "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff1c3b5b93ca6d4e0fcfccdaf2c4845377e533fb4f870d430630140049edffffffff01f03b082a01000000232103837725cf7377d40a965f082fa6a942d39d9c2433c6d3c7bb4fa262e7d0d19defac00000000"
+
+    generalTxCase SCRIPT_P2PK ValidTx tx1 0 tx0 0
+    generalTxCase SCRIPT_P2PK ValidTx tx2 0 tx0 1
+    generalTxCase SCRIPT_P2PK ValidTx tx3 0 tx0 2
+    generalTxCase SCRIPT_P2PK ValidTx tx4 0 tx0 3
+    generalTxCase SCRIPT_P2PK ValidTx tx5 0 tx0 4
+    generalTxCase SCRIPT_P2PK ValidTx tx6 0 tx0 5
+
 scriptTest = TestCase $ do
     let sc1 = [ OP_NOP ]
         sc2 = [ OP_IF True 1, OP_ENDIF ]
@@ -510,6 +369,7 @@ msgTests = TestList [
         TestLabel "tx case 8" txCase8,
         TestLabel "tx case 9" txCase9,
         TestLabel "tx case 10" txCase10
+        -- TestLabel "tx case 11" txCase11
     ]
 
 bucketTest = TestCase $ do

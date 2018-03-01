@@ -316,7 +316,7 @@ addBlockFail bc@(BlockChain {
                 expectTrue "more than one coinbase txns" $
                     idx == 0 || not is_coinbase
 
-                traceM $ "checking tx " ++ show idx
+                traceM $ "\rchecking tx " ++ show idx
 
                 if not is_coinbase then do
                     in_values <- forM ([0..] `zip` tx_in tx) $ \(in_idx, inp@(TxInput {

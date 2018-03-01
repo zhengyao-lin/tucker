@@ -10,12 +10,12 @@ import Control.Monad.Loops
 import Control.Monad.Morph
 import Control.Monad.Trans.Resource
 import Control.Concurrent.Thread.Delay
-import qualified Control.Concurrent.Lock as LK
 
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Util
 import Tucker.Atom
+import qualified Tucker.Lock as LK
 
 import Tucker.P2P.Node
 import Tucker.P2P.Util
@@ -29,7 +29,7 @@ import System.Mem
 bootstrap :: MainLoopEnv -> [String] -> IO ()
 bootstrap env hostnames = do
     addrs <- mapM (seedLookup $ global_conf env) hostnames >>= (pure . concat)
-    probe env addrs
+    probe env (take (envConf env tckr_max_node) addrs)
     
 {-
 
@@ -49,7 +49,7 @@ we want to dump part of it into the disk
 -}
 
 -- measure the availability & responding time
--- of each node(every 20 * 1000 * 1000 ms)
+-- of each node(every tckr_reping_time second)
 pingLoop :: MainLoopEnv -> IO ()
 pingLoop env =
     forever $ do
@@ -114,9 +114,9 @@ gcLoop env@(MainLoopEnv {
         -- envMsg env $ "actions: " ++ show res
 
         envMsg env $ "gc: " ++
-                     (show $ length cur_list - length new_list) ++
+                     show (length cur_list - length new_list) ++
                      " dead node(s) collected"
-        envMsg env $ "all nodes: " ++ (show new_list)
+        envMsg env $ "all " ++ show (length new_list) ++ " node(s): " ++ show new_list
 
 -- syncOne env n = do
 --     envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n

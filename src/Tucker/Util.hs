@@ -3,6 +3,7 @@ module Tucker.Util where
 import qualified Text.Printf as TP
 
 import Data.Bits
+import Data.List
 import Data.Time.Clock.POSIX
 import qualified Data.Foldable as FD
 import qualified Data.Set.Ordered as OSET
@@ -226,4 +227,22 @@ lst' !!! i =
     else Nothing
     where lst = FD.toList lst'
 
+half :: Integral t => t -> t
 half = (`div` 2)
+
+middle :: [a] -> a
+middle [] = error "middle of empty list"
+middle lst = lst !! half (length lst - 1)
+
+median :: Ord a => [a] -> a
+median [] = error "median of empty list"
+median lst = middle (sort lst)
+
+average :: Integral a => [a] -> a
+average [] = error "average of empty list"
+average lst' =
+    fi (sum lst `div` fi (length lst))
+    where lst = map fi lst' :: [Integer]
+
+deleteAll :: Eq a => a -> [a] -> [a]
+deleteAll a lst = filter (/= a) lst

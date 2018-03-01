@@ -8,6 +8,7 @@ import Data.List
 import Data.Word
 import Data.Bits
 import qualified Data.ByteString as BSR
+import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
 import Control.Monad.State
@@ -29,13 +30,15 @@ import Tucker.Msg.ScriptOp
 data ScriptConf =
     ScriptConf {
         script_enable_strict :: Bool,
-        script_enable_p2sh   :: Bool
+        script_enable_p2sh   :: Bool,
+        script_enable_trace  :: Bool
     } deriving (Show)
 
 instance Default ScriptConf where
     def = ScriptConf {
         script_enable_strict = False,
-        script_enable_p2sh = True
+        script_enable_p2sh = True,
+        script_enable_trace = False
     }
 
 type StackItem = ByteString
@@ -196,6 +199,9 @@ curTxS = cur_tx <$> get
 
 outTxS :: EvalState TxPayload
 outTxS = out_tx <$> get
+
+stackS :: EvalState [StackItem]
+stackS = eval_stack <$> get
 
 -- ONE time SHA256 hash of the raw tx body for signature
 -- require the raw signature with the htype byte appended
@@ -430,7 +436,7 @@ evalOpS OP_RIGHT = do
 
     pushS (BSR.drop (len - fi size) str)
 
-evalOpS OP_SIZE = unaryOpS (fi . BSR.length)
+evalOpS OP_SIZE = evalOpS OP_DUP >> unaryOpS (fi . BSR.length)
 
 evalOpS OP_BOOLAND = binaryOpS (&&)
 evalOpS OP_BOOLOR = binaryOpS (||)
@@ -529,6 +535,19 @@ evalOpS op = error $ "unimplemented " ++ show op
 
 checkValidOp :: ScriptOp -> EvalState ScriptOp
 checkValidOp op = do
+    -- depth <- depthS
+    -- top <- if depth > 0 then peekS else return (BS.pack "no elem")
+    -- stack <- eval_stack <$> get
+    -- traceM $ "exec " ++ show op ++ ": " ++ show stack
+
+    enable_trace <- confS script_enable_trace
+
+    if enable_trace then do
+        stack <- stackS
+        traceM $ "[trace] exec " ++ show op ++ " " ++ show stack
+    else
+        return ()
+
     strict <- confS script_enable_strict
 
     if strict && op `elem` disabled_ops then

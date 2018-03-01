@@ -1,23 +1,28 @@
 module Tucker.P2P.Scheduler where
 
+import Data.List
 import qualified Data.Set as SET
 
 import Control.Monad
 import Control.Concurrent
 import Control.Concurrent.Thread.Delay
-import qualified Control.Concurrent.Lock as LK
+
+import Debug.Trace
 
 import Tucker.Atom
 import Tucker.Util
+import qualified Tucker.Lock as LK
+
 import Tucker.P2P.Node
 
 -- task scheduler
 data Scheduler t =
     Scheduler {
-        sched_tid  :: ThreadId,
-        var_lock   :: LK.Lock,
-        blacklist  :: Atom (SET.Set Node),
-        cur_assign :: Atom [(Node, t)]
+        sched_tid   :: ThreadId,
+        var_lock    :: LK.Lock,
+        blacklist   :: Atom (SET.Set Node),
+        cur_assign  :: Atom [(Node, t)],
+        sched_alive :: Atom Bool
     }
 
 {-
@@ -61,8 +66,13 @@ removeNode sched node = filterAssign sched ((/= node) . fst)
 -- cancel a scheduler
 cancel :: Scheduler t -> IO ()
 cancel (Scheduler {
-    sched_tid = tid
-}) = killThread tid
+    sched_tid = tid,
+    sched_alive = alive
+}) = do
+    orig_alive <- appA_ (const False) alive
+
+    if orig_alive then killThread tid
+    else return ()
 
 clearBlacklist :: Scheduler t -> IO ()
 clearBlacklist (Scheduler {
@@ -95,68 +105,102 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
     blacklist_var <- newA SET.empty
     assign_var <- newA []
 
+    alive_var <- newA True
+
     let tmp_sched = Scheduler {
             sched_tid = undefined,
             var_lock = var_lock,
             blacklist = blacklist_var,
-            cur_assign = assign_var
+            cur_assign = assign_var,
+            sched_alive = alive_var
         }
 
-    tid <- forkIO $ do
-        tid <- myThreadId
-        let sched = tmp_sched { sched_tid = tid }
+        watch = do
+            tid <- myThreadId
+            let sched = tmp_sched { sched_tid = tid }
+    
+            forever $ do
+                start_time <- unixTimestamp
 
-        forever $ do
-            start_time <- unixTimestamp
-            delay timeout_us
+                -- traceM "start waiting"
 
-            LK.with var_lock $ do
-                cur_assign <- getA assign_var
+                delay timeout_us
 
-                progs <- forM cur_assign $ \(n, _) -> getA (cur_progress n)
-                envMsg env $ "current progresses: " ++ show progs
+                delays <- envAllNetDelay env
+                traceM $ "median " ++ show (median delays) ++
+                         "ms, average " ++ show (average delays) ++
+                         "ms, last " ++ show (last (sort delays)) ++
+                         "ms, timeout " ++ show timeout_s
 
-                -- separate slow and good nodes
-                (slow, ok) <- flip sepWhenM cur_assign $ \(n, _) -> do
-                    time <- getA (last_seen n)
-                    return $ time < start_time
+                -- traceM "scheduler waiting for the lock"
+                
+                LK.with var_lock $ do
+                    -- traceM "scheduler locked"
+                    cur_assign <- getA assign_var
 
-                let slow_nodes = unique $ map fst slow
-                    ok_nodes = unique $ map fst ok
+                    if not $ null cur_assign then do
+                        progs <- forM cur_assign $ \(n, _) -> getA (cur_progress n)
+                        envMsg env $ "current progresses: " ++ show progs
 
-                -- decrease/increase blacklist count
-                mapM_ nodeBlacklistDec ok_nodes
-                mapM_ nodeBlacklistInc slow_nodes
+                        -- separate slow and good nodes
+                        (slow, ok) <- flip sepWhenM cur_assign $ \(n, _) -> do
+                            time <- getA (last_seen n)
+                            return $ time < start_time
 
-                if not $ null slow then do
-                    -- we have slow nodes!
-                    -- add them to the blacklist
-                    appA (`SET.union` SET.fromList slow_nodes) blacklist_var
+                        -- traceM $ "separated " ++ show (length slow) ++ show (length ok)
 
-                    -- retry tasks of slow nodes
-                    let retry_tasks = map snd slow
+                        let slow_nodes = unique $ map fst slow
+                            ok_nodes = unique $ map fst ok
 
-                    -- nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
+                        -- decrease/increase blacklist count
+                        mapM_ nodeBlacklistDec ok_nodes
+                        mapM_ nodeBlacklistInc slow_nodes
 
-                    new_assign <- reassign sched retry_tasks
+                        -- traceM "here"
 
-                    if null new_assign then do
-                        -- failed to assign
+                        if not $ null slow then do
+                            -- we have slow nodes!
+                            -- add them to the blacklist
+                            appA (`SET.union` SET.fromList slow_nodes) blacklist_var
 
-                        -- blacklist full
-                        -- try again with an empty blacklist
-                        -- nodeMsg env node "failed to reassign tasks"
+                            -- retry tasks of slow nodes
+                            let retry_tasks = map snd slow
 
-                        assign <- failed_reassign sched retry_tasks
+                            -- nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
 
-                        if not $ null assign then
-                            setA assign_var (ok ++ assign)
-                        else
-                            return ()
-                            -- keep the original assignment
-                    else
-                        setA assign_var (ok ++ new_assign)
-                else return ()
+                            new_assign <- reassign sched retry_tasks
+
+                            if null new_assign then do
+                                -- failed to assign
+
+                                -- blacklist full
+                                -- try again with an empty blacklist
+                                -- nodeMsg env node "failed to reassign tasks"
+
+                                traceM "!!! failed to reassign"
+
+                                assign <- failed_reassign sched retry_tasks
+
+                                if not $ null assign then
+                                    setA assign_var (ok ++ assign)
+                                else
+                                    return ()
+                                    -- keep the original assignment
+                            else
+                                setA assign_var (ok ++ new_assign)
+                        else return ()
+                    else do
+                        -- empty cur_assign
+                        -- kill the thread
+                        traceM "self cancelling on empty assignment"
+                        cancel sched
+
+        -- watchExit mres =
+        --     case mres of
+        --         Right _ -> traceM "scheduler exiting"
+        --         Left err -> traceM $ "scheduler exiting in error: " ++ show err
+
+    tid <- forkIO watch -- watchExit
 
     let sched = tmp_sched { sched_tid = tid }
 

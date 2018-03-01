@@ -15,7 +15,6 @@ import Control.Concurrent
 import Control.Applicative
 import Control.Monad.Loops
 import Control.Concurrent.Thread.Delay
-import qualified Control.Concurrent.Lock as LK
 
 import Debug.Trace
 
@@ -30,6 +29,7 @@ import Tucker.Util
 import Tucker.Atom
 import Tucker.Error
 import Tucker.Transport
+import qualified Tucker.Lock as LK
 
 import Tucker.P2P.Msg
 import Tucker.P2P.Node
@@ -177,8 +177,9 @@ sync env n = do
         (tckr_sync_inv_timeout (global_conf env))
         (flip reassign (replicate n NullTask)) -- init assign
         reassign -- reassign
-        $ \_ _ -> do -- fail
+        $ \sched _ -> do -- fail
             envMsg env "failed to find active nodes to sync inventory"
+            cancel sched
             return []
 
     return ()
@@ -251,42 +252,48 @@ scheduleFetch env init_hashes callback = do
                 buildFetchTasks (tckr_max_block_task conf) hashes (taskDone sched)
 
         taskDone sched node task results = do
-            LK.with var_lock $ do
-                removeFromBlacklist sched node
-                valid <- removeTask sched task
+            forkIO $ do
+                -- traceM "task done waiting for the lock"
+                LK.with var_lock $ do
+                    -- traceM "task done locked"
+                    removeFromBlacklist sched node
+                    valid <- removeTask sched task
 
-                added <- getA added_var
-                
-                -- is this still a valid task
-                if valid then do
-                    -- fill in the block
-                    forM_ results $ \(hash, payload) -> do
-                        -- decode now
-                        let block = decodeFailLE payload
-                            midx = findIndex ((== hash) . fst) tarray
+                    added <- getA added_var
+                    
+                    -- is this still a valid task
+                    if valid then do
+                        -- fill in the block
+                        forM_ results $ \(hash, payload) -> do
+                            -- decode now
+                            let block = decodeFailLE payload
+                                midx = findIndex ((== hash) . fst) tarray
 
-                        -- here if the hash already exists, no decoding will be needed
-                        case midx of
-                            Just idx ->
-                                if idx >= added then -- not added
-                                    setA (snd (tarray !! idx)) (Just block)
-                                else
-                                    return ()
-                            Nothing ->
-                                nodeMsg env node $ "irrelavent block " ++ show block
+                            -- here if the hash already exists, no decoding will be needed
+                            case midx of
+                                Just idx ->
+                                    if idx >= added then -- not added
+                                        setA (snd (tarray !! idx)) (Just block)
+                                    else
+                                        return ()
+                                Nothing ->
+                                    nodeMsg env node $ "irrelavent block " ++ show block
 
-                    forkFinally (refreshBlock sched node) (refreshFinal node)
-                    return ()
-                    -- return ()
-                    -- nodeMsg env node $ "task decoding finished"
-                else do
-                    -- task already finished
-                    nodeMsg env node $ "duplicated assignment"
+                        forkFinally (refreshBlock sched node) (refreshFinal node)
+                        return ()
+                        -- nodeMsg env node $ "task decoding finished"
+                    else do
+                        -- task already finished
+                        nodeMsg env node $ "duplicated assignment"
+
+            return ()
 
         refreshFinal node res =
             case res of
                 Right _ -> nodeMsg env node "refresh finished"
-                Left err ->
+                Left err -> do
+                    -- need to release the lock
+                    LK.release var_lock
                     if Nothing == (fromException err :: Maybe ErrorCall) then
                         -- not error
                         nodeMsg env node ("refresh failed with: " ++ show err)
@@ -296,7 +303,7 @@ scheduleFetch env init_hashes callback = do
 
         -- refresh block inventory
         refreshBlock sched node = do
-            traceM "enter refreshing"
+            -- traceM "enter refreshing"
             LK.with var_lock $ do
                 old_added <- getA added_var
 
@@ -327,6 +334,8 @@ scheduleFetch env init_hashes callback = do
                                 return block
                         
                     readNClear >>= envAddBlocks env node
+
+                    nodeMsg env node ("new added block " ++ show new_added)
 
                     if new_added == total then do
                         nodeMsg env node "all fetching finished"

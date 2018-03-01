@@ -48,6 +48,10 @@ appA_ :: (t -> t) -> Atom t -> IO t
 appA_ f x =
     atomicModifyIORef' x $ \x -> (f x, x)
 
+peekA :: Atom t -> (t -> a) -> IO a
+peekA x f =
+    atomicModifyIORef' x $ \x -> (x, f x)
+
 lseq :: [a] -> b -> b
 lseq []     w = w
 lseq (x:xs) w = x `seq` lseq xs w

@@ -53,22 +53,36 @@ vstrToBS (VBStr bs) = bs
 
 type RawScript = ByteString
 
-data HashType =
+data HashTypeSingle =
     SIGHASH_ALL | SIGHASH_NONE | SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+    deriving (Show)
 
-hashTypeToInt :: Integral t => HashType -> t
-hashTypeToInt SIGHASH_ALL          = 0x01
-hashTypeToInt SIGHASH_NONE         = 0x02
-hashTypeToInt SIGHASH_SINGLE       = 0x03
-hashTypeToInt SIGHASH_ANYONECANPAY = 0x80
+data HashType = HashType [HashTypeSingle] deriving (Show)
 
-intToHashType :: Integral t => t -> HashType
+hashTypeToInt :: (Integral t, Bits t) => HashType -> t
+hashTypeToInt (HashType []) = 0
+hashTypeToInt (HashType (SIGHASH_ALL:rst)) =
+    (hashTypeToInt (HashType rst) .&. complement 0xf) .|. 0x1
+
+hashTypeToInt (HashType (SIGHASH_NONE:rst)) =
+    (hashTypeToInt (HashType rst) .&. complement 0xf) .|. 0x2
+
+hashTypeToInt (HashType (SIGHASH_SINGLE:rst)) =
+    (hashTypeToInt (HashType rst) .&. complement 0xf) .|. 0x3
+
+hashTypeToInt (HashType (SIGHASH_ANYONECANPAY:rst)) =
+    hashTypeToInt (HashType rst) .|. 0x80
+
+intToHashType :: (Integral t, Bits t) => t -> HashType
 intToHashType i =
-    case fi i :: Int of
-        0x01 -> SIGHASH_ALL
-        0x02 -> SIGHASH_NONE
-        0x03 -> SIGHASH_SINGLE
-        0x80 -> SIGHASH_ANYONECANPAY
+    HashType $
+    base : (if i .&. 0x80 /= 0 then [ SIGHASH_ANYONECANPAY ] else [])
+    where
+        base = case i .&. 0xf of
+            0x01 -> SIGHASH_ALL
+            0x02 -> SIGHASH_NONE
+            0x03 -> SIGHASH_SINGLE
+            _ -> error "unrecognized hash type"
 
 data NetAddr =
     NetAddr {

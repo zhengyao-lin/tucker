@@ -175,9 +175,9 @@ nodeExec env unready_node = do
     envAppendNode env node
 
     -- enter receiving loop
-    whileM_ (pure True) $
-        nodeRecvOneMsgNonBlocking env node >>=
-        nodeProcMsg env node
+    whileM_ (pure True) $ do
+        -- nodeMsg env node "node loop"
+        nodeRecvOneMsgNonBlocking env node >>= nodeProcMsg env node
 
 nodeFinal :: MainLoopEnv -> Node -> Either SomeException () -> IO ()
 nodeFinal env node res = do

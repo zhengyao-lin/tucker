@@ -457,7 +457,7 @@ tryFixBranch chain@(Chain {
 
     -- print depth
 
-    if fi depth > tckr_max_tree_insert_depth conf then
+    if fi depth >= tckr_max_tree_insert_depth conf then
         case mprev of
             -- only one node in the branch -> keep the original chain
             Nothing -> return Nothing
