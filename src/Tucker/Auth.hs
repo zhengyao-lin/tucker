@@ -149,17 +149,23 @@ instance Decodable ECCPublicKey where
     decoder = do
         i <- byteD
 
-        if i == 0x04 then do
-            x <- bsD 32
-            y <- bsD 32
-            return $ ECCPublicKey False (bs2vintBE x) (bs2vintBE y)
+        if i `elem` [ 0x04, 0x06, 0x07 ] then do
+            x <- bs2vintBE <$> bsD 32
+            y <- bs2vintBE <$> bsD 32
+
+            -- extra check for evenness
+            assertMT "hybrid public key unmatched evenness" $
+                (i /= 0x06 || even y) &&
+                (i /= 0x07 || odd y)
+
+            return $ ECCPublicKey False x y
         else if i == 0x00 then
             return ECCPrivatePointO
         else do
             y_bit <- case i of
                 0x02 -> return 0
                 0x03 -> return 1
-                _    -> fail "illegal initial byte"
+                _    -> fail ("illegal initial byte " ++ show i)
             
             x <- bs2vintBE <$> bsD 32
 

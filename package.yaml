@@ -49,6 +49,7 @@ dependencies:
 - split
 - arithmoi
 - transformers
+- exceptions
 
 library:
   source-dirs: src

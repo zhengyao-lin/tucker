@@ -249,7 +249,7 @@ handshake env node = do
 -- timeout in seconds
 probe :: MainLoopEnv -> [AddrInfo] -> IO ()
 probe env addrs = do
-    forM_ addrs $ \addr -> (try $ do
+    forM_ addrs $ \addr -> tryT $ do
         let sock_addr = addrAddress addr
 
         envMsg env ("probing " ++ show sock_addr)
@@ -265,4 +265,4 @@ probe env addrs = do
         -- appA (++ [node]) (node_list env)
         -- return $ Just node
 
-        return ()) :: IO (Either SomeException ())
+        return ()

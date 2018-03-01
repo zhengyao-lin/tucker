@@ -51,6 +51,8 @@ data TxOutput =
 instance NFData TxOutput where
     rnf (TxOutput a b) = rnf (a, b)
 
+nullTxOutput = TxOutput { value = -1, pk_script = BSR.empty }
+
 -- TxWitness is a list of stack items in general
 data TxWitness =
     TxWitness [ByteString] deriving (Eq, Show)
@@ -361,27 +363,62 @@ stripWitness tx =
     }
 
 -- raw tx to be signed
+
+-- hashtype
+-- 1. SIGHASH_ALL -> the current imp
+-- 2. SIGHASH_NONE
+-- 3. SIGHASH_SINGLE
+
+-- 1. set all inputs except the current's sequence to 0 if NONE || SINGLE
+
 sigRawTx :: TxPayload -> Word32 -> [ScriptOp] -> HashType -> ByteString
 sigRawTx tx idx' subscript htype =
-    let tx_copy = stripWitness $ tx {
+    let hash_none = hasHashType htype SIGHASH_NONE
+        hash_single = hasHashType htype SIGHASH_SINGLE
+        hash_anyonecanpay = hasHashType htype SIGHASH_ANYONECANPAY
+
+        tx_copy = stripWitness $ tx {
                 -- remove all sig_script
-                tx_in = map (\inp -> inp { sig_script = BSR.empty }) (tx_in tx)
+                tx_in = map (\inp -> inp {
+                    sig_script = BSR.empty,
+                    seqn = if hash_none || hash_single then 0 else seqn inp
+                }) (tx_in tx)
             }
 
         idx = fi idx'
-        
-        -- subscript = decodeFailLE subscript' -- extractValidCode $ decodeFailLE $ pk_script prev
-
-        inp = tx_in tx !! idx
-
         raw_htype = hashTypeToInt htype :: Word32
 
+        input = tx_in tx !! idx
+        output = assertT "SIGHASH_SINGLE needs more outputs"
+                         (length (tx_out tx) > idx)
+                         (tx_out tx !! idx) -- ONLY used when hash_single
+
+        new_input = input {
+            -- replace the corresponding sig_script
+            -- with pk_script after OP_CODESEPARATOR
+            sig_script = encodeLE subscript
+        }
+
+        new_inputs =
+            if hash_anyonecanpay then
+                -- only the current input is included
+                [ new_input ]
+            else
+                replace idx new_input (tx_in tx_copy)
+
+        new_outputs =
+            if hash_none then [] -- no output is included
+            else if hash_single then
+                -- only outputs from 0 to idx is included
+                -- require length tx_out > idx
+                map (const nullTxOutput) (take idx (tx_out tx))
+                ++ [ output ]
+            else
+                tx_out tx -- original outputs
+
         final_tx = tx_copy {
-            tx_in = replace idx ((tx_in tx_copy !! idx) {
-                -- replace the corresponding sig_script
-                -- with pk_script after OP_CODESEPARATOR
-                sig_script = encodeLE subscript
-            }) (tx_in tx_copy)
+            tx_in = new_inputs,
+            tx_out = new_outputs
         }
 
     in

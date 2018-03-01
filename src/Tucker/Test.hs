@@ -368,8 +368,8 @@ msgTests = TestList [
         TestLabel "tx case 7" txCase7,
         TestLabel "tx case 8" txCase8,
         TestLabel "tx case 9" txCase9,
-        TestLabel "tx case 10" txCase10
-        -- TestLabel "tx case 11" txCase11
+        TestLabel "tx case 10" txCase10,
+        TestLabel "tx case 11" txCase11
     ]
 
 bucketTest = TestCase $ do

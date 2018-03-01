@@ -294,12 +294,11 @@ scheduleFetch env init_hashes callback = do
                 Left err -> do
                     -- need to release the lock
                     LK.release var_lock
-                    if Nothing == (fromException err :: Maybe ErrorCall) then
-                        -- not error
-                        nodeMsg env node ("refresh failed with: " ++ show err)
-                    else do
+                    if shouldExitOn err then do
                         nodeMsg env node "killing the main thread(bug)"
                         envExit env err
+                    else
+                        nodeMsg env node ("refresh failed with: " ++ show err)
 
         -- refresh block inventory
         refreshBlock sched node = do

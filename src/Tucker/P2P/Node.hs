@@ -358,7 +358,7 @@ envAddBlocks env node =
         proc block res =
             case res of
                 Left err ->
-                    nodeMsg env node $ "error when adding block " ++ show block ++ ": " ++ show err
+                    error $ "error when adding block " ++ show block ++ ": " ++ show err
                 
                 Right _ ->
                     nodeMsg env node $ "block added: " ++ show block

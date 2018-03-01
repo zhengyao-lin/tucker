@@ -191,7 +191,7 @@ collectOrphan bc@(BlockChain {
 
 addBlock :: BlockChain -> Block -> IO (Either TCKRError BlockChain)
 addBlock bc block =
-    force <$> ioToEitherIO (addBlockFail bc block)
+    force <$> tryT (addBlockFail bc block)
 
 addBlocks :: (Block -> Either TCKRError BlockChain -> IO ())
           -> BlockChain -> [Block]
@@ -287,7 +287,6 @@ addBlockFail bc@(BlockChain {
     case insertBlock chain block of
         Nothing -> do -- no previous hash found
             -- traceIO "orphan block!"
-            error ("block orphaned " ++ show block)
             return $ bc { bc_chain = addOrphan chain block }
 
         Just (branch, chain) -> do

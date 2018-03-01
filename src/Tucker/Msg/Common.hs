@@ -55,7 +55,7 @@ type RawScript = ByteString
 
 data HashTypeSingle =
     SIGHASH_ALL | SIGHASH_NONE | SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
-    deriving (Show)
+    deriving (Eq, Show)
 
 data HashType = HashType [HashTypeSingle] deriving (Show)
 
@@ -72,6 +72,9 @@ hashTypeToInt (HashType (SIGHASH_SINGLE:rst)) =
 
 hashTypeToInt (HashType (SIGHASH_ANYONECANPAY:rst)) =
     hashTypeToInt (HashType rst) .|. 0x80
+
+hasHashType :: HashType -> HashTypeSingle -> Bool
+hasHashType (HashType lst) t = t `elem` lst
 
 intToHashType :: (Integral t, Bits t) => t -> HashType
 intToHashType i =

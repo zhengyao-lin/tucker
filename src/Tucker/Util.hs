@@ -112,10 +112,8 @@ maybeCat lst = [ v | Just v <- lst ]
 eitherToIO :: Show a => Either a b -> IO b
 eitherToIO = either (fail . show) (pure . id)
 
-ioToEitherIO :: IO a -> IO (Either TCKRError a)
-ioToEitherIO =
-    (`catch` \e -> return $ Left $ TCKRError $ show (e :: TCKRError)) .
-    (Right <$>)
+-- ioToEitherIO :: IO a -> IO (Either TCKRError a)
+-- ioToEitherIO = (`catchT` (return . Left)) . (Right <$>)
 
 divCeiling :: Integral a => a -> a -> a
 divCeiling a b = (a + b - 1) `div` b

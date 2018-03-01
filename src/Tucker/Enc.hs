@@ -16,6 +16,7 @@ import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
 import Control.Exception
+import Control.Monad.Catch
 import Control.Applicative
 
 import Tucker.Util
@@ -207,6 +208,19 @@ instance Alternative Decoder where
                         r@(Right _, rest) -> r
                         (Left e2, rest) ->
                             (Left $ wrapError e2 (show e1), rest)
+
+instance MonadThrow Decoder where
+    throwM = fail . show
+
+instance MonadCatch Decoder where
+    catch d proc =
+        Decoder $ \end bs ->
+            case doDecode d end bs of
+                r@(Right _, _) -> r
+                r@(Left exc, _) ->
+                    case fromException $ toException exc of
+                        Nothing -> r
+                        Just e -> doDecode (proc e) end bs
 
 class Decodable t where
     decoder :: Decoder t

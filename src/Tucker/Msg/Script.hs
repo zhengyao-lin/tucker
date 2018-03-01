@@ -11,6 +11,7 @@ import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
+import Control.Exception
 import Control.Monad.State
 import Control.Monad.Loops
 import Control.Monad.Except
@@ -113,9 +114,9 @@ data ScriptState =
         cur_tx      :: TxPayload
     } deriving (Show)
 
-type EvalState v = StateT ScriptState TCKRErrorM v
+type EvalState v = StateT ScriptState (Either SomeException) v
 
-invalidTx = failT "invalid transaction"
+invalidTx = throwT "invalid transaction"
 
 confS :: (ScriptConf -> t) -> EvalState t
 confS c = (c . script_conf) <$> get
@@ -146,17 +147,17 @@ pushAltS v = modifyAltS $ \s -> return (toItem v : s, ())
 peekS :: StackItemValue t => EvalState t
 peekS = do
     es@(ScriptState { eval_stack = stack }) <- get
-    assertT "peek on an empty stack" (not (null stack))
+    assertMT "peek on an empty stack" (not (null stack))
     return $ fromItem $ head stack
 
 popS :: StackItemValue t => EvalState t
 popS = modifyS $ \s -> do
-    assertT "pop on an empty stack" (not (null s))
+    assertMT "pop on an empty stack" (not (null s))
     return (tail s, fromItem (head s))
 
 popAltS :: StackItemValue t => EvalState t
 popAltS = modifyAltS $ \s -> do
-    assertT "pop on an empty stack" (not (null s))
+    assertMT "pop on an empty stack" (not (null s))
     return (tail s, fromItem (head s))
 
 pop2S :: StackItemValue t => EvalState (t, t)
@@ -173,21 +174,21 @@ popNS' = popNS :: Int -> EvalState [ByteString]
 
 pickS :: Int -> EvalState ()
 pickS n = modifyS $ \s -> do
-    assertT "illegal pick range" (n >= 0 && n < length s)
+    assertMT "illegal pick range" (n >= 0 && n < length s)
     return ((s !! n) : s, ())
 
 -- copy the nth item to the top
 -- and remove the original item
 rollS :: Int -> EvalState ()
 rollS n = modifyS $ \s -> do
-    assertT "illegal pick range" (n >= 0 && n < length s)
+    assertMT "illegal pick range" (n >= 0 && n < length s)
     return ((s !! n) : take n s ++ drop (n + 1) s, ())
 
 dupS :: EvalState ()
 dupS = do
     s@(ScriptState { eval_stack = stack }) <- get
 
-    assertT "dup on an empty stack" (not (null stack))
+    assertMT "dup on an empty stack" (not (null stack))
 
     put (s { eval_stack = head stack : stack })
 
@@ -244,7 +245,7 @@ curOpS = do
         prog_count = pc
     } <- get
 
-    assertT "counter has reached the end" (pc < length code)
+    assertMT "counter has reached the end" (pc < length code)
 
     return (code !! pc)
 
@@ -328,13 +329,13 @@ evalOpS OP_CHECKSIGVERIFY =
 evalOpS OP_CHECKMULTISIG = do
     n' <- popS -- total number of possible keys
     let n = decodeFailLE n' :: Word8
-    assertT "illegal n in checkmultisig" (BSR.length n' == 1 && n > 0 && n <= 16)
+    assertMT "illegal n in checkmultisig" (BSR.length n' == 1 && n > 0 && n <= 16)
 
     pub's <- popNS $ fi n
 
     m' <- popS -- number of signatures must be provided
     let m = decodeFailLE m' :: Word8
-    assertT "illegal m in checkmultisig" (BSR.length m' == 1 && m > 0 && m <= 16)
+    assertMT "illegal m in checkmultisig" (BSR.length m' == 1 && m > 0 && m <= 16)
 
     sig's <- popNS $ fi m
 
@@ -414,7 +415,7 @@ evalOpS OP_SUBSTR = do
     (size, begin) <- pop2S :: EvalState (Integer, Integer)
     str <- popS
 
-    assertT "illegal OP_SUBSTR range" $
+    assertMT "illegal OP_SUBSTR range" $
         begin >= 0 && size >= 0 && fi (begin + size) <= BSR.length str
 
     pushS (BSR.take (fi size) $ BSR.drop (fi begin) str)
@@ -423,7 +424,7 @@ evalOpS OP_LEFT = do
     size <- popS :: EvalState Integer
     str <- popS
 
-    assertT "illegal OP_LEFT size" (fi size <= BSR.length str)
+    assertMT "illegal OP_LEFT size" (fi size <= BSR.length str)
 
     pushS (BSR.take (fi size) str)
 
@@ -432,7 +433,7 @@ evalOpS OP_RIGHT = do
     str <- popS
 
     let len = BSR.length str
-    assertT "illegal OP_RIGHT size" (fi size <= len)
+    assertMT "illegal OP_RIGHT size" (fi size <= len)
 
     pushS (BSR.drop (len - fi size) str)
 
@@ -491,12 +492,12 @@ evalOpS OP_CHECKLOCKTIMEVERIFY = return ()
     -- let lt1 = lock_time cur_tx
     --     sequence = seqn (tx_in cur_tx !! fi in_idx)
 
-    -- assertT "invalid locktime value" $ not $
+    -- assertMT "invalid locktime value" $ not $
     --     lt < 0 ||
     --     ((lt <= 500000000) /= (lt1 <= 500000000)) ||
     --     sequence == 0xffffffff
 
-    -- assertT "unmatched locktime" $
+    -- assertMT "unmatched locktime" $
     --     fi lt <= lt1
 
 evalOpS OP_CHECKSEQUENCEVERIFY = return ()
@@ -509,7 +510,7 @@ evalOpS OP_CHECKSEQUENCEVERIFY = return ()
     --     lt0 = lock_time out_tx
     --     lt1 = lock_time cur_tx
 
-    -- assertT "invalid span/locktime" $ not $
+    -- assertMT "invalid span/locktime" $ not $
     --     span < 0 ||
     --     not (span .&. (1 `shiftL` 31) == 0 &&
     --          (version cur_tx < 2 ||
@@ -551,7 +552,7 @@ checkValidOp op = do
     strict <- confS script_enable_strict
 
     if strict && op `elem` disabled_ops then
-        failT ("(strict mode)disabled op " ++ show op)
+        throwT ("(strict mode)disabled op " ++ show op)
     else
         return op
 
@@ -582,11 +583,12 @@ initState conf out_tx cur_tx idx =
 
 execEval :: ScriptState -> [ScriptOp] -> Either TCKRError ScriptState
 execEval init ops =
+    toTCKRErrorM $
     execStateT execS (init {
         prog_code = ops,
         last_cs_op = -1,
         prog_count = 0
-    }) `catchError` Left
+    }) `catchT` (Left . toException)
 
 -- whether the exec result means a positive result
 isValidStack :: ScriptState -> Bool
@@ -634,7 +636,7 @@ specialScript :: ScriptState -> [[ScriptOp]] -> Either TCKRError ScriptState
 specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     if script_enable_p2sh (script_conf s) then do
         redeem_script <- decodeAllLE redeem
-        ns <- execStateT popS' s -- pop out result first
+        ns <- toTCKRErrorM (execStateT popS' s) -- pop out result first
         execEval ns redeem_script -- exec on redeem script
     else
         -- p2sh not enabled
