@@ -100,14 +100,15 @@ netAddrToAddrInfo :: NetAddr -> IO AddrInfo
 netAddrToAddrInfo netaddr = do
     let sockaddr6 =
             SockAddrInet6 (fromIntegral $ port netaddr) 0 (
-                ntohl $ fromIntegral $ decodeInt 4 BigEndian h1,
-                ntohl $ fromIntegral $ decodeInt 4 BigEndian h2,
-                ntohl $ fromIntegral $ decodeInt 4 BigEndian h3,
-                ntohl $ fromIntegral $ decodeInt 4 BigEndian h4
+                ntohl $ fromIntegral $ bs2vwordBE h1,
+                ntohl $ fromIntegral $ bs2vwordBE h2,
+                ntohl $ fromIntegral $ bs2vwordBE h3,
+                ntohl $ fromIntegral $ bs2vwordBE h4
             ) 0
         
         sockaddr4 =
-            SockAddrInet (fromIntegral $ port netaddr) (ntohl $ fromIntegral $ decodeInt 4 BigEndian h4)
+            SockAddrInet (fromIntegral $ port netaddr)
+                         (ntohl $ fromIntegral $ bs2vwordBE h4)
 
     if is_ip4 || not (isSupportedSockAddr sockaddr6) then
         return $ defaultHints {

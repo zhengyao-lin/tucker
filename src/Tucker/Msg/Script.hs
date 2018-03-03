@@ -85,12 +85,12 @@ instance StackItemValue Integer where
                 if int < 0 then 0x80
                 else 0x00
     
-            Right raw = vint2bsLE (abs int)
+            raw = vword2bsLE (abs int)
             last_byte = BSR.last raw
 
     fromItem item =
         if BSR.null item then 0
-        else (if sign == 1 then negate else id) (bs2vintLE unsigned)
+        else (if sign == 1 then negate else id) (bs2vwordLE unsigned)
         where
             last_byte = BSR.last item
             sign = last_byte `shiftR` 7 -- 1 or 0
@@ -116,7 +116,7 @@ data ScriptState =
 
 type EvalState v = StateT ScriptState (Either SomeException) v
 
-invalidTx = throwT "invalid transaction"
+invalidTx = throwMT "invalid transaction"
 
 confS :: (ScriptConf -> t) -> EvalState t
 confS c = (c . script_conf) <$> get
@@ -245,9 +245,12 @@ curOpS = do
         prog_count = pc
     } <- get
 
-    assertMT "counter has reached the end" (pc < length code)
+    return $
+        if pc < length code then code !! pc
+        else OP_EOC
 
-    return (code !! pc)
+    -- assertMT "counter has reached the end" (pc < length code)
+    -- return (code !! pc)
 
 -- is end-of-code
 eocS :: EvalState Bool
@@ -261,9 +264,12 @@ eocS = do
 
 -- verifyFail public_key_encoded message signature_encoded
 verifyFail :: ByteString -> ByteString -> ByteString -> Bool
-verifyFail pub msg sig =
+verifyFail pub' msg sig =
     -- NOTE: final hash is encoded in big-endian
-    verifySHA256DER (decodeFailBE pub) msg sig == Right True
+
+    case decodeAllBE pub' of
+        Right pub -> verifySHA256DER pub msg sig == Right True
+        Left err -> False
 
 unaryOpS :: (StackItemValue a, StackItemValue b)
          => (a -> b) -> EvalState ()
@@ -552,7 +558,7 @@ checkValidOp op = do
     strict <- confS script_enable_strict
 
     if strict && op `elem` disabled_ops then
-        throwT ("(strict mode)disabled op " ++ show op)
+        throwMT ("(strict mode)disabled op " ++ show op)
     else
         return op
 

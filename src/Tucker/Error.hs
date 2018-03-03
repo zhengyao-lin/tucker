@@ -58,9 +58,13 @@ shouldExitOn e
 tryT :: MonadCatch m => m a -> m (Either TCKRError a)
 tryT action = catchT (Right <$> action) (return . Left)
 
+-- NOTE: throwT is a stronger throw that
+-- is generally not safe because it can
+-- only be caught by the catch in IO monad
 throwT :: String -> a
 throwT = throw . TCKRError
 
+-- a more gentle monad throw
 throwMT :: MonadThrow m => String -> m a
 throwMT = throwM . TCKRError
 

@@ -37,6 +37,7 @@ import Control.Monad.Loops
 import Tucker.Enc
 import Tucker.Conf
 import Tucker.Util
+import Tucker.ASN1
 import Tucker.Error
 
 ba2bs :: BA.ByteArrayAccess a => a -> ByteString
@@ -66,7 +67,7 @@ base58enc raw =
         alphabet = base58_alphabet
         numz = BSR.length $ BSR.takeWhile (== 0) raw
         pref = take numz $ repeat '1'
-        rawi = bs2vintLE $ BS.reverse $ BS.drop numz raw
+        rawi = bs2vwordLE $ BS.reverse $ BS.drop numz raw
 
 base58dec' :: Integer -> String -> Either TCKRError Integer
 base58dec' cur [] = Right cur
@@ -80,7 +81,7 @@ base58dec' cur (c:str) = do
 base58dec :: ByteString -> Either TCKRError ByteString
 base58dec enc = do
     res <- base58dec' (0 :: Integer) rest
-    res_enc <- vint2bsLE res
+    let res_enc = vword2bsLE res
 
     return $ BS.pack pref <> BS.reverse res_enc
     where
@@ -113,7 +114,7 @@ data ECCPublicKey = ECCPublicKey {
         compressed :: Bool,
         x_coord    :: Integer,
         y_coord    :: Integer
-    } | ECCPrivatePointO deriving (Eq, Show)
+    } deriving (Eq, Show)
 data ECCSignature = ECCSignature Integer Integer deriving (Eq, Show)
 
 type WIF = String
@@ -143,15 +144,15 @@ instance Encodable ECCPublicKey where
                 (encodeInt 32 BigEndian x <>
                  encodeInt 32 BigEndian y)
 
-    encode _ ECCPrivatePointO = bchar 0x00
+    -- encode _ ECCPrivatePointO = bchar 0x00
 
 instance Decodable ECCPublicKey where
     decoder = do
         i <- byteD
 
         if i `elem` [ 0x04, 0x06, 0x07 ] then do
-            x <- bs2vintBE <$> bsD 32
-            y <- bs2vintBE <$> bsD 32
+            x <- bs2vwordBE <$> bsD 32
+            y <- bs2vwordBE <$> bsD 32
 
             -- extra check for evenness
             assertMT "hybrid public key unmatched evenness" $
@@ -159,15 +160,13 @@ instance Decodable ECCPublicKey where
                 (i /= 0x07 || odd y)
 
             return $ ECCPublicKey False x y
-        else if i == 0x00 then
-            return ECCPrivatePointO
         else do
             y_bit <- case i of
                 0x02 -> return 0
                 0x03 -> return 1
                 _    -> fail ("illegal initial byte " ++ show i)
             
-            x <- bs2vintBE <$> bsD 32
+            x <- bs2vwordBE <$> bsD 32
 
             y <- case tucker_curve of
                 CurveFP (CurvePrime p curve) -> do
@@ -191,30 +190,58 @@ instance Decodable ECCPublicKey where
 instance Encodable ECCSignature where
     -- encode a signature using ASN1 by the following structure
     -- SEQUENCE { r INTEGER, s INTEGER }
-    encode _ (ECCSignature r s) =
-        encodeASN1' DER [ Start Sequence, IntVal r, IntVal s, End Sequence ]
+    encode end (ECCSignature r s) =
+        encode end $ ASN1Sequence [
+            ASN1Integer r,
+            ASN1Integer s            
+        ]
 
 instance Decodable ECCSignature where
     decoder = do
-        all <- allD
-        case decodeASN1' DER all of
-            Right [ Start Sequence, IntVal r, IntVal s, End Sequence ]
-                -> return $ ECCSignature r s
-            Right res
-                -> fail ("wrong DER encoding result: " ++ show res)
-            Left err -> fail ("illegal DER encoding: " ++ show err)
+        -- a DER encoding here
+        -- a sequence starting with 0x30 <size>
+        bs <- getD
+        res <- decoder
+
+        case res of
+            ASN1Sequence [ ASN1Integer r, ASN1Integer s ]
+                -> return (ECCSignature r s)
+
+            _ -> fail ("wrong DER encoding result: " ++ show res ++
+                       ", raw: " ++ show bs)
+
+        -- beginWithByteD 0x30
+
+        -- all <- allD
+        -- case decodeASN1' DER all of
+        --     Right [ Start Sequence, IntVal r, IntVal s, End Sequence ]
+        --         -> return $ ECCSignature r s
+        --     Right res
+        --         -> fail ("wrong DER encoding result: " ++ show res)
+        --     Left err -> fail ("illegal DER encoding: " ++ show err)
+
+{-
+
+3046
+
+0221
+002e6f0e8b515b5f25e837592e5e8a834cbe3fabaf98973edf88b19502e0180c2d
+
+0221
+00d03cc64f35fb277fe1b69270b542aca5620394ed7b7fae7a3546934dd6fe4288
+
+-}
 
 priv2pub :: ECCPrivateKey -> ECCPublicKey
 priv2pub (ECCPrivateKey num) =
     let Point x y = generateQ tucker_curve num in
     ECCPublicKey True x y
 
-priv2wif :: TCKRConf -> ECCPrivateKey -> Either TCKRError WIF
-priv2wif conf (ECCPrivateKey num) = do
-    priv_raw <- vint2bsBE num
-    let priv_proc = BSR.cons (tckr_wif_pref conf) priv_raw
-
-    return $ BS.unpack $ base58encCheck priv_proc
+priv2wif :: TCKRConf -> ECCPrivateKey -> WIF
+priv2wif conf (ECCPrivateKey num) =
+    let priv_raw = vword2bsBE num
+        priv_proc = BSR.cons (tckr_wif_pref conf) priv_raw
+    in BS.unpack $ base58encCheck priv_proc
 
 wif2priv :: TCKRConf -> WIF -> Either TCKRError ECCPrivateKey
 wif2priv conf wif = do
@@ -224,7 +251,7 @@ wif2priv conf wif = do
         Left $ TCKRError "illegal WIF"
     else do
         let priv_raw = BSR.drop 1 priv_proc
-        return $ ECCPrivateKey $ bs2vintBE priv_raw
+        return $ ECCPrivateKey $ bs2vwordBE priv_raw
 
 -- using default compressing encoding
 pub2addr :: TCKRConf -> ECCPublicKey -> Address
@@ -265,14 +292,14 @@ genRaw = do
     let Point x y = pt
     return (ECCPublicKey True x y, ECCPrivateKey num)
 
-gen :: TCKRConf -> IO (Either TCKRError (WIF, Address))
+gen :: TCKRConf -> IO (WIF, Address)
 gen conf = do
     (pub, priv) <- genRaw
 
-    return $ do
-        let addr = pub2addr conf pub
-        wif <- priv2wif conf priv
-        return (wif, addr)
+    let addr = pub2addr conf pub
+        wif = priv2wif conf priv
+
+    return (wif, addr)
 
 -- hash & sign
 signSHA256 :: ECCPrivateKey -> ByteString -> IO ECCSignature

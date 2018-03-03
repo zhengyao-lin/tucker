@@ -85,6 +85,11 @@ instance Encodable Word64 where
 instance Encodable Word256 where
     encode = encodeInt 32
 
+-- encode an integer with variable length
+-- to the shortest form
+instance Encodable Integer where
+    encode = encodeVInt
+
 instance Encodable a => Encodable [a] where
     encode end = BSR.concat . (map (encode end))
 
@@ -94,73 +99,101 @@ instance Encodable a => Encodable (PartialList a) where
 instance (Encodable t1, Encodable t2) => Encodable (t1, t2) where
     encode end (a, b) = encode end a <> encode end b
 
+instance (Encodable t1, Encodable t2, Encodable t3) => Encodable (t1, t2, t3) where
+    encode end (a, b, c) = encode end a <> encode end b <> encode end c
+
 bchar :: Integral t => t -> ByteString
 bchar = BSR.singleton . fromIntegral
 
--- VInt > 0
-encodeVInt :: Endian -> Integer -> Either TCKRError ByteString
-encodeVInt _ 0 = Right $ BSR.empty
-encodeVInt end num = do
-    if num < 0 then
-        Left $ TCKRError "encoding negative variable length ineteger"
-    else do
-        let
-            (rest, m) = num `divMod` 0x100
-    
-        rest_enc <- encodeVInt end rest
-
-        if end == LittleEndian then
-            Right $ BSR.append (bchar m) rest_enc
-        else
-            Right $ BSR.append rest_enc (bchar m)
-
-encodeInt :: Integral t => Int -> Endian -> t -> ByteString
-encodeInt 0 _ _ = BSR.empty
-encodeInt nbyte end num =
-    let
-        (rest, m) = (fromIntegral num :: Integer) `divMod` 0x100
-    in
-        if end == LittleEndian then
-            BSR.append (bchar m) (encodeInt (nbyte - 1) end rest)
-        else
-            BSR.append (encodeInt (nbyte - 1) end rest) (bchar m)
-
--- cannot determine the sign
-decodeVInt :: Endian -> ByteString -> Integer
-decodeVInt LittleEndian = BSR.foldr (\x a -> shift a 8 + (toInteger x)) 0
-decodeVInt BigEndian = BSR.foldl (\a x -> shift a 8 + (toInteger x)) 0
-
-decodeInt' :: Int -> ByteString -> Int -> Integer
-decodeInt' 0 _ init = toInteger init
-decodeInt' nbyte bs init =
-    shift (decodeInt' (nbyte - 1) rest init) 8 + toInteger c
+-- encode integer to the shortest possible encoding
+-- using 2's complement
+encodeVInt' :: Endian -> Integer -> ByteString
+encodeVInt' end 0 = BSR.empty
+encodeVInt' end (-1) = bchar 0xff
+encodeVInt' end num =
+    case end of
+        LittleEndian -> BSR.reverse res
+        BigEndian -> res
     where
-        c = BSR.head bs
-        rest = BSR.tail bs
+        pred (bs, num) = not $
+            (num == 0 || num == -1) &&
+            not (BSR.null bs) &&
+            (BSR.head bs < 0x80) == (num >= 0) -- sign is correct
 
-decodeInt :: Int -> Endian -> ByteString -> Integer
-decodeInt nbyte BigEndian bs = decodeInt nbyte LittleEndian $ BSR.reverse bs
-decodeInt nbyte LittleEndian bs =
-    if BSR.last bs < 0x80 then -- positive
-        decodeInt' nbyte bs 0
+        res =
+            -- BSR.dropWhile (== 0) $
+            fst $ head $
+            dropWhile pred $
+            flip iterate (BSR.empty, num) $ \(bs, num) ->
+                let least = num .&. 0xff
+                in  (BSR.cons (fi least) bs, num `shiftR` 8)
+
+-- encode int to an indefinite size
+-- inverse of decodeVInt
+encodeVInt :: (Integral t, Bits t) => Endian -> t -> ByteString
+encodeVInt end num = encodeVInt' end (fi num)
+
+-- similar to encodeVInt
+-- but it will trim all unnecessary zero bytes
+-- from the high end
+-- inverse of decodeVWord
+encodeVWord :: (Integral t, Bits t) => Endian -> t -> ByteString
+encodeVWord end num =
+    case end of
+        LittleEndian -> BSR.reverse $ BSR.dropWhile (== 0) $ BSR.reverse res
+        BigEndian -> BSR.dropWhile (== 0) res
+    where res = encodeVInt' end (fi num)
+
+-- encode int to a fixed-size string(will truncate/fill the resultant string)
+encodeInt :: (Integral t, Bits t) => Int -> Endian -> t -> ByteString
+encodeInt nbyte end num =
+    if diff > 0 then -- fill
+        if num < 0 then BSR.replicate diff 0xff `fill` res
+        else BSR.replicate diff 0x00 `fill` res
     else
-        decodeInt' nbyte bs (-1)
+        BSR.take nbyte res
+    
+    where res = encodeVInt end num
+          len = BSR.length res
+          diff = nbyte - len
+          fill pref a =
+              case end of
+                  LittleEndian -> a <> pref
+                  BigEndian -> pref <> a
+
+decodeInt' :: Integer -> Endian -> ByteString -> Integer
+decodeInt' init LittleEndian = BSR.foldr' (\x a -> shiftL a 8 + fi x) init
+decodeInt' init BigEndian = BSR.foldl' (\a x -> shiftL a 8 + fi x) init
+
+-- decodes a bytestring as an integer and determines the sign
+decodeVInt :: Integral t => Endian -> ByteString -> t
+decodeVInt end bs =
+    if BSR.null bs then 0
+    else if sign < 0x80 then fi (decodeInt' 0 end bs)
+    else fi (decodeInt' (-1) end bs)
+    where
+        sign =
+            case end of
+                LittleEndian -> BSR.last bs
+                BigEndian -> BSR.head bs
+
+-- similar to above, but doesn't care about the sign
+decodeVWord :: Integral t => Endian -> ByteString -> t
+decodeVWord end bs = fi (decodeInt' 0 end bs)
 
 -- little-endian
-bs2vintLE :: ByteString -> Integer
-bs2vintLE = decodeVInt LittleEndian
+bs2vwordLE :: ByteString -> Integer
+bs2vwordLE = decodeVWord LittleEndian
 
--- pre-condition: n >= 0
-vint2bsLE :: Integer -> Either TCKRError ByteString
-vint2bsLE = encodeVInt LittleEndian
+vword2bsLE :: Integer -> ByteString
+vword2bsLE = encodeVWord LittleEndian
 
 -- big-endian
-bs2vintBE :: ByteString -> Integer
-bs2vintBE = decodeVInt BigEndian
+bs2vwordBE :: ByteString -> Integer
+bs2vwordBE = decodeVWord BigEndian
 
--- pre-condition: n >= 0
-vint2bsBE :: Integer -> Either TCKRError ByteString
-vint2bsBE = encodeVInt BigEndian
+vword2bsBE :: Integer -> ByteString
+vword2bsBE = encodeVWord BigEndian
 
 -- decoding
 newtype Decoder r = Decoder { doDecode :: Endian -> ByteString -> (Either TCKRError r, ByteString) }
@@ -255,12 +288,18 @@ class Decodable t where
 intD :: Integral t => Int -> Decoder t
 intD nbyte = Decoder $ \end bs ->
     if BSR.length bs >= nbyte then
-        (Right $ fromInteger $ decodeInt nbyte end bs, BSR.drop nbyte bs)
+        (Right $ decodeVInt end (BSR.take nbyte bs), BSR.drop nbyte bs)
     else
         (Left $ TCKRError
-            ("no enough byte for a " ++
-             (show nbyte) ++
-             "-byte int"), bs)
+            ("no enough byte for a " ++ (show nbyte) ++ "-byte int"), bs)
+
+wordD :: Integral t => Int -> Decoder t
+wordD nbyte = Decoder $ \end bs ->
+    if BSR.length bs >= nbyte then
+        (Right $ decodeVWord end (BSR.take nbyte bs), BSR.drop nbyte bs)
+    else
+        (Left $ TCKRError
+            ("no enough byte for a " ++ (show nbyte) ++ "-byte word"), bs)
 
 byteD :: Decoder Word8
 byteD =
@@ -315,6 +354,10 @@ ifD cond t d = if cond then return t else d
 appendD :: ByteString -> Decoder ()
 appendD bs = Decoder $ \_ orig -> (Right (), BSR.append bs orig)
 
+forceEndian :: Endian -> Decoder a -> Decoder a
+forceEndian end (Decoder d) =
+    Decoder $ \_ bs -> d end bs
+
 allD :: Decoder ByteString
 allD = Decoder $ \_ bs -> (Right bs, BSR.empty)
 
@@ -325,6 +368,14 @@ getD = allD'
 
 putD :: ByteString -> Decoder ()
 putD bs = Decoder $ \_ _ -> (Right (), bs)
+
+-- only feed part of the current bs to the given decoder
+quota :: Int -> Decoder t -> Decoder t
+quota len d =
+    Decoder $ \end bs ->
+        let part = BSR.take len bs
+            (res, rest) = doDecode d end part
+        in (res, rest <> BSR.drop len bs)
 
 instance Decodable Placeholder where
     decoder = return Placeholder
@@ -356,22 +407,26 @@ instance Decodable Int64 where
     decoder = intD 8
 
 instance Decodable Word16 where
-    decoder = intD 2
+    decoder = wordD 2
 
 instance Decodable Word32 where
-    decoder = intD 4
+    decoder = wordD 4
 
 instance Decodable Word64 where
-    decoder = intD 8
+    decoder = wordD 8
 
 instance Decodable Word256 where
-    decoder = intD 32
+    decoder = wordD 32
 
 instance (Decodable t1, Decodable t2) => Decodable (t1, t2) where
     decoder = (,) <$> decoder <*> decoder
 
 instance Decodable String where
     decoder = BS.unpack <$> allD
+
+instance Decodable Integer where
+    decoder = Decoder $ \end bs ->
+        (Right (decodeVInt end bs), BSR.empty)
 
 -- -- decode as many t as possible
 -- instance Decodable t => Decodable [t] where

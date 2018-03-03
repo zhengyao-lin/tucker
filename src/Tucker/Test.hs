@@ -6,10 +6,10 @@ import Data.Hex
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
-import Data.ASN1.Types
-import Data.ASN1.BitArray
-import Data.ASN1.Encoding
-import Data.ASN1.BinaryEncoding
+-- import Data.ASN1.Types
+-- import Data.ASN1.BitArray
+-- import Data.ASN1.Encoding
+-- import Data.ASN1.BinaryEncoding
 
 import Debug.Trace
 
@@ -41,6 +41,7 @@ import Tucker.Conf
 import Tucker.Atom
 import Tucker.Auth
 import Tucker.Util
+import Tucker.ASN1
 import Tucker.Error
 
 import Tucker.P2P.Init
@@ -52,6 +53,40 @@ import Tucker.Storage.Chain
 -- import Tucker.Chain.Cached
 
 test_db_path = "tucker-testdb"
+
+-- [(original number, encoded as vint, encoded as vword)]
+encode_map_be :: [(Integer, ByteString, ByteString)]
+encode_map_be = [
+        (0, hex2bs "", hex2bs ""),
+        (-1, hex2bs "ff", hex2bs "ff"),
+        (-256, hex2bs "ff00", hex2bs "ff00"),
+        (65280, hex2bs "00ff00", hex2bs "ff00")
+    ]
+
+basicEncTest = TestCase $ do
+    -- encodeVInt
+    -- encodeInt
+
+    forM_ encode_map_be $ \(num, vint_bs, vword_bs) -> do
+        assertEqual ("wrong big-endian encoding as vint of " ++ show num)
+            vint_bs (encodeVInt BigEndian num)
+
+        assertEqual ("wrong little-endian encoding as vint of " ++ show num)
+            (BSR.reverse vint_bs) (encodeVInt LittleEndian num)
+
+        assertEqual ("wrong big-endian encoding as vword of " ++ show num)
+            vword_bs (encodeVWord BigEndian num)
+
+        assertEqual ("wrong little-endian encoding as vword of " ++ show num)
+            (BSR.reverse vword_bs) (encodeVWord LittleEndian num)
+
+basicDecTest = TestCase $ do
+    return ()
+
+encTests = TestList [
+        TestLabel "basic encoding tests" basicEncTest,
+        TestLabel "basic decoding tests" basicDecTest
+    ]
 
 simpleBlock :: Hash256 -> IO Block
 simpleBlock prev_hash = do
@@ -316,6 +351,33 @@ txCase11 = TestCase $ do
     generalTxCase SCRIPT_P2PK ValidTx tx5 0 tx0 4
     generalTxCase SCRIPT_P2PK ValidTx tx6 0 tx0 5
 
+-- this one has a non-standard signature encoding
+txCase12 = TestCase $ do
+    -- tx0 af1796999f26e8e92f81adcc38bbf57b902ac4693aa0eb519ff8a39d63305b16
+    -- tx1 ca05e4f0ad93be876a6abea6405c080a9c78141403753a9885c8c36ec379cf4f
+    let tx0 = hex2tx "01000000015ce0318412c63146c391f8ea3cf2d33a6270bc14a3770c0fb4f26587b2586ffc010000008c493046022100ee2c5c959ec7cb9bbb3f361dfc305b4e0db3fa8af6fd6d4197fd65c1276f182f022100d9e91ddfa82c3910012e19ca0dc2c914e03f48fc6de7db9e36469a093a9f87cc0141047d47ccf8e454a20d4b78b1c69a666618246a833ba7dc344a217c5cece3ff32cc61ab96cfe9485eb9c2e377d1b12418fd450f8d6320ca2fd2a102c926a47f4187ffffffff02807c814a000000001976a914db936bee496c56c6f03bb2f391d6d593989dab2088ac80678a09020000001976a914a9df761225dc028c4578f97d0cd015f003ee5be788ac00000000"
+        tx1 = hex2tx "0100000001165b30639da3f89f51eba03a69c42a907bf5bb38ccad812fe9e8269f999617af010000008c4930460221002e6f0e8b515b5f25e837592e5e8a834cbe3fabaf98973edf88b19502e0180c2d022100d03cc64f35fb277fe1b69270b542aca5620394ed7b7fae7a3546934dd6fe428801410441a8dc2e02a367c5658724fb4437c6c7317ebe72388bdb4aef74c730a81f0682bdeb337a1dae0ce8c50dadb4bd58efd3eee34f7c1820216b5798f4349d8fcbffffffffff02807c814a000000001976a9149bb8e829dbca82f4cf4f0ae3a602ab76eef8f8fd88ac00eb08bf010000001976a9145be27ad49c77a1fe275e59a02f79be1ce9aaa43088ac00000000"
+
+    generalTxCase SCRIPT_P2PKH ValidTx tx0 1 tx1 0
+
+-- empty pk_script
+txCase13 = TestCase $ do
+    -- tx0 38e6f72bc717d8a423e717f59c098b8f6f7adb2f0f85833ec02e4266bf3fad65
+    -- tx1 a1f6a4ffcfd7bb4775790932aff1f82ac6a9b3b3e76c8faf8b11328e948afcca
+    let tx0 = hex2tx "0100000001c323b444df62c6d1290d6be7a7db120a914c2c52ba330dcef240291e5251dc68010000006b48304502202b72aba30dd51ab93939397932ba7db51a728ab395cddfff161220f53959e03e022100cda87f332e80184c2e28eedb42b2334248e9a0ef90bb676b8504e449dcac924d012102786409cdbb55392b04e55d32d3f0c6964193b61dc537cc75f565c6535f4a9c5affffffff0101000000000000000000000000"
+        tx1 = hex2tx "010000000165ad3fbf66422ec03e83850f2fdb7a6f8f8b099cf517e723a4d817c72bf7e638000000000151ffffffff0101000000000000001976a914ffca5cf550ad617598d10342b78317c2a563b77888ac00000000"
+
+    generalTxCase SCRIPT_NONSTD ValidTx tx0 0 tx1 0
+
+-- multisig, with the first pubkey illegal(and may cause crash) but the second correct
+txCase14 = TestCase $ do
+    -- tx0 2e131d48f58cbb358cc53967a2fb89a80a6da337cb430fd719f5888af7a48507
+    -- tx1 bdefb2077a28d419425d8964f7d09eec89b334a258085f14ea60b71a368cd781
+    let tx0 = hex2tx "010000000101c6ce2306d3d1a415cb3a4816a573384e4994cd7c9a6da906d86a91f9522e1d000000006b483045022100b5ab50db8119ccde0a6fc51837394358869f36bf8d00030f5d3b0153fd1b1cac02201e9bc491960157faf570e85722106e030631df4df2ef510bfa2c09b8e266b21f01210243203d811524ef8f3588e28b4f68b354322d317dca8c77da8a1c11d41a167a31ffffffff0140787d0100000000475121033d091990498104e71aa940771aa2b9946850591e6f4e3eac31d24078cdb20a4121000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2052ae00000000"
+        tx1 = hex2tx "01000000010785a4f78a88f519d70f43cb37a36d0aa889fba26739c58c35bb8cf5481d132e000000004a004830450221009e3787c6d9d6c072093389ecf643975a122e7334b48880fa8c5e5be2473234dd0220041f3f0338f9db2ccde267ef25e7bad7b1e67bca84a837b419f3b501823e0a3b01ffffffff0120bcbe00000000001976a91417e0a7b539f7479ba80c8f40892ee514f723824388ac00000000"
+
+    generalTxCase SCRIPT_P2MULTISIG ValidTx tx0 0 tx1 0
+
 scriptTest = TestCase $ do
     let sc1 = [ OP_NOP ]
         sc2 = [ OP_IF True 1, OP_ENDIF ]
@@ -369,7 +431,10 @@ msgTests = TestList [
         TestLabel "tx case 8" txCase8,
         TestLabel "tx case 9" txCase9,
         TestLabel "tx case 10" txCase10,
-        TestLabel "tx case 11" txCase11
+        TestLabel "tx case 11" txCase11,
+        TestLabel "tx case 12" txCase12,
+        TestLabel "tx case 13" txCase13,
+        TestLabel "tx case 14" txCase14
     ]
 
 bucketTest = TestCase $ do
@@ -414,6 +479,8 @@ allTests = TestList [
                 removeDirectoryRecursive test_db_path
             else
                 return (),
+
+        encTests,
 
         dbTests, blockTests, msgTests
     ]
