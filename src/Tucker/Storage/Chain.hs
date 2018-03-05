@@ -29,19 +29,19 @@ import Tucker.Storage.Block
 
 data Blockchain =
     Blockchain {
-        bc_conf   :: TCKRConf,
-        bc_dbs    :: [Database],
+        bc_conf     :: TCKRConf,
+        bc_dbs      :: [Database],
 
-        bc_chain  :: Chain,
-        bc_tx_set :: TxState UTXOCache1
+        bc_chain    :: Chain,
+        bc_tx_state :: TxState UTXOCache1
         -- use 1 layer of cached in UTXO
     }
 
 instance NFData Blockchain where
     rnf (Blockchain {
         bc_chain = bc_chain,
-        bc_tx_set = bc_tx_set
-    }) = rnf bc_chain `seq` rnf bc_tx_set
+        bc_tx_state = bc_tx_state
+    }) = rnf bc_chain `seq` rnf bc_tx_state
 
 initBlockchain :: TCKRConf -> ResIO Blockchain
 initBlockchain conf@(TCKRConf {
@@ -52,14 +52,14 @@ initBlockchain conf@(TCKRConf {
     tx_db <- openDB def tx_db_path
 
     bc_chain <- lift $ initChain conf block_db
-    bc_tx_set <- lift $ initTxState conf tx_db
+    bc_tx_state <- lift $ initTxState conf tx_db
 
     return $ Blockchain {
         bc_conf = conf,
         bc_dbs = [ block_db, tx_db ],
 
         bc_chain = bc_chain,
-        bc_tx_set = bc_tx_set
+        bc_tx_state = bc_tx_state
     }
 
 {-
@@ -212,7 +212,7 @@ addBlocks proc bc (block:blocks) = do
 trySyncChain :: Blockchain -> IO Blockchain
 trySyncChain bc@(Blockchain {
     bc_chain = chain,
-    bc_tx_set = tx_set
+    bc_tx_state = tx_state
 }) = do
     mres <- tryFixBranch chain
 
@@ -221,7 +221,7 @@ trySyncChain bc@(Blockchain {
         Just chain -> do
             -- blockchain flushed back to disk
             -- sync utxo
-            syncUTXO tx_set
+            syncUTXO tx_state
             return $ bc { bc_chain = chain }
 
 genScriptConf :: TCKRConf -> Block -> IO ScriptConf
@@ -244,7 +244,7 @@ genScriptConf conf out_block =
 addBlockFail :: Blockchain -> Block -> IO Blockchain
 addBlockFail bc@(Blockchain {
     bc_conf = conf,
-    bc_tx_set = tx_set,
+    bc_tx_state = tx_state,
     bc_chain = chain
 }) block@(Block {
     block_hash = block_hash,
@@ -310,75 +310,78 @@ addBlockFail bc@(Blockchain {
                 5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
             -}
 
-            forM_ (zip [0..] all_txns) $ \(idx, tx) -> do
-                let is_coinbase = isCoinbase tx
+            -- using cached utxo because any error
+            -- in the tx will cause the tx state to roll back
+            withCacheUTXO tx_state $ \tx_state ->
+                forM_ (zip [0..] all_txns) $ \(idx, tx) -> do
+                    let is_coinbase = isCoinbase tx
 
-                expectTrue "more than one coinbase txns" $
-                    idx == 0 || not is_coinbase
+                    expectTrue "more than one coinbase txns" $
+                        idx == 0 || not is_coinbase
 
-                traceM $ "\rchecking tx " ++ show idx
+                    traceM $ "\rchecking tx " ++ show idx
 
-                if not is_coinbase then do
-                    in_values <- forM ([0..] `zip` tx_in tx) $ \(in_idx, inp@(TxInput {
-                            prev_out = outp@(OutPoint txid out_idx)
-                        })) -> do
+                    if not is_coinbase then do
+                        in_values <- forM ([0..] `zip` tx_in tx) $ \(in_idx, inp@(TxInput {
+                                prev_out = outp@(OutPoint txid out_idx)
+                            })) -> do
 
-                        value <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
-                            lookupUTXO tx_set outp
+                            value <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
+                                lookupUTXO tx_state outp
 
-                        locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
-                            findTxId tx_set txid
+                            locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
+                                findTxId tx_state txid
 
-                        bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
-                            blockWithHash chain branch (locatorToHash locator)
-                        
-                        bnode <-
-                            -- special case -> outpoint is in the current block
-                            if bnode == branch then return bnode
-                            else expectMaybeIO ("failed to load full block for " ++ show bnode) $
-                                toFullBlockNode chain bnode
+                            bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+                                blockWithHash chain branch (locatorToHash locator)
+                            
+                            bnode <-
+                                -- special case -> outpoint is in the current block
+                                if bnode == branch then return bnode
+                                else expectMaybeIO ("failed to load full block for " ++ show bnode) $
+                                    toFullBlockNode chain bnode
 
-                        let prev_tx_idx = locatorToIdx locator
-                            prev_tx_body =
-                                (if bnode == branch then
-                                     FullList all_txns
-                                 else
-                                     txns (block_data bnode)) `index` fi prev_tx_idx
+                            let prev_tx_idx = locatorToIdx locator
+                                prev_tx_body =
+                                    (if bnode == branch then
+                                        FullList all_txns
+                                    else
+                                        txns (block_data bnode)) `index` fi prev_tx_idx
 
-                            prev_tx_out = tx_out prev_tx_body !! fi out_idx
+                                prev_tx_out = tx_out prev_tx_body !! fi out_idx
 
-                        -- if the tx is coinbase(idx == 0), check coinbase maturity
-                        expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
-                            prev_tx_idx /= 0 ||
-                            cur_height branch - cur_height bnode >= fi (tckr_coinbase_maturity conf)
+                            -- if the tx is coinbase(idx == 0), check coinbase maturity
+                            expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
+                                prev_tx_idx /= 0 ||
+                                cur_height branch - cur_height bnode >= fi (tckr_coinbase_maturity conf)
 
-                        script_conf <- genScriptConf conf (block_data bnode)
+                            script_conf <- genScriptConf conf (block_data bnode)
 
-                        let pk_sc = decodeFailLE (pk_script prev_tx_out)
-                            sig_sc = decodeFailLE (sig_script inp)
-                            state = initState script_conf prev_tx_body tx in_idx
-                            check_res = runEval state [ sig_sc, pk_sc ]
+                            let pk_sc = decodeFailLE (pk_script prev_tx_out)
+                                sig_sc = decodeFailLE (sig_script inp)
+                                state = initState script_conf prev_tx_body tx in_idx
+                                check_res = runEval state [ sig_sc, pk_sc ]
 
-                        -- traceShowM (out_idx, prev_tx_out)
+                            -- traceShowM (out_idx, prev_tx_out)
 
-                        expectTrue ("invalid script/signature for outpoint tx " ++
-                                    show txid ++ ": " ++ show check_res ++
-                                    ": " ++ show [ sig_sc, pk_sc ]) $
-                            check_res == ValidTx
+                            expectTrue ("invalid script/signature for outpoint tx " ++
+                                        show txid ++ ": " ++ show check_res ++
+                                        ": " ++ show [ sig_sc, pk_sc ]) $
+                                check_res == ValidTx
 
-                        return value
+                            return value
 
-                    -- validity of values
-                    expectTrue "sum of inputs less than the sum of output" $
-                        sum (in_values) >= getOutputValue tx
-                else
-                    -- omitting coinbase value check
-                    return ()
+                        -- validity of values
+                        expectTrue "sum of inputs less than the sum of output" $
+                            sum (in_values) >= getOutputValue tx
+                    else
+                        -- omitting coinbase value check
+                        return ()
 
-                addTx tx_set block idx
+                    addTx tx_state block idx
 
             -- add tx to tx and utxo pool
-            -- mapM_ (addTx tx_set block) [ 0 .. length txns - 1 ]
+            -- mapM_ (addTx tx_state block) [ 0 .. length txns - 1 ]
              
             -- all check passed
             -- write the block into the block database

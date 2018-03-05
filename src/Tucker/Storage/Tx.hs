@@ -116,3 +116,15 @@ findTxId = lookupIO . bucket_tx
 
 syncUTXO :: UTXOMap a => TxState (UTXOArg (CacheMap a)) -> IO ()
 syncUTXO = syncCacheMap . utxo_map
+
+cacheUTXO :: UTXOMap a => TxState a -> IO (TxState (UTXOCache a))
+cacheUTXO state = do
+    new_map <- wrapCacheMap (utxo_map state)
+    return (state { utxo_map = new_map })
+
+withCacheUTXO :: UTXOMap a => TxState a -> (TxState (UTXOCache a) -> IO b) -> IO b
+withCacheUTXO state proc = do
+    new_state <- cacheUTXO state
+    res <- proc new_state
+    syncUTXO new_state
+    return res
