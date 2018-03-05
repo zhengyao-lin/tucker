@@ -43,6 +43,7 @@ import Tucker.Auth
 import Tucker.Util
 import Tucker.ASN1
 import Tucker.Error
+import Tucker.IOMap
 
 import Tucker.P2P.Init
 import Tucker.P2P.Util
@@ -121,9 +122,9 @@ assertEitherLeft :: Either TCKRError t -> IO ()
 assertEitherLeft (Right _) = assertFailure "expecting error"
 assertEitherLeft (Left err) = return ()
 
-withChain :: TCKRConf -> (BlockChain -> IO a) -> IO a
+withChain :: TCKRConf -> (Blockchain -> IO a) -> IO a
 withChain conf proc = runResourceT $ do
-    bc <- initBlockChain conf
+    bc <- initBlockchain conf
     lift $ proc bc
 
 hex2block :: String -> Block
@@ -439,32 +440,30 @@ msgTests = TestList [
 
 bucketTest = TestCase $ do
     withDB def (test_db_path </> "bucket-test") $ \db -> do
-        b1 <- openBucket db "bucket1" :: IO (DBBucket String String)
         b1_raw <- openBucket db "bucket1" :: IO (DBBucket String String)
+        b1 <- wrapCacheMap b1_raw
 
-        bufferizeB b1
+        insertIO b1 "hi" "yeah"
 
-        setB b1 "hi" "yeah"
-
-        res <- getB b1_raw "hi"
-        assertEqual "buffered value should not be stored"
+        res <- lookupIO b1_raw "hi"
+        assertEqual "cached value should not be stored"
             Nothing res
 
-        syncB b1
+        syncCacheMap b1
 
-        res <- getB b1_raw "hi"
+        res <- lookupIO b1_raw "hi"
         assertEqual "sync value should be stored"
             (Just "yeah") res
 
-        deleteB b1 "hi"
+        deleteIO b1 "hi"
 
-        res <- getB b1_raw "hi"
-        assertEqual "buffered value should not be deleted"
+        res <- lookupIO b1_raw "hi"
+        assertEqual "cached value should not be deleted"
             (Just "yeah") res
 
-        syncB b1
+        syncCacheMap b1
 
-        res <- getB b1_raw "hi"
+        res <- lookupIO b1_raw "hi"
         assertEqual "sync value should be deleted"
             Nothing res
 

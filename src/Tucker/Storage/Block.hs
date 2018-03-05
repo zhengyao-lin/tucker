@@ -51,6 +51,7 @@ import Tucker.Enc
 import Tucker.Util
 import Tucker.Conf
 import Tucker.Error
+import Tucker.IOMap
 import Tucker.DeepSeq
 
 type Height = Word64
@@ -154,7 +155,7 @@ initChain conf@(TCKRConf {
             edge_branches = []
         }
 
-    entries <- countB bucket_chain
+    entries <- countIO bucket_chain
     let height = entries - 1 :: Height
 
     putStrLn $ "a tree of height " ++ show entries ++ " - 1 found in database"
@@ -166,7 +167,7 @@ initChain conf@(TCKRConf {
             (Left err, _) -> error $ "genesis decode error: " ++ show err
 
             (Right genesis, _) -> do
-                setB bucket_block (block_hash genesis) (0, genesis)
+                insertIO bucket_block (block_hash genesis) (0, genesis)
 
                 return $ chain {
                     edge_branches = [BlockNode {
@@ -184,10 +185,10 @@ initChain conf@(TCKRConf {
         let range = take max_depth [ height, height - 1 .. 0 ]
 
         -- in descending order of height
-        hashes <- maybeCat <$> mapM (getB bucket_chain) range
+        hashes <- maybeCat <$> mapM (lookupIO bucket_chain) range
                :: IO [Hash256]
 
-        res    <- maybeCat <$> mapM (getAsB bucket_block) hashes
+        res    <- maybeCat <$> mapM (lookupAsIO bucket_block) hashes
                :: IO [(Height, BlockHeader)] -- read headers only
         
         let fold_proc (height, BlockHeader block) Nothing =
@@ -297,12 +298,12 @@ blockAtHeight chain@(Chain {
         return (block_data <$> searchBranchHeight chain height branch)
     else do
         -- the block should be in the db
-        mhash <- getB bucket_chain height
+        mhash <- lookupIO bucket_chain height
         
         case mhash of
             Nothing -> return Nothing
             Just hash -> do
-                mpair <- getB bucket_block hash
+                mpair <- lookupIO bucket_block hash
                 return (snd <$> mpair)
 
 -- block with the given hash on a branch
@@ -317,12 +318,12 @@ blockWithHash chain@(Chain {
     case searchBranchHash chain hash branch of
         Just bn -> return (Just bn)
         Nothing -> do
-            mres <- getB bucket_block hash
+            mres <- lookupIO bucket_block hash
 
             case mres of
                 Nothing -> return Nothing
                 Just (height, block) -> do
-                    mhash <- getB bucket_chain height
+                    mhash <- lookupIO bucket_chain height
 
                     -- print (isPartial (txns block))
         
@@ -349,7 +350,7 @@ toFullBlockNode (Chain {
 }) =
     if isFullBlock block then return (Just node)
     else do
-        mres <- getB bucket_block (block_hash block)
+        mres <- lookupIO bucket_block (block_hash block)
 
         case mres of
             Nothing -> return Nothing -- full block not found
@@ -425,14 +426,14 @@ saveBranch (Chain {
         let (height, _) = last pairs
 
         forM_ pairs $ \(height, (Block { block_hash = hash })) ->
-            setB bucket_chain height hash
+            insertIO bucket_chain height hash
     else
         return ()
 
 -- save block into the block map
 saveBlock :: Chain -> Branch -> IO ()
 saveBlock chain branch =
-    setB (bucket_block chain) hash (cur_height branch, block)
+    insertIO (bucket_block chain) hash (cur_height branch, block)
     where
         block = block_data branch
         hash = block_hash block
@@ -529,7 +530,7 @@ hasBlockInChain chain@(Chain {
 }) block@(Block {
     block_hash = hash
 }) = do
-    mres <- getAsB bucket_block hash :: IO (Maybe (Height, Placeholder))
+    mres <- lookupAsIO bucket_block hash :: IO (Maybe (Height, Placeholder))
     
     case mres of
         Nothing -> return False

@@ -428,6 +428,9 @@ instance Decodable Integer where
     decoder = Decoder $ \end bs ->
         (Right (decodeVInt end bs), BSR.empty)
 
+instance Decodable ByteString where
+    decoder = allD
+
 -- -- decode as many t as possible
 -- instance Decodable t => Decodable [t] where
 --     decoder = many decoder

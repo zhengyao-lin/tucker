@@ -27,23 +27,24 @@ import Tucker.DeepSeq
 import Tucker.Storage.Tx
 import Tucker.Storage.Block
 
-data BlockChain =
-    BlockChain {
+data Blockchain =
+    Blockchain {
         bc_conf   :: TCKRConf,
         bc_dbs    :: [Database],
 
         bc_chain  :: Chain,
-        bc_tx_set :: TxSet
+        bc_tx_set :: TxState UTXOCache1
+        -- use 1 layer of cached in UTXO
     }
 
-instance NFData BlockChain where
-    rnf (BlockChain {
+instance NFData Blockchain where
+    rnf (Blockchain {
         bc_chain = bc_chain,
         bc_tx_set = bc_tx_set
     }) = rnf bc_chain `seq` rnf bc_tx_set
 
-initBlockChain :: TCKRConf -> ResIO BlockChain
-initBlockChain conf@(TCKRConf {
+initBlockchain :: TCKRConf -> ResIO Blockchain
+initBlockchain conf@(TCKRConf {
     tckr_block_db_path = block_db_path,
     tckr_tx_db_path = tx_db_path
 }) = do
@@ -51,9 +52,9 @@ initBlockChain conf@(TCKRConf {
     tx_db <- openDB def tx_db_path
 
     bc_chain <- lift $ initChain conf block_db
-    bc_tx_set <- lift $ initTxSet conf tx_db
+    bc_tx_set <- lift $ initTxState conf tx_db
 
-    return $ BlockChain {
+    return $ Blockchain {
         bc_conf = conf,
         bc_dbs = [ block_db, tx_db ],
 
@@ -112,7 +113,7 @@ what do we need to check for each transaction:
 
 -}
 
-latestBlocks :: BlockChain -> Int -> IO [Block]
+latestBlocks :: Blockchain -> Int -> IO [Block]
 latestBlocks chain n = topNBlocks (bc_chain chain) n
 
 corrupt = reject "corrupted database"
@@ -141,8 +142,8 @@ shouldDiffChange conf height =
     height /= 0 &&
     height `mod` fi (tckr_diff_change_span conf) == 0
 
-hashTargetValid :: BlockChain -> Branch -> IO Bool
-hashTargetValid bc@(BlockChain {
+hashTargetValid :: Blockchain -> Branch -> IO Bool
+hashTargetValid bc@(Blockchain {
     bc_conf = conf,
     bc_chain = chain
 }) branch@(BlockNode {
@@ -172,8 +173,8 @@ hashTargetValid bc@(BlockChain {
     return $ hash_target <= target
 
 -- should not fail
-collectOrphan :: BlockChain -> IO BlockChain
-collectOrphan bc@(BlockChain {
+collectOrphan :: Blockchain -> IO Blockchain
+collectOrphan bc@(Blockchain {
     bc_chain = chain
 }) = do
     let orphan_list = orphanList chain
@@ -189,13 +190,13 @@ collectOrphan bc@(BlockChain {
     if suc then collectOrphan bc -- if success, try to collect the orphan again
     else return bc -- otherwise return the original chain
 
-addBlock :: BlockChain -> Block -> IO (Either TCKRError BlockChain)
+addBlock :: Blockchain -> Block -> IO (Either TCKRError Blockchain)
 addBlock bc block =
     force <$> tryT (addBlockFail bc block)
 
-addBlocks :: (Block -> Either TCKRError BlockChain -> IO ())
-          -> BlockChain -> [Block]
-          -> IO BlockChain
+addBlocks :: (Block -> Either TCKRError Blockchain -> IO ())
+          -> Blockchain -> [Block]
+          -> IO Blockchain
 addBlocks proc bc [] = return bc
 addBlocks proc bc (block:blocks) = do
     res <- addBlock bc block
@@ -208,8 +209,8 @@ addBlocks proc bc (block:blocks) = do
     new_bc `seq` addBlocks proc new_bc blocks
 
 -- test & save chain to the disk
-trySyncChain :: BlockChain -> IO BlockChain
-trySyncChain bc@(BlockChain {
+trySyncChain :: Blockchain -> IO Blockchain
+trySyncChain bc@(Blockchain {
     bc_chain = chain,
     bc_tx_set = tx_set
 }) = do
@@ -240,8 +241,8 @@ genScriptConf conf out_block =
 --         hash = locatorToHash locator
 
 -- throws a TCKRError when rejecting the block
-addBlockFail :: BlockChain -> Block -> IO BlockChain
-addBlockFail bc@(BlockChain {
+addBlockFail :: Blockchain -> Block -> IO Blockchain
+addBlockFail bc@(Blockchain {
     bc_conf = conf,
     bc_tx_set = tx_set,
     bc_chain = chain

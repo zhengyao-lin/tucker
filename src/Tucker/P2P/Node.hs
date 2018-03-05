@@ -49,7 +49,7 @@ data MainLoopEnv =
         io_buf        :: Atom [String],
 
         chain_lock    :: LK.Lock,
-        block_chain   :: Atom BlockChain
+        block_chain   :: Atom Blockchain
     }
 
 data RouterAction
@@ -177,7 +177,7 @@ initEnv conf = do
     -- db_chain <- openDB def (tckr_db_path conf) (tckr_ks_chain conf)
 
     chain_lock <- lift $ LK.new
-    block_chain <- initBlockChain conf >>= (lift . newA)
+    block_chain <- initBlockchain conf >>= (lift . newA)
 
     return $ MainLoopEnv {
         main_proc_tid = tid,
