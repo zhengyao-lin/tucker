@@ -19,6 +19,7 @@ module Tucker.Storage.Block (
     insertBlock,
     tryFixBranch,
 
+    allBranches,
     topNBlocks,
 
     saveBlock,
@@ -54,7 +55,7 @@ import Tucker.Error
 import Tucker.IOMap
 import Tucker.DeepSeq
 
-type Height = Word64
+type Height = Int64
 -- height starts from 0(genesis)
 
 data Branch
@@ -223,6 +224,9 @@ branchHeights :: Chain -> [Height]
 branchHeights (Chain { edge_branches = branches }) =
     map cur_height branches
 
+branchHeight :: Branch -> Height
+branchHeight = cur_height
+
 searchBranch' :: (Branch -> Bool) -> Branch -> (Branch, Maybe Branch)
 searchBranch' pred node@(BlockNode {
     prev_node = mprev
@@ -291,7 +295,7 @@ blockAtHeight chain@(Chain {
 }) branch@(BlockNode {
     cur_height = max_height
 }) height =
-    if height > max_height then
+    if height > max_height || height < 0 then
         return Nothing
     else if height >= saved_height then do
         -- the block should be in memory
@@ -496,17 +500,29 @@ takeBranch n branch =
     if n >= 0 then takeBranch' n (Just branch)
     else []
 
+allBranches = edge_branches
+
 -- topNBlocks chain max_number_of_block
 -- take maxn from each branch
 -- highest height first
-topNBlocks :: Chain -> Int -> IO [Block]
-topNBlocks (Chain {
-    edge_branches = branches
-}) maxn =
-    return $
-    map block_data $
-    sortBy (\a b -> compare (cur_height b) (cur_height a))
-           (concatMap (takeBranch maxn) branches)
+-- topNBlocks :: Chain -> Int -> IO [Block]
+-- topNBlocks (Chain {
+--     edge_branches = branches
+-- }) maxn =
+--     return $
+--     map block_data $
+--     sortBy (\a b -> compare (cur_height b) (cur_height a))
+--            (concatMap (takeBranch maxn) branches)
+
+-- top n blocks of a paticular branch(if height < n, return height blocks)
+-- in descending order of heights
+topNBlocks :: Chain -> Branch -> Int -> IO [Block]
+topNBlocks chain branch n' =
+    maybeCat <$> mapM (blockAtHeight chain branch) range
+    where
+        n = fi n'
+        height = branchHeight branch
+        range = [ height, height - 1 .. height - n + 1 ]
 
 addOrphan :: Chain -> Block -> Chain
 addOrphan chain block =

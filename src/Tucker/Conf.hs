@@ -87,7 +87,8 @@ data TCKRConf =
 
         tckr_coinbase_maturity :: Int,
 
-        tckr_p2sh_enable_time :: Word32
+        tckr_p2sh_enable_time :: Word32,
+        tckr_mtp_number :: Int
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -177,7 +178,9 @@ tucker_default_conf_mainnet = do
 
         tckr_coinbase_maturity = 100,
 
-        tckr_p2sh_enable_time = 1333238400
+        tckr_p2sh_enable_time = 1333238400,
+
+        tckr_mtp_number = 11
 
         -- the collector will wait until the top chunk
         -- has (tckr_max_block_per_chunk + tckr_max_tree_insert_depth)

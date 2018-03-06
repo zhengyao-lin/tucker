@@ -27,8 +27,8 @@ import Tucker.DeepSeq
 import Tucker.Storage.Tx
 import Tucker.Storage.Block
 
-data Blockchain =
-    Blockchain {
+data BlockChain =
+    BlockChain {
         bc_conf     :: TCKRConf,
         bc_dbs      :: [Database],
 
@@ -37,14 +37,14 @@ data Blockchain =
         -- use 1 layer of cached in UTXO
     }
 
-instance NFData Blockchain where
-    rnf (Blockchain {
+instance NFData BlockChain where
+    rnf (BlockChain {
         bc_chain = bc_chain,
         bc_tx_state = bc_tx_state
     }) = rnf bc_chain `seq` rnf bc_tx_state
 
-initBlockchain :: TCKRConf -> ResIO Blockchain
-initBlockchain conf@(TCKRConf {
+initBlockChain :: TCKRConf -> ResIO BlockChain
+initBlockChain conf@(TCKRConf {
     tckr_block_db_path = block_db_path,
     tckr_tx_db_path = tx_db_path
 }) = do
@@ -54,7 +54,7 @@ initBlockchain conf@(TCKRConf {
     bc_chain <- lift $ initChain conf block_db
     bc_tx_state <- lift $ initTxState conf tx_db
 
-    return $ Blockchain {
+    return $ BlockChain {
         bc_conf = conf,
         bc_dbs = [ block_db, tx_db ],
 
@@ -113,12 +113,15 @@ what do we need to check for each transaction:
 
 -}
 
-latestBlocks :: Blockchain -> Int -> IO [Block]
-latestBlocks chain n = topNBlocks (bc_chain chain) n
+latestBlocks :: BlockChain -> Int -> IO [Block]
+latestBlocks (BlockChain { bc_chain = chain }) n =
+    fmap concat $
+    forM (allBranches chain) $ \branch ->
+        topNBlocks chain branch n
 
 corrupt = reject "corrupted database"
 
-calNewTarget :: TCKRConf -> Hash256 -> Word32 -> Hash256
+calNewTarget :: TCKRConf -> Hash256 -> Timestamp -> Hash256
 calNewTarget conf old_target actual_span =
     -- real target used
     unpackHash256 (packHash256 new_target)
@@ -137,13 +140,23 @@ calNewTarget conf old_target actual_span =
 
         new_target = old_target * (fi new_span) `div` (fi expect_span)
 
+medianPastTime :: BlockChain -> Branch -> Int -> IO Timestamp
+medianPastTime bc@(BlockChain {
+    bc_chain = chain
+}) branch n = do
+    ts <- map btimestamp <$> (topNBlocks chain branch n)
+
+    return $
+        if null ts then 0
+        else median ts
+
 shouldDiffChange :: TCKRConf -> Height -> Bool
 shouldDiffChange conf height =
     height /= 0 &&
     height `mod` fi (tckr_diff_change_span conf) == 0
 
-hashTargetValid :: Blockchain -> Branch -> IO Bool
-hashTargetValid bc@(Blockchain {
+hashTargetValid :: BlockChain -> Branch -> IO Bool
+hashTargetValid bc@(BlockChain {
     bc_conf = conf,
     bc_chain = chain
 }) branch@(BlockNode {
@@ -173,8 +186,8 @@ hashTargetValid bc@(Blockchain {
     return $ hash_target <= target
 
 -- should not fail
-collectOrphan :: Blockchain -> IO Blockchain
-collectOrphan bc@(Blockchain {
+collectOrphan :: BlockChain -> IO BlockChain
+collectOrphan bc@(BlockChain {
     bc_chain = chain
 }) = do
     let orphan_list = orphanList chain
@@ -190,13 +203,13 @@ collectOrphan bc@(Blockchain {
     if suc then collectOrphan bc -- if success, try to collect the orphan again
     else return bc -- otherwise return the original chain
 
-addBlock :: Blockchain -> Block -> IO (Either TCKRError Blockchain)
+addBlock :: BlockChain -> Block -> IO (Either TCKRError BlockChain)
 addBlock bc block =
     force <$> tryT (addBlockFail bc block)
 
-addBlocks :: (Block -> Either TCKRError Blockchain -> IO ())
-          -> Blockchain -> [Block]
-          -> IO Blockchain
+addBlocks :: (Block -> Either TCKRError BlockChain -> IO ())
+          -> BlockChain -> [Block]
+          -> IO BlockChain
 addBlocks proc bc [] = return bc
 addBlocks proc bc (block:blocks) = do
     res <- addBlock bc block
@@ -209,8 +222,8 @@ addBlocks proc bc (block:blocks) = do
     new_bc `seq` addBlocks proc new_bc blocks
 
 -- test & save chain to the disk
-trySyncChain :: Blockchain -> IO Blockchain
-trySyncChain bc@(Blockchain {
+trySyncChain :: BlockChain -> IO BlockChain
+trySyncChain bc@(BlockChain {
     bc_chain = chain,
     bc_tx_state = tx_state
 }) = do
@@ -241,8 +254,8 @@ genScriptConf conf out_block =
 --         hash = locatorToHash locator
 
 -- throws a TCKRError when rejecting the block
-addBlockFail :: Blockchain -> Block -> IO Blockchain
-addBlockFail bc@(Blockchain {
+addBlockFail :: BlockChain -> Block -> IO BlockChain
+addBlockFail bc@(BlockChain {
     bc_conf = conf,
     bc_tx_state = tx_state,
     bc_chain = chain
@@ -295,6 +308,10 @@ addBlockFail bc@(Blockchain {
 
             -- update chain
             bc <- return $ bc { bc_chain = chain }
+
+            expectTrueIO "MTP rule not met" $
+                (btimestamp block >=) <$>
+                medianPastTime bc branch (tckr_mtp_number conf)
 
             expectTrueIO "wrong difficulty" $
                 hashTargetValid bc branch

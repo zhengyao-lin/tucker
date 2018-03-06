@@ -31,7 +31,7 @@ data Block =
         prev_hash   :: Hash256,
         merkle_root :: Hash256,
 
-        btimestamp  :: Word32,
+        btimestamp  :: Timestamp,
         -- diff_bits   :: Word32,
         hash_target :: Hash256,
 
