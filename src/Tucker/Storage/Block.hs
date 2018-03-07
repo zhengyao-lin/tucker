@@ -4,14 +4,17 @@
 module Tucker.Storage.Block (
     Height,
     Branch(..),
-    Chain(..),
+    Chain,
 
     initChain,
     branchHeights,
     
     blocksAtHeight,
     blockAtHeight,
+    branchAtHeight,
+
     blockWithHash,
+    branchWithHash,
 
     hasFullBlock,
     toFullBlockNode,
@@ -24,13 +27,17 @@ module Tucker.Storage.Block (
 
     saveBlock,
 
+    prevBlockNode,
+
     addOrphan,
     removeOrphan,
     orphanList,
 
     hasBlockInChain,
     hasBlockInOrphan,
-    hasBlock
+    hasBlock,
+
+    isMainBranch
     -- searchBranch,
     -- searchBranchHash,
     -- searchBranchHeight
@@ -278,7 +285,14 @@ searchBranchHash chain hash =
 searchBranchHeight chain height =
     searchBranch chain ((== height) . cur_height)
 
--- public functions
+createSingleNode :: Block -> Height -> Branch
+createSingleNode block height =
+    BlockNode {
+        block_data = block,
+        cur_height = height,
+        acc_diff = error "accessing single node",
+        prev_node = error "accessing single node"
+    }
 
 -- blocks at a specific height
 blocksAtHeight :: Chain -> Height -> IO [Block]
@@ -286,9 +300,12 @@ blocksAtHeight chain height =
     (maybeCat <$>) $ forM (edge_branches chain) $
         \b -> blockAtHeight chain b height
 
+blockAtHeight chain branch height =
+    maybe Nothing (Just . block_data) <$> branchAtHeight chain branch height
+
 -- block at a specific height on a branch
-blockAtHeight :: Chain -> Branch -> Height -> IO (Maybe Block)
-blockAtHeight chain@(Chain {
+branchAtHeight :: Chain -> Branch -> Height -> IO (Maybe Branch)
+branchAtHeight chain@(Chain {
     bucket_chain = bucket_chain,
     bucket_block = bucket_block,
     saved_height = saved_height
@@ -299,7 +316,7 @@ blockAtHeight chain@(Chain {
         return Nothing
     else if height >= saved_height then do
         -- the block should be in memory
-        return (block_data <$> searchBranchHeight chain height branch)
+        return (searchBranchHeight chain height branch)
     else do
         -- the block should be in the db
         mhash <- lookupIO bucket_chain height
@@ -308,11 +325,16 @@ blockAtHeight chain@(Chain {
             Nothing -> return Nothing
             Just hash -> do
                 mpair <- lookupIO bucket_block hash
-                return (snd <$> mpair)
+                return $ case mpair of
+                    Just (_, block) -> Just (createSingleNode block height)
+                    Nothing -> Nothing
+
+blockWithHash chain branch hash =
+    maybe Nothing (Just . block_data) <$> branchWithHash chain branch hash
 
 -- block with the given hash on a branch
-blockWithHash :: Chain -> Branch -> Hash256 -> IO (Maybe Branch)
-blockWithHash chain@(Chain {
+branchWithHash :: Chain -> Branch -> Hash256 -> IO (Maybe Branch)
+branchWithHash chain@(Chain {
     bucket_chain = bucket_chain,
     bucket_block = bucket_block,
     saved_height = saved_height
@@ -334,12 +356,7 @@ blockWithHash chain@(Chain {
                     -- the block is indeed in the chain
                     if height < saved_height && mhash == Just hash then
                         -- create a tmp node to store the result
-                        return $ Just $ BlockNode {
-                            acc_diff = undefined,
-                            cur_height = height,
-                            block_data = block,
-                            prev_node = Nothing
-                        }
+                        return $ Just (createSingleNode block height)
                     else
                         return Nothing -- not in the chain(probably due to data lost)
 
@@ -524,6 +541,13 @@ topNBlocks chain branch n' =
         height = branchHeight branch
         range = [ height, height - 1 .. height - n + 1 ]
 
+-- previous node of a node
+-- only garanteed to return Just when
+-- the branch node is on the edge and has non-zero height
+prevBlockNode :: Chain -> Branch -> IO (Maybe Branch)
+prevBlockNode chain branch =
+    branchAtHeight chain branch (cur_height branch - 1)
+
 addOrphan :: Chain -> Block -> Chain
 addOrphan chain block =
     chain {
@@ -562,3 +586,9 @@ hasBlock :: Chain -> Block -> IO Bool
 hasBlock chain block =
     (||) <$> hasBlockInChain chain block
          <*> return (hasBlockInOrphan chain block)
+
+isMainBranch :: Chain -> Branch -> Bool
+isMainBranch (Chain {
+    edge_branches = branches
+}) branch =
+    all (cur_height branch >=) (map cur_height branches)

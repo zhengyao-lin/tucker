@@ -42,8 +42,6 @@ cmd_map = [
 
 cmd_map_r = map (\(a, b) -> (b, a)) cmd_map
 
-type Timestamp = Word32
-
 class (Encodable p, Decodable p) => MsgPayload p where
 
 newtype VInt = VInt Integer deriving (Show, Eq)

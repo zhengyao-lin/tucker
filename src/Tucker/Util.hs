@@ -63,6 +63,7 @@ unixTimestamp :: Integral a => IO a
 unixTimestamp = round `fmap` getPOSIXTime
 
 replace pos new list = take pos list ++ new : drop (pos + 1) list
+replaceApp pos f list = take pos list ++ f (list !! pos) : drop (pos + 1) list
 
 -- replace' pos new list = take pos list ++ new : drop (pos + 1) list
 

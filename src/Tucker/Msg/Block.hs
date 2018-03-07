@@ -4,6 +4,7 @@ module Tucker.Msg.Block where
 
 import Data.Int
 import Data.Word
+import Data.Bits
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
 
@@ -26,7 +27,7 @@ data Block =
     Block {
         block_hash  :: Hash256,
 
-        vers        :: Int32,
+        vers        :: Word32,
         
         prev_hash   :: Hash256,
         merkle_root :: Hash256,
@@ -232,3 +233,64 @@ blockHeader block = block {
 
 isFullBlock :: Block -> Bool
 isFullBlock block = isFull (txns block)
+
+-- SoftFork defined in Conf.hs
+
+instance Encodable SoftForkStatus where
+    encode end FORK_STATUS_DEFINED = bchar 0
+    encode end FORK_STATUS_STARTED = bchar 1
+    encode end FORK_STATUS_LOCKED_IN = bchar 2
+    encode end FORK_STATUS_FAILED = bchar 3
+    encode end FORK_STATUS_ACTIVE = bchar 4
+
+instance Decodable SoftForkStatus where
+    decoder = do
+        b <- byteD
+        case b of
+            0 -> return FORK_STATUS_DEFINED
+            1 -> return FORK_STATUS_STARTED
+            2 -> return FORK_STATUS_LOCKED_IN
+            3 -> return FORK_STATUS_FAILED
+            4 -> return FORK_STATUS_ACTIVE
+            _ -> fail "illegal deployment status"
+
+instance Encodable SoftFork where
+    encode end d =
+        mconcat [
+            encode end (VStr (fork_name d)),
+            encode end (fork_bit d),
+            encode end (fork_start d),
+            encode end (fork_timeout d),
+            encode end (fork_status d)
+        ]
+
+instance Decodable SoftFork where
+    decoder = do
+        VStr name <- decoder
+        bit <- decoder
+        start <- decoder
+        timeout <- decoder
+        status <- decoder
+
+        return $ SoftFork {
+            fork_name = name,
+            fork_bit = bit,
+            fork_start = start,
+            fork_timeout = timeout,
+            fork_status = status
+        }
+
+-- get deployment ids(bit position)
+-- for which the corresponding bit
+-- in version is set
+getSoftForkIds :: Block -> [SoftForkId]
+getSoftForkIds (Block { vers = vers }) =
+    if vers .&. 0xE0000000 == 0x20000000 then
+        filter (\n -> (vers `shift` fi n) .&. 1 == 1) [ 0 .. 28 ]
+    else []
+
+isFinalSoftFork :: SoftFork -> Bool
+isFinalSoftFork d =
+    status == FORK_STATUS_ACTIVE ||
+    status == FORK_STATUS_FAILED
+    where status = fork_status d

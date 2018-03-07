@@ -1,6 +1,7 @@
 module Tucker.Conf where
 
 import Data.Hex
+import Data.Int
 import Data.Word
 import Data.Char
 
@@ -18,6 +19,32 @@ tucker_curve = getCurveByName SEC_p256k1
 data NodeServiceTypeSingle = TCKR_NODE_NETWORK | TCKR_NODE_GETUTXO | TCKR_NODE_BLOOM deriving (Show, Eq)
 data NodeServiceType = NodeServiceType [NodeServiceTypeSingle] deriving (Show, Eq)
 
+type Timestamp = Word32
+
+type SoftForkId = Int32
+
+data SoftForkStatus
+    = FORK_STATUS_DEFINED
+    | FORK_STATUS_STARTED
+    | FORK_STATUS_LOCKED_IN
+
+    -- final status
+    | FORK_STATUS_FAILED
+    | FORK_STATUS_ACTIVE
+    deriving (Eq, Show)
+
+data SoftFork =
+    SoftFork {
+        fork_name    :: String,
+        fork_bit     :: SoftForkId,
+        fork_start   :: Timestamp,
+        fork_timeout :: Timestamp,
+        fork_status  :: SoftForkStatus
+    } deriving (Show)
+
+instance Eq SoftFork where
+    f1 == f2 = fork_name f1 == fork_name f2 && fork_bit f1 == fork_bit f2
+
 data TCKRConf =
     TCKRConf {
         tckr_net_version     :: Integer,
@@ -30,6 +57,8 @@ data TCKRConf =
         tckr_bucket_chain_name :: String,
         tckr_bucket_tx_name    :: String,
         tckr_bucket_utxo_name  :: String,
+        tckr_bucket_fork_name  :: String,
+        tckr_bucket_stat_name  :: String,
 
         tckr_user_agent      :: String,
 
@@ -72,9 +101,10 @@ data TCKRConf =
         -- max difference of the timestamp of a block with the time received
         tckr_max_block_future_diff :: Word32, -- in sec
 
-        -- the difficulty changes every tckr_diff_change_span blocks
-        tckr_diff_change_span :: Word32,
-        tckr_expect_diff_change_time :: Word32, -- expected difficulty change time in sec
+        -- the difficulty changes every tckr_retarget_span blocks
+        tckr_retarget_span :: Word32,
+        tckr_expect_retarget_time :: Word32, -- expected difficulty change time in sec
+        tckr_soft_fork_lock_threshold :: Word32, -- roughly 95% of retarget span
 
         tckr_use_special_min_diff :: Bool, -- support special-min-difficulty or not(mainly on testnet)
 
@@ -88,7 +118,9 @@ data TCKRConf =
         tckr_coinbase_maturity :: Int,
 
         tckr_p2sh_enable_time :: Word32,
-        tckr_mtp_number :: Int
+        tckr_mtp_number :: Int,
+
+        tckr_soft_forks :: [SoftFork]
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -120,6 +152,8 @@ tucker_default_conf_mainnet = do
         tckr_bucket_chain_name = "chain",
         tckr_bucket_tx_name = "tx",
         tckr_bucket_utxo_name = "utxo",
+        tckr_bucket_fork_name = "fork",
+        tckr_bucket_stat_name = "stat",
 
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 
@@ -165,8 +199,9 @@ tucker_default_conf_mainnet = do
 
         tckr_max_block_future_diff = 60 * 2, -- 2 hours
 
-        tckr_diff_change_span = 2016,
-        tckr_expect_diff_change_time = 14 * 24 * 60 * 60, -- 2 weeks in sec
+        tckr_retarget_span = 2016,
+        tckr_expect_retarget_time = 14 * 24 * 60 * 60, -- 2 weeks in sec
+        tckr_soft_fork_lock_threshold = 1916,
 
         tckr_use_special_min_diff = False,
 
@@ -180,7 +215,25 @@ tucker_default_conf_mainnet = do
 
         tckr_p2sh_enable_time = 1333238400,
 
-        tckr_mtp_number = 11
+        tckr_mtp_number = 11,
+
+        tckr_soft_forks = [
+            SoftFork {
+                fork_name = "csv",
+                fork_bit = 0,
+                fork_start = 1462032000,
+                fork_timeout = 1493568000,
+                fork_status = FORK_STATUS_DEFINED
+            },
+            
+            SoftFork {
+                fork_name = "segwit",
+                fork_bit = 1,
+                fork_start = 1479139200,
+                fork_timeout = 1510675200,
+                fork_status = FORK_STATUS_DEFINED
+            }
+        ]
 
         -- the collector will wait until the top chunk
         -- has (tckr_max_block_per_chunk + tckr_max_tree_insert_depth)

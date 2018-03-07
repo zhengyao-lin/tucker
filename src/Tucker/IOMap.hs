@@ -19,6 +19,14 @@ class IOMap a k v | a -> k, a -> v where
 
     foldKeyIO :: a -> b -> (b -> k -> IO b) -> IO b
 
+    mapKeyIO :: a -> (k -> IO b) -> IO [b]
+    mapKeyIO a f = foldKeyIO a [] $ \lst k -> do
+        r <- f k
+        return (lst ++ [r])
+
+    mapKeyIO_ :: a -> (k -> IO a) -> IO ()
+    mapKeyIO_ a f = foldKeyIO a () (\_ k -> f k >> return ())
+
     countIO :: Integral t => a -> IO t
     countIO a = foldKeyIO a 0 (\n _ -> return (n + 1))
 

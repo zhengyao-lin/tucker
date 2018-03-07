@@ -26,15 +26,17 @@ import Tucker.DeepSeq
 
 import Tucker.Storage.Tx
 import Tucker.Storage.Block
+import Tucker.Storage.SoftFork
 
 data BlockChain =
     BlockChain {
-        bc_conf     :: TCKRConf,
-        bc_dbs      :: [Database],
+        bc_conf       :: TCKRConf,
+        bc_dbs        :: [Database],
 
-        bc_chain    :: Chain,
-        bc_tx_state :: TxState UTXOCache1
-        -- use 1 layer of cached in UTXO
+        bc_chain      :: Chain,
+        bc_tx_state   :: TxState UTXOCache1,
+        bc_fork_state :: SoftForkState
+        -- use 1 layer of cache in UTXO
     }
 
 instance NFData BlockChain where
@@ -53,13 +55,15 @@ initBlockChain conf@(TCKRConf {
 
     bc_chain <- lift $ initChain conf block_db
     bc_tx_state <- lift $ initTxState conf tx_db
+    bc_fork_state <- lift $ initForkState conf block_db
 
     return $ BlockChain {
         bc_conf = conf,
         bc_dbs = [ block_db, tx_db ],
 
         bc_chain = bc_chain,
-        bc_tx_state = bc_tx_state
+        bc_tx_state = bc_tx_state,
+        bc_fork_state = bc_fork_state
     }
 
 {-
@@ -110,6 +114,20 @@ what do we need to check for each transaction:
 3. verify signature(involves script)
 4. referenced output is not spent
 5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
+6. the highest 3 bits must be 001
+
+-}
+
+{-
+
+notes for BIP9
+
+0. four states: DEFINED, STARTED, LOCKED_IN, FAILED
+1. uses bits in vers(32-bits) in total to represent deployment
+2. only the lowest 29 bits(2 bits restricted by BIP34, 1 other bit is used for future extension) are used
+3. blocks within the same retarget period have the same state of a deployment(per 2016 blocks)
+4. if 1916 blocks of the previous 2016 blocks have the version bit,
+   switch the state of the next retarget period to LOCKED_IN
 
 -}
 
@@ -126,7 +144,7 @@ calNewTarget conf old_target actual_span =
     -- real target used
     unpackHash256 (packHash256 new_target)
     where
-        expect_span = fi $ tckr_expect_diff_change_time conf
+        expect_span = fi $ tckr_expect_retarget_time conf
 
         -- new_span is in [ exp * 4, exp / 4 ]
         -- to avoid rapid increase in difficulty
@@ -150,10 +168,99 @@ medianPastTime bc@(BlockChain {
         if null ts then 0
         else median ts
 
-shouldDiffChange :: TCKRConf -> Height -> Bool
-shouldDiffChange conf height =
+shouldRetarget :: TCKRConf -> Height -> Bool
+shouldRetarget conf height =
     height /= 0 &&
-    height `mod` fi (tckr_diff_change_span conf) == 0
+    height `mod` fi (tckr_retarget_span conf) == 0
+
+updateForkDeploy :: BlockChain -> Branch -> IO ()
+updateForkDeploy bc@(BlockChain {
+    bc_conf = conf@(TCKRConf {
+        tckr_mtp_number = mtp_number
+    }),
+    bc_chain = chain,
+    bc_fork_state = fork_state
+}) branch =
+    let block = block_data branch in
+
+    if shouldRetarget conf (cur_height branch) then do
+        traceM ("retarget and update deploy status on block " ++ show block)
+
+        -- update
+        prev <- expectMaybeIO "no previous branch" (prevBlockNode chain branch)
+
+        mtp <- medianPastTime bc prev mtp_number
+        forks <- lookupNonFinalForks fork_state block
+
+        forM_ forks $ \fork -> do
+            traceM ("update status on fork " ++ show fork)
+
+            case fork_status fork of
+                FORK_STATUS_DEFINED ->
+                    if mtp > fork_timeout fork then
+                        changeForkStatus fork_state fork FORK_STATUS_FAILED
+                    else if mtp > fork_start fork then
+                        changeForkStatus fork_state fork FORK_STATUS_STARTED
+                    else
+                        return ()
+                
+                FORK_STATUS_STARTED ->
+                    if mtp > fork_timeout fork then
+                        changeForkStatus fork_state fork FORK_STATUS_FAILED
+                    else do
+                        -- pull out number of blocks supporting the fork
+                        number <- getRecord fork_state fork
+                        
+                        if number > fi (tckr_soft_fork_lock_threshold conf) then
+                            changeForkStatus fork_state fork FORK_STATUS_LOCKED_IN
+                        else
+                            return ()
+
+                FORK_STATUS_LOCKED_IN ->
+                    changeForkStatus fork_state fork FORK_STATUS_ACTIVE
+
+                _ -> return ()
+
+        -- clear the stat for the current retarget period
+        clearRecord fork_state
+        recordBlock fork_state block
+    else
+        recordBlock fork_state block
+
+{-
+
+dep_bucket DeploymentId -> [Deployment]
+           id 32        -> numbers of time appeared for each bit(0-28) in the current retarget period
+
+at first, all deployment is defined
+when a block is added,
+check:
+if height % 2016 == 0 and the block is in the main branch then
+    for all deployment declared in version:
+        case deployment status of
+            defined:
+                if MTP > timeout then
+                    set stauts to failed
+                else if MTP > start then
+                    set status to start
+                else
+                    nothing
+
+            started:
+                if MTP > timeout then
+                    set stauts to failed
+                else
+                    check 95% threshold
+                    if reached then
+                        set status to locked_in
+                    else
+                        nothing
+
+            locked_in:
+                set status to active
+
+            _ -> nothing
+-}
 
 hashTargetValid :: BlockChain -> Branch -> IO Bool
 hashTargetValid bc@(BlockChain {
@@ -175,7 +282,7 @@ hashTargetValid bc@(BlockChain {
         if tckr_use_special_min_diff conf then
             -- TODO: non-standard special-min-diff
             return $ fi tucker_bdiff_diff1
-        else if shouldDiffChange conf height then do
+        else if shouldRetarget conf height then do
             Just (Block { btimestamp = t1 }) <-
                 blockAtHeight chain branch (height - 2016)
 
@@ -225,7 +332,8 @@ addBlocks proc bc (block:blocks) = do
 trySyncChain :: BlockChain -> IO BlockChain
 trySyncChain bc@(BlockChain {
     bc_chain = chain,
-    bc_tx_state = tx_state
+    bc_tx_state = tx_state,
+    bc_fork_state = fork_state
 }) = do
     mres <- tryFixBranch chain
 
@@ -235,6 +343,8 @@ trySyncChain bc@(BlockChain {
             -- blockchain flushed back to disk
             -- sync utxo
             syncUTXO tx_state
+            syncForkState fork_state
+            
             return $ bc { bc_chain = chain }
 
 genScriptConf :: TCKRConf -> Block -> IO ScriptConf
@@ -350,7 +460,7 @@ addBlockFail bc@(BlockChain {
                                 findTxId tx_state txid
 
                             bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
-                                blockWithHash chain branch (locatorToHash locator)
+                                branchWithHash chain branch (locatorToHash locator)
                             
                             bnode <-
                                 -- special case -> outpoint is in the current block
@@ -403,6 +513,12 @@ addBlockFail bc@(BlockChain {
             -- all check passed
             -- write the block into the block database
             saveBlock chain branch
+
+            -- update fork deploy status
+            if isMainBranch chain branch then
+                updateForkDeploy bc branch
+            else
+                return ()
 
             if chain `hasBlockInOrphan` block then
                 return $ bc { bc_chain = removeOrphan chain block }

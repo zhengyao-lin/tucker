@@ -167,3 +167,5 @@ lookupAsIO :: (Encodable k, Decodable v') => DBBucket k v -> k -> IO (Maybe v')
 lookupAsIO (DBBucket pref db) k = do
     mres <- lookupIO db (pref <> encodeLE k)
     return (decodeFailLE <$> mres)
+
+type DBEntry = DBBucket Placeholder
