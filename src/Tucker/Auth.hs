@@ -115,6 +115,7 @@ data ECCPublicKey = ECCPublicKey {
         x_coord    :: Integer,
         y_coord    :: Integer
     } deriving (Eq, Show)
+
 data ECCSignature = ECCSignature Integer Integer deriving (Eq, Show)
 
 type WIF = String
@@ -205,7 +206,7 @@ instance Decodable ECCSignature where
 
         case res of
             ASN1Sequence [ ASN1Integer r, ASN1Integer s ]
-                -> return (ECCSignature r s)
+                -> return (ECCSignature (toUnsigned r) (toUnsigned s))
 
             _ -> fail ("wrong DER encoding result: " ++ show res ++
                        ", raw: " ++ show bs)

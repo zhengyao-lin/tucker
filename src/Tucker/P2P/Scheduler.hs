@@ -94,7 +94,7 @@ removeFromBlacklist (Scheduler {
 newScheduler :: NodeTask t
              => MainLoopEnv -> Int
              -> (Scheduler t -> IO [(Node, t)])
-             -> (Scheduler t -> [t] -> IO [(Node, t)])
+             -> (Scheduler t -> [t] -> [Node] -> IO [(Node, t)])
              -> (Scheduler t -> [t] -> IO [(Node, t)])
              -> IO (Scheduler t)
 newScheduler env timeout_s init_assign reassign failed_reassign = do
@@ -161,14 +161,14 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                         if not $ null slow then do
                             -- we have slow nodes!
                             -- add them to the blacklist
-                            appA (`SET.union` SET.fromList slow_nodes) blacklist_var
+                            new_blacklist <- appA (`SET.union` SET.fromList slow_nodes) blacklist_var
 
                             -- retry tasks of slow nodes
                             let retry_tasks = map snd slow
 
                             -- nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
 
-                            new_assign <- reassign sched retry_tasks
+                            new_assign <- reassign sched retry_tasks (SET.toList new_blacklist)
 
                             if null new_assign then do
                                 -- failed to assign

@@ -30,15 +30,17 @@ import Tucker.Msg.ScriptOp
 
 data ScriptConf =
     ScriptConf {
-        script_enable_strict :: Bool,
-        script_enable_p2sh   :: Bool,
-        script_enable_trace  :: Bool,
-        script_enable_csv    :: Bool
+        script_enable_disabled_op        :: Bool,
+        script_enable_unordered_multisig :: Bool,
+        script_enable_p2sh               :: Bool,
+        script_enable_trace              :: Bool,
+        script_enable_csv                :: Bool
     } deriving (Show)
 
 instance Default ScriptConf where
     def = ScriptConf {
-        script_enable_strict = False,
+        script_enable_disabled_op = False,
+        script_enable_unordered_multisig = True,
         script_enable_p2sh = True,
         script_enable_trace = True,
         script_enable_csv = False
@@ -264,14 +266,12 @@ eocS = do
 
     return (pc >= length code)
 
--- verifyFail public_key_encoded message signature_encoded
-verifyFail :: ByteString -> ByteString -> ByteString -> Bool
-verifyFail pub' msg sig =
+-- checkSig public_key_encoded message signature_encoded
+checkSig :: ByteString -> ByteString -> ByteString -> Bool
+checkSig pub' msg sig =
     -- NOTE: final hash is encoded in big-endian
     case decodeAllBE pub' of
-        Right pub ->
-            let res = verifySHA256DER pub msg sig in
-            trace (show (res, pub', sig, sha256 msg)) $ res == Right True
+        Right pub -> verifySHA256DER pub msg sig == Right True
         Left err -> False
 
 unaryOpS :: (StackItemValue a, StackItemValue b)
@@ -329,7 +329,7 @@ evalOpS OP_CHECKSIG = do
     msg <- rawSigHashS sig'
 
     -- there is one byte(hash type) appended to the signature
-    pushS (verifyFail pub' msg (BSR.init sig'))
+    pushS (checkSig pub' msg (BSR.init sig'))
 
 evalOpS OP_CHECKSIGVERIFY =
     evalOpS OP_CHECKSIG >>
@@ -351,20 +351,24 @@ evalOpS OP_CHECKMULTISIG = do
     -- messages for signing
     msgs <- mapM rawSigHashS sig's
 
-    -- traceM (show (pub's, sig's))
+    traceM (show (map hex pub's, map hex sig's))
+
+    enable_um <- confS script_enable_unordered_multisig
 
     let sigs = map BSR.init sig's
 
         -- indices of successful match of public keys
         match =
             flip map (zip msgs sigs) $ \(msg, sig) ->
-                findIndex (\pub' -> verifyFail pub' msg sig) pub's
+                findIndex (\pub' -> checkSig pub' msg sig) pub's
 
         final = maybeCat match
 
         succ = length final == length match &&
-               ascending final -- public keys are in the right order
-    
+               (enable_um || ascending final) -- public keys are in the right order
+
+    traceM (show match)
+
     -- for compatibility with a historical bug
     popS :: EvalState ByteString
 
@@ -574,10 +578,10 @@ checkValidOp op = do
     else
         return ()
 
-    strict <- confS script_enable_strict
+    use_disabled <- confS script_enable_disabled_op
 
-    if strict && op `elem` disabled_ops then
-        throwMT ("(strict mode)disabled op " ++ show op)
+    if use_disabled && op `elem` disabled_ops then
+        throwMT ("(non-strict mode)disabled op " ++ show op)
     else
         return op
 
@@ -661,6 +665,9 @@ specialScript :: ScriptState -> [[ScriptOp]] -> Either TCKRError ScriptState
 specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     if script_enable_p2sh (script_conf s) then do
         redeem_script <- decodeAllLE redeem
+
+        traceM (show redeem_script)
+        
         ns <- toTCKRErrorM (execStateT popS' s) -- pop out result first
         execEval ns redeem_script -- exec on redeem script
     else

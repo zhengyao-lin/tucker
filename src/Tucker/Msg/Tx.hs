@@ -423,7 +423,8 @@ sigRawTx tx idx' subscript htype =
 
     in
         -- trace (show final_tx) $
-        trace (show (encodeLE final_tx <> encodeLE raw_htype)) $ encodeLE final_tx <> encodeLE raw_htype
+        -- trace (show (sha256 $ encodeLE final_tx <> encodeLE raw_htype)) $
+        encodeLE final_tx <> encodeLE raw_htype
         -- trace (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ sha256 $ sha256 final_str
 

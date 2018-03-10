@@ -12,7 +12,9 @@ import Data.LargeWord
 import qualified Data.Monoid as MND
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
+import qualified Data.ByteString.Lazy as LBSR
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Builder as BSB
 
 import Control.Monad
 import Control.Exception
@@ -144,8 +146,23 @@ encodeVWord end num =
         BigEndian -> BSR.dropWhile (== 0) res
     where res = encodeVInt' end (fi num)
 
+encodeFixed :: (Integral a, Integral b) => (b -> BSB.Builder) -> a -> ByteString
+encodeFixed t = LBSR.toStrict . BSB.toLazyByteString . t . fi
+
 -- encode int to a fixed-size string(will truncate/fill the resultant string)
 encodeInt :: (Integral t, Bits t) => Int -> Endian -> t -> ByteString
+
+encodeInt 1 _ num = encodeFixed BSB.int8 num
+
+encodeInt 2 LittleEndian num = encodeFixed BSB.int16LE num
+encodeInt 2 BigEndian num    = encodeFixed BSB.int16BE num
+
+encodeInt 4 LittleEndian num = encodeFixed BSB.int32LE num
+encodeInt 4 BigEndian num    = encodeFixed BSB.int32BE num
+
+encodeInt 8 LittleEndian num = encodeFixed BSB.int64LE num
+encodeInt 8 BigEndian num    = encodeFixed BSB.int64BE num
+
 encodeInt nbyte end num =
     if diff > 0 then -- fill
         if num < 0 then BSR.replicate diff 0xff `fill` res
@@ -180,6 +197,12 @@ decodeVInt end bs =
 -- similar to above, but doesn't care about the sign
 decodeVWord :: Integral t => Endian -> ByteString -> t
 decodeVWord end bs = fi (decodeInt' 0 end bs)
+
+-- turn a negative Integer to a unsigned positive Integer
+toUnsigned :: Integer -> Integer
+toUnsigned int =
+    if int >= 0 then int
+    else decodeVWord LittleEndian (encodeVInt LittleEndian int)
 
 -- little-endian
 bs2vwordLE :: ByteString -> Integer

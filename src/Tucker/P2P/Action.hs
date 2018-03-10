@@ -170,12 +170,12 @@ sync env n = do
 
         action sched = NormalAction (syncChain (taskDone sched))
          
-        reassign sched =
-            envSpreadAction env (const [action sched])
+        reassign sched tasks blacklist =
+            envSpreadActionExcept blacklist env (const [action sched]) tasks
 
     newScheduler env
         (tckr_sync_inv_timeout (global_conf env))
-        (flip reassign (replicate n NullTask)) -- init assign
+        (\sched -> reassign sched (replicate n NullTask) []) -- init assign
         reassign -- reassign
         $ \sched _ -> do -- fail
             envMsg env "failed to find active nodes to sync inventory"
@@ -241,14 +241,13 @@ scheduleFetch env init_hashes callback = do
     added_var <- newA 0 :: IO (Atom (Int))
     let total = length tarray
 
-    let reassign sched = doFetch sched . fetchTaskToHashes . mconcat
+    let reassign sched task blacklist =
+            doFetch sched (fetchTaskToHashes (mconcat task)) blacklist
 
-        doFetch sched hashes = do
-            blacklist <- getA (blacklist sched)
-
+        doFetch sched hashes blacklist =
             envSpreadActionExcept
-                (SET.toList blacklist) env
-                ((:[]) . NormalAction . fetchBlock) $
+                blacklist env
+                (\task -> [NormalAction (fetchBlock task)]) $
                 buildFetchTasks (tckr_max_block_task conf) hashes (taskDone sched)
 
         taskDone sched node task results = do
@@ -346,9 +345,9 @@ scheduleFetch env init_hashes callback = do
                     return ()
 
     newScheduler env (tckr_block_fetch_timeout conf)
-        (flip doFetch init_hashes) -- init assign
+        (\sched -> doFetch sched init_hashes []) -- init assign
         reassign -- reassign
-        (\sched tasks -> clearBlacklist sched >> reassign sched tasks) -- fail
+        (\sched tasks -> clearBlacklist sched >> reassign sched tasks []) -- fail
 
     return ()
 
