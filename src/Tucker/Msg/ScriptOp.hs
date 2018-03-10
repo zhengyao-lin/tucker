@@ -135,6 +135,8 @@ data ScriptOp
 
     | OP_EOC -- end of code
 
+    | OP_UNKNOWN Word8 -- unknown byte(should not fail on the decoding phase)
+
     -- for test ues
     | OP_PRINT String deriving (Eq, Show)
 
@@ -299,6 +301,8 @@ instance Encodable ScriptOp where
     encode _ (OP_ELSE _)  = bchar 0x67
     encode _ OP_ENDIF = bchar 0x68
 
+    encode _ (OP_UNKNOWN b) = bchar b
+
     -- one-byte ops
     encode _ op
         | op `elem` one_byte_op_index =
@@ -369,17 +373,29 @@ oneByteOpD = do
         Just op -> return op
         _ -> fail "not a one-byte op"
 
+unknownD :: Decoder ScriptOp
+unknownD = do
+    i <- byteD
+
+    if i `notElem` [ 0x67, 0x68 ] then
+        return (OP_UNKNOWN i)
+    else
+        fail "OP_ELSE/OP_ENDIF without an OP_IF/OP_NOTIF"
+
 stmtD :: Decoder [ScriptOp]
-stmtD = opIfD <|> ((:[]) <$> (opPushdataD <|> opConstD <|> oneByteOpD))
+stmtD =
+    opIfD <|> do
+        other <- opPushdataD <|> opConstD <|> oneByteOpD <|> unknownD
+        return [other]
 
 stmtsD :: Decoder [ScriptOp]
 stmtsD = concat <$> many stmtD
 
 instance Decodable [ScriptOp] where
     decoder = do
+        all <- getD
         res <- stmtsD
         len <- lenD
-        all <- getD
 
         if len /= 0 then
             fail $ "failed to parse " ++ show (hex all) -- reparse and output the last errors
@@ -389,3 +405,6 @@ instance Decodable [ScriptOp] where
 -- extractValidCode :: [ScriptOp] -> [ScriptOp]
 -- extractValidCode ops =
 --     last $ splitOn [OP_CODESEPARATOR] ops
+
+-- error when adding block Block 000000000017538a71d012de3a73fcc22415b2aabf7329133c0109aa0a75b4b4: tucker error: tucker error: failed to parse "63BAC0D0E0F0F1F2F3F3F4FF675168"
+-- 63 BAC0D0E0F0F1F2F3F3F4FF6751 68

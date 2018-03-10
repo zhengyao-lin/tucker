@@ -75,6 +75,7 @@ changeForkStatus (SoftForkState {
     bucket_fork = bucket_fork
 }) fork status = do
     traceM ("!!! changing the status fork " ++ show fork ++ " to " ++ show status)
+    error "i wanna die!!!"
 
     forks <- maybe [] id <$> lookupIO bucket_fork bit
 

@@ -65,16 +65,16 @@ data TxPayload =
         txid        :: Hash256,
         wtxid       :: Hash256,
 
-        version     :: Int32,
+        version     :: Word32,
         flag        :: Word8, -- currently only 1 or 0
         
         tx_in       :: [TxInput],
         tx_out      :: [TxOutput],
         tx_witness  :: [TxWitness],
 
-        lock_time   :: Int32  -- the earliest time the tx can be used
-                              -- if lock_time < 500,000,000, treat it as a block height
-                              -- if lock_time >= 500,000,000, treat it as an unix timestamp
+        lock_time   :: Word32  -- the earliest time the tx can be used
+                               -- if lock_time < 500,000,000, treat it as a block height
+                               -- if lock_time >= 500,000,000, treat it as an unix timestamp
         -- tx_cache    :: Maybe ByteString
     } deriving (Show)
 
@@ -423,7 +423,7 @@ sigRawTx tx idx' subscript htype =
 
     in
         -- trace (show final_tx) $
-        encodeLE final_tx <> encodeLE raw_htype
+        trace (show (encodeLE final_tx <> encodeLE raw_htype)) $ encodeLE final_tx <> encodeLE raw_htype
         -- trace (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ sha256 $ sha256 final_str
 

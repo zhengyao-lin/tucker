@@ -89,7 +89,7 @@ data TCKRConf =
         -- max number of hashes to send when trying to sync witht the network
 
         tckr_block_tree_path :: FilePath,
-        tckr_max_block_per_chunk :: Int,
+        
         tckr_max_tree_insert_depth :: Int, -- max search depth when inserting a block
 
         tckr_fetch_dup_node  :: Int,
@@ -188,8 +188,8 @@ tucker_default_conf_mainnet = do
         tckr_known_inv_count = 8,
 
         tckr_block_tree_path = "test.block.d",
-        tckr_max_block_per_chunk = 2048,
-        tckr_max_tree_insert_depth = 50,
+
+        tckr_max_tree_insert_depth = 128,
 
         tckr_max_block_batch = 500,
         -- receive 200 blocks a time(if inv is greater than that, trim the tail)
@@ -234,11 +234,6 @@ tucker_default_conf_mainnet = do
                 fork_status = FORK_STATUS_DEFINED
             }
         ]
-
-        -- the collector will wait until the top chunk
-        -- has (tckr_max_block_per_chunk + tckr_max_tree_insert_depth)
-        -- blocks and split & seal the previous (tckr_max_tree_insert_depth)
-        -- chunk, while create a new chunk for tckr_max_tree_insert_depth
     }
 
     where
@@ -258,5 +253,23 @@ tucker_default_conf_testnet3 = do
     
         tckr_use_special_min_diff = True,
 
-        tckr_p2sh_enable_time = 1329264000
+        tckr_p2sh_enable_time = 1329264000,
+
+        tckr_soft_forks = [
+            SoftFork {
+                fork_name = "csv",
+                fork_bit = 0,
+                fork_start = 1456761600,
+                fork_timeout = 1493568000,
+                fork_status = FORK_STATUS_DEFINED
+            },
+            
+            SoftFork {
+                fork_name = "segwit",
+                fork_bit = 1,
+                fork_start = 1462032000,
+                fork_timeout = 1493568000,
+                fork_status = FORK_STATUS_DEFINED
+            }
+        ]
     }

@@ -262,6 +262,28 @@ if height % 2016 == 0 and the block is in the main branch then
             _ -> nothing
 -}
 
+{-
+
+Notes on BIP 68
+
+1. redesigned purpose of sequence field
+
+disable                type
+flag 31                flag 22              value(0-15)
+[     ][][][][][][][][][     ][][][][][][]  [][][][][][][][][][][][][][][]
+
+if type == 1 then
+    value has unit 512 sec
+else
+    value is the number of blocks
+
+
+the tx must not be a coinbase
+
+
+
+-}
+
 hashTargetValid :: BlockChain -> Branch -> IO Bool
 hashTargetValid bc@(BlockChain {
     bc_conf = conf,
@@ -481,6 +503,8 @@ addBlockFail bc@(BlockChain {
                             expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
                                 prev_tx_idx /= 0 ||
                                 cur_height branch - cur_height bnode >= fi (tckr_coinbase_maturity conf)
+
+                            -- checkTxInput 
 
                             script_conf <- genScriptConf conf (block_data bnode)
 

@@ -32,14 +32,16 @@ data ScriptConf =
     ScriptConf {
         script_enable_strict :: Bool,
         script_enable_p2sh   :: Bool,
-        script_enable_trace  :: Bool
+        script_enable_trace  :: Bool,
+        script_enable_csv    :: Bool
     } deriving (Show)
 
 instance Default ScriptConf where
     def = ScriptConf {
         script_enable_strict = False,
         script_enable_p2sh = True,
-        script_enable_trace = False
+        script_enable_trace = True,
+        script_enable_csv = False
     }
 
 type StackItem = ByteString
@@ -266,9 +268,10 @@ eocS = do
 verifyFail :: ByteString -> ByteString -> ByteString -> Bool
 verifyFail pub' msg sig =
     -- NOTE: final hash is encoded in big-endian
-
     case decodeAllBE pub' of
-        Right pub -> verifySHA256DER pub msg sig == Right True
+        Right pub ->
+            let res = verifySHA256DER pub msg sig in
+            trace (show (res, pub', sig, sha256 msg)) $ res == Right True
         Left err -> False
 
 unaryOpS :: (StackItemValue a, StackItemValue b)
@@ -490,39 +493,52 @@ evalOpS OP_CODESEPARATOR =
         last_cs_op = prog_count s
     })
 
-evalOpS OP_CHECKLOCKTIMEVERIFY = return ()
-    -- lt <- peekS
-    -- in_idx <- tx_in_idx <$> get
-    -- cur_tx <- curTxS
+evalOpS OP_CHECKLOCKTIMEVERIFY = do
+    csv <- confS script_enable_csv
 
-    -- let lt1 = lock_time cur_tx
-    --     sequence = seqn (tx_in cur_tx !! fi in_idx)
+    if csv then do
+        return ()
+        -- lt <- peekS
+        -- in_idx <- tx_in_idx <$> get
+        -- cur_tx <- curTxS
 
-    -- assertMT "invalid locktime value" $ not $
-    --     lt < 0 ||
-    --     ((lt <= 500000000) /= (lt1 <= 500000000)) ||
-    --     sequence == 0xffffffff
+        -- let lt1 = lock_time cur_tx
+        --     sequence = seqn (tx_in cur_tx !! fi in_idx)
 
-    -- assertMT "unmatched locktime" $
-    --     fi lt <= lt1
+        -- assertMT "invalid locktime value" $ not $
+        --     lt < 0 ||
+        --     ((lt <= 500000000) /= (lt1 <= 500000000)) ||
+        --     sequence == 0xffffffff
 
-evalOpS OP_CHECKSEQUENCEVERIFY = return ()
-    -- in_idx <- tx_in_idx <$> get
-    -- cur_tx <- curTxS
-    -- out_tx <- outTxS
-    -- span   <- peekS
+        -- assertMT "unmatched locktime" $
+        --     fi lt <= lt1
+    else
+        -- treated as OP_NOP2
+        return ()
+
+evalOpS OP_CHECKSEQUENCEVERIFY = do
+    csv <- confS script_enable_csv
     
-    -- let sequence = seqn (tx_in cur_tx !! fi in_idx)
-    --     lt0 = lock_time out_tx
-    --     lt1 = lock_time cur_tx
+    if csv then do
+        return ()
+        -- in_idx <- tx_in_idx <$> get
+        -- cur_tx <- curTxS
+        -- out_tx <- outTxS
+        -- span   <- peekS
+        
+        -- let sequence = seqn (tx_in cur_tx !! fi in_idx)
+        --     lt0 = lock_time out_tx
+        --     lt1 = lock_time cur_tx
 
-    -- assertMT "invalid span/locktime" $ not $
-    --     span < 0 ||
-    --     not (span .&. (1 `shiftL` 31) == 0 &&
-    --          (version cur_tx < 2 ||
-    --           sequence .&. (1 `shiftL` 31) /= 0 ||
-    --           (lt0 <= 500000000) /= (lt1 <= 500000000) ||
-    --           fi span > lt1 - lt0))
+        -- assertMT "invalid span/locktime" $ not $
+        --     span < 0 ||
+        --     not (span .&. (1 `shiftL` 31) == 0 &&
+        --         (version cur_tx < 2 ||
+        --         sequence .&. (1 `shiftL` 31) /= 0 ||
+        --         (lt0 <= 500000000) /= (lt1 <= 500000000) ||
+        --         fi span > lt1 - lt0))
+    else
+        return ()
 
 evalOpS (OP_PRINT msg) = traceM msg
 
@@ -537,6 +553,9 @@ evalOpS OP_NOP10 = return ()
 
 -- end of code
 evalOpS OP_EOC = return ()
+
+evalOpS (OP_UNKNOWN byte) =
+    throwMT ("OP_UNKNOWN " ++ show byte ++ " executed")
 
 evalOpS op = error $ "unimplemented " ++ show op
 
