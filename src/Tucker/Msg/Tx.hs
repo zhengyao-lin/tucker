@@ -371,8 +371,8 @@ stripWitness tx =
 
 -- 1. set all inputs except the current's sequence to 0 if NONE || SINGLE
 
-sigRawTx :: TxPayload -> Word32 -> [ScriptOp] -> HashType -> ByteString
-sigRawTx tx idx' subscript htype =
+txSigHash :: TxPayload -> Word32 -> [ScriptOp] -> HashType -> ByteString
+txSigHash tx idx' subscript htype =
     let hash_none = hasHashType htype SIGHASH_NONE
         hash_single = hasHashType htype SIGHASH_SINGLE
         hash_anyonecanpay = hasHashType htype SIGHASH_ANYONECANPAY
@@ -389,9 +389,14 @@ sigRawTx tx idx' subscript htype =
         raw_htype = hashTypeToInt htype :: Word32
 
         input = tx_in tx !! idx
-        output = assertT "SIGHASH_SINGLE needs more outputs"
-                         (length (tx_out tx) > idx)
-                         (tx_out tx !! idx) -- ONLY used when hash_single
+
+        -- output = assertT "SIGHASH_SINGLE needs more outputs"
+        --                  (length (tx_out tx) > idx)
+        --                  (tx_out tx !! idx) -- ONLY used when hash_single
+        invalid_sighash_single =
+            hash_single && length (tx_out tx) <= idx
+
+        output = tx_out tx !! idx
 
         new_input = input {
             -- replace the corresponding sig_script
@@ -420,11 +425,16 @@ sigRawTx tx idx' subscript htype =
             tx_in = new_inputs,
             tx_out = new_outputs
         }
-
     in
-        -- trace (show htype) $
-        -- trace (show (sha256 $ encodeLE final_tx <> encodeLE raw_htype)) $
-        encodeLE final_tx <> encodeLE raw_htype
+        if invalid_sighash_single then
+            -- when ninput > noutput and sighash_single is declared
+            -- the hash value 1 is signed
+            encodeLE (1 :: Hash256)
+        else
+            -- trace (show htype) $
+            -- trace (show final_tx) $
+            -- trace (show (hex $ encodeLE final_tx <> encodeLE raw_htype)) $
+            sha256 $ sha256 $ encodeLE final_tx <> encodeLE raw_htype
         -- trace (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ sha256 $ sha256 final_str
 

@@ -6,9 +6,6 @@
 
 module Tucker.Auth where
 
-import Crypto.Hash (hash, Digest)
-import Crypto.Hash.Algorithms
-
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -17,8 +14,14 @@ import qualified Data.ByteArray as BA
 import Crypto.Error
 import Crypto.PubKey.ECC.P256
 import Crypto.PubKey.ECC.Types
-import Crypto.PubKey.ECC.ECDSA
 import Crypto.PubKey.ECC.Generate
+
+import Crypto.PubKey.ECC.ECDSA hiding (sign, verify)
+import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
+
+import Crypto.Hash (hash, Digest)
+import Crypto.Hash.NoHash
+import Crypto.Hash.Algorithms
 
 import Data.ASN1.Types
 import Data.ASN1.BitArray
@@ -44,13 +47,13 @@ ba2bs :: BA.ByteArrayAccess a => a -> ByteString
 ba2bs = BA.convert
 
 sha256 :: ByteString -> ByteString -- BA.ByteArrayAccess a => a -> Digest SHA256
-sha256 = ba2bs . (hash :: BA.ByteArrayAccess a => a -> Digest SHA256)
+sha256 dat = ba2bs (hash dat :: Digest SHA256)
 
 sha1 :: ByteString -> ByteString
-sha1 = ba2bs . (hash :: BA.ByteArrayAccess a => a -> Digest SHA1)
+sha1 dat = ba2bs (hash dat :: Digest SHA1)
 
 ripemd160 :: ByteString -> ByteString
-ripemd160 = ba2bs . (hash :: BA.ByteArrayAccess a => a -> Digest RIPEMD160)
+ripemd160 dat = ba2bs (hash dat :: Digest RIPEMD160)
 
 base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -303,23 +306,23 @@ gen conf = do
     return (wif, addr)
 
 -- hash & sign
-signSHA256 :: ECCPrivateKey -> ByteString -> IO ECCSignature
-signSHA256 (ECCPrivateKey num) msg = do
+sign :: ECCPrivateKey -> ByteString -> IO ECCSignature
+sign (ECCPrivateKey num) msg = do
     let privk = PrivateKey tucker_curve num
-    Signature r s <- sign privk SHA256 msg
+    Signature r s <- ECDSA.sign privk NoHash256 msg
     return $ ECCSignature r s
 
-verifySHA256 :: ECCPublicKey -> ByteString -> ECCSignature -> Bool
-verifySHA256 (ECCPublicKey _ x y) msg (ECCSignature r s) =
-    verify SHA256 pubk (Signature r s) msg
+verify :: ECCPublicKey -> ByteString -> ECCSignature -> Bool
+verify (ECCPublicKey _ x y) msg (ECCSignature r s) =
+    ECDSA.verify NoHash256 pubk (Signature r s) msg
     where pubk = PublicKey tucker_curve (Point x y)
 
-signSHA256DER :: ECCPrivateKey -> ByteString -> IO ByteString
-signSHA256DER priv msg = do
-    sig <- signSHA256 priv msg
+signDER :: ECCPrivateKey -> ByteString -> IO ByteString
+signDER priv msg = do
+    sig <- sign priv msg
     return $ encodeBE sig
 
-verifySHA256DER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Bool
-verifySHA256DER pub msg sig_enc = do
+verifyDER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Bool
+verifyDER pub msg sig_enc = do
     sig <- decodeAllBE sig_enc
-    return $ verifySHA256 pub msg sig
+    return $ verify pub msg sig

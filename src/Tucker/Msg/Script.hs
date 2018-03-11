@@ -223,23 +223,29 @@ pkScriptS = do
 
 -- ONE time SHA256 hash of the raw tx body for signature
 -- require the raw signature with the htype byte appended
-rawSigHashS :: ByteString -> EvalState ByteString
-rawSigHashS sig_raw = do
+txSigHashS :: [ByteString] -> ByteString -> EvalState ByteString
+txSigHashS all_sigs sig_raw = do
     cur_tx   <- curTxS
     in_idx   <- tx_in_idx <$> get
     cs_op    <- last_cs_op <$> get
     code     <- prog_code <$> get
 
+    -- traceM ("wulala " ++ show (intToHashType (BSR.last sig_raw)))
+
     let -- turn the current code(should be pk_script) to subscript
         -- that is used in signature
         -- defined as from the last EXECUTED OP_CODESEPARATOR to the end
-        -- with all OP_CODESEPARATOR's removed
+        -- with all OP_CODESEPARATORs and signatures removed
         -- (https://en.bitcoin.it/w/images/en/7/70/Bitcoin_OpCheckSig_InDetail.png)
-        subscr = filter (/= OP_CODESEPARATOR) . drop (cs_op + 1)
+
+        should_keep OP_CODESEPARATOR = False
+        should_keep (OP_PUSHDATA dat) = dat `notElem` all_sigs
+        should_keep _ = True
+
+        subscr = filter should_keep . drop (cs_op + 1)
          
         htype = intToHashType (BSR.last sig_raw)
-        rawtx = sigRawTx cur_tx in_idx (subscr code) htype
-        hash = sha256 rawtx
+        hash = txSigHash cur_tx in_idx (subscr code) htype
         -- NOTE: only sha256 it ONCE because there's another
         -- hashing in the verification process
 
@@ -282,9 +288,10 @@ eocS = do
 -- checkSig public_key_encoded message signature_encoded
 checkSig :: ByteString -> ByteString -> ByteString -> Bool
 checkSig pub' msg sig =
+    -- trace ("CHECKSIG " ++ show (pub', msg, sig)) $
     -- NOTE: final hash is encoded in big-endian
     case decodeAllBE pub' of
-        Right pub -> verifySHA256DER pub msg sig == Right True
+        Right pub -> verifyDER pub msg sig == Right True
         Left err -> False
 
 unaryOpS :: (StackItemValue a, StackItemValue b)
@@ -339,7 +346,7 @@ evalOpS OP_HASH256 = unaryOpS (sha256 . sha256)
 
 evalOpS OP_CHECKSIG = do
     (pub', sig') <- pop2S
-    msg <- rawSigHashS sig'
+    msg <- txSigHashS [sig'] sig'
 
     -- there is one byte(hash type) appended to the signature
     pushS (checkSig pub' msg (BSR.init sig'))
@@ -361,30 +368,41 @@ evalOpS OP_CHECKMULTISIG = do
     assertMT "illegal m in checkmultisig"
         (m >= 0 && m <= max_pubkeys)
 
-    sig's <- popNS $ fi m
+    sig's <- reverse <$> (popNS (fi m))
 
     -- messages for signing
-    msgs <- mapM rawSigHashS sig's
+    msgs <- mapM (txSigHashS sig's) sig's
 
-    let sigs = reverse (map BSR.init sig's)
+    let sigs = map BSR.init sig's
+
+        match r@(idx, rest_pub's) =
+            let msg = msgs !! idx
+                sig = sigs !! idx
+                nres =
+                    -- trace (show (hex sig, map hex rest_pub's)) $
+                    dropWhile (\pub' -> not (checkSig pub' msg sig)) rest_pub's
+
+            in if idx < length sigs then
+                if null nres then (idx, []) -- no matching, failed
+                else (idx + 1, tail nres) -- matched, continue
+            else
+                (idx, []) -- all matched, return
 
         -- indices of successful match of public keys
-        match =
-            flip map (zip msgs sigs) $ \(msg, sig) ->
-                findIndex (\pub' -> checkSig pub' msg sig) pub's
+        (matched, _) =
+            head $ dropWhile (not . null . snd) $
+            iterate match (0, pub's)
 
-        final = maybeCat match
+            -- flip map (zip msgs sigs) $ \(msg, sig) ->
+            --     findIndex (\pub' -> checkSig pub' msg sig) pub's
 
-        succ = length final == length match &&
-               ascending final -- public keys are in the right order
-
-    -- traceM (show (map hex pub's, map hex sigs))
-    -- traceM (show match)
+    -- traceM (show (m, n, map hex pub's, map hex sigs))
+    -- traceM (show matched)
 
     -- for compatibility with a historical bug
     popS :: EvalState ByteString
 
-    pushS succ
+    pushS (matched == length sigs)
 
 evalOpS OP_CHECKMULTISIGVERIFY =
     evalOpS OP_CHECKMULTISIG >>
