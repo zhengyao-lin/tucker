@@ -31,19 +31,19 @@ import Tucker.Msg.ScriptOp
 data ScriptConf =
     ScriptConf {
         script_enable_disabled_op        :: Bool,
-        script_enable_unordered_multisig :: Bool,
         script_enable_p2sh               :: Bool,
         script_enable_trace              :: Bool,
-        script_enable_csv                :: Bool
+        script_enable_csv                :: Bool,
+        script_max_pubkeys_per_multisig  :: Int
     } deriving (Show)
 
 instance Default ScriptConf where
     def = ScriptConf {
         script_enable_disabled_op = False,
-        script_enable_unordered_multisig = True,
         script_enable_p2sh = True,
-        script_enable_trace = True,
-        script_enable_csv = False
+        script_enable_trace = False,
+        script_enable_csv = False,
+        script_max_pubkeys_per_multisig = 20
     }
 
 type StackItem = ByteString
@@ -208,6 +208,19 @@ outTxS = out_tx <$> get
 stackS :: EvalState [StackItem]
 stackS = eval_stack <$> get
 
+pkScriptS :: EvalState [ScriptOp]
+pkScriptS = do
+    cur_tx   <- curTxS
+    out_tx   <- outTxS
+    in_idx   <- tx_in_idx <$> get
+
+    let OutPoint _ out_idx = prev_out (tx_in cur_tx !! fi in_idx)
+        script = pk_script (tx_out out_tx !! fi out_idx)
+
+    case decodeAllLE script of
+        Right ops -> return ops
+        Left err -> throwMT ("wrong decoding for pk_script " ++ show err)
+
 -- ONE time SHA256 hash of the raw tx body for signature
 -- require the raw signature with the htype byte appended
 rawSigHashS :: ByteString -> EvalState ByteString
@@ -336,26 +349,24 @@ evalOpS OP_CHECKSIGVERIFY =
     evalOpS OP_VERIFY
 
 evalOpS OP_CHECKMULTISIG = do
-    n' <- popS -- total number of possible keys
-    let n = decodeFailLE n' :: Word8
-    assertMT "illegal n in checkmultisig" (BSR.length n' == 1 && n > 0 && n <= 16)
+    max_pubkeys <- fi <$> confS script_max_pubkeys_per_multisig
 
-    pub's <- popNS $ fi n
+    n <- popS -- total number of possible keys
+    assertMT "illegal n in checkmultisig"
+        (n >= 0 && n <= max_pubkeys)
 
-    m' <- popS -- number of signatures must be provided
-    let m = decodeFailLE m' :: Word8
-    assertMT "illegal m in checkmultisig" (BSR.length m' == 1 && m > 0 && m <= 16)
+    pub's <- reverse <$> (popNS (fi n))
+
+    m <- popS -- number of signatures must be provided
+    assertMT "illegal m in checkmultisig"
+        (m >= 0 && m <= max_pubkeys)
 
     sig's <- popNS $ fi m
 
     -- messages for signing
     msgs <- mapM rawSigHashS sig's
 
-    traceM (show (map hex pub's, map hex sig's))
-
-    enable_um <- confS script_enable_unordered_multisig
-
-    let sigs = map BSR.init sig's
+    let sigs = reverse (map BSR.init sig's)
 
         -- indices of successful match of public keys
         match =
@@ -365,9 +376,10 @@ evalOpS OP_CHECKMULTISIG = do
         final = maybeCat match
 
         succ = length final == length match &&
-               (enable_um || ascending final) -- public keys are in the right order
+               ascending final -- public keys are in the right order
 
-    traceM (show match)
+    -- traceM (show (map hex pub's, map hex sigs))
+    -- traceM (show match)
 
     -- for compatibility with a historical bug
     popS :: EvalState ByteString
@@ -666,7 +678,7 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     if script_enable_p2sh (script_conf s) then do
         redeem_script <- decodeAllLE redeem
 
-        traceM (show redeem_script)
+        -- traceM (show redeem_script)
         
         ns <- toTCKRErrorM (execStateT popS' s) -- pop out result first
         execEval ns redeem_script -- exec on redeem script

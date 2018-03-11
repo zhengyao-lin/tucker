@@ -259,7 +259,7 @@ disabled_ops = [
 
 instance Encodable ScriptOp where
     encode _ (OP_PUSHDATA dat) =
-        if len /= 0 && len <= 0x4b then
+        if len <= 0x4b then
             BSR.concat [ encodeLE (fromIntegral len :: Word8), dat ]
         else if len <= 0xff then
             BSR.concat [ bchar 0x4c, encodeLE (fromIntegral len :: Word8), dat ]

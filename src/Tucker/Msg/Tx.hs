@@ -219,7 +219,7 @@ instance Decodable TxPayload where
         version <- decoder
 
         mark <- peekByteD
-
+        
         flag <-
             if mark == 0 then byteD
             else return 0
@@ -422,7 +422,7 @@ sigRawTx tx idx' subscript htype =
         }
 
     in
-        -- trace (show final_tx) $
+        -- trace (show htype) $
         -- trace (show (sha256 $ encodeLE final_tx <> encodeLE raw_htype)) $
         encodeLE final_tx <> encodeLE raw_htype
         -- trace (show (prev, final_tx, hex final_str)) $
