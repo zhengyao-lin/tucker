@@ -81,30 +81,70 @@ instance Show Progress where
         else
             printf "progress %d received" recv'd
 
+instance Default Progress where
+    def = Progress 0 0
+
+data TransferState =
+    TransferState {
+        ping_delay         :: Word, -- in ms
+        cur_progress       :: Progress, -- download progress on the current msg(when last_seen)
+        last_seen          :: Timestamp,
+        recv_buf           :: ByteString, -- currently downloaded part
+
+        speed_test_begin   :: Timestamp,
+        total_download     :: Word64, -- total download from speed_test_begin to now
+        max_download_speed :: Word64 -- in bytes/s
+    }
+
+-- return if the ts1 is likely faster than ts2(GT) or other wise
+compareTransState :: TransferState -> TransferState -> Ordering
+compareTransState (TransferState {
+    max_download_speed = ds1,
+    ping_delay = ping1
+}) (TransferState {
+    max_download_speed = ds2,
+    ping_delay = ping2
+}) =
+    case compare ds1 ds2 of
+        EQ -> compare ping2 ping1 -- the result is reversed
+        r -> r
+
+instance Show TransferState where
+    show ts = printf "TransferState {ping_delay=%v,cur_progress=%v,max_download_speed=%v}"
+        (ping_delay ts) (show (cur_progress ts)) (max_download_speed ts)
+
+instance Default TransferState where
+    def = TransferState {
+        ping_delay = maxBound,
+        cur_progress = def,
+        last_seen = 0,
+        recv_buf = BSR.empty,
+
+        speed_test_begin = 0,
+        total_download = 0,
+        max_download_speed = 0
+    }
+
 data Node =
     Node {
-        conn_trans     :: Transport,
-        incoming       :: Bool,
+        conn_trans      :: Transport,
+        incoming        :: Bool,
 
-        thread_id      :: ThreadId,
-        sock_addr      :: SockAddr,
-        net_addr       :: NetAddr,
-        vers_payload   :: VersionPayload,
+        thread_id       :: ThreadId,
+        sock_addr       :: SockAddr,
+        net_addr        :: NetAddr,
+        vers_payload    :: VersionPayload,
 
-        recv_buf       :: Atom ByteString,
         -- msg_list       :: Atom [MsgHead], -- prepend
-        last_seen      :: Atom Word64,
-        cur_progress   :: Atom Progress,
-        -- download progress on the current msg(when last_seen)
 
-        blacklist_time :: Atom Int, -- how many times is the node blacklisted
+        blacklist_time  :: Atom Int, -- how many times is the node blacklisted
 
-        action_list    :: Atom [NodeAction],
-        new_action     :: Atom [NodeAction],
+        action_list     :: Atom [NodeAction],
+        new_action      :: Atom [NodeAction],
 
-        ping_delay     :: Atom Word, -- in ms
+        cur_trans_state :: Atom TransferState,
 
-        alive          :: Atom Bool
+        alive           :: Atom Bool
     }
 
 instance Eq Node where
@@ -189,37 +229,39 @@ initNode sock_addr trans = do
     timestamp    <- unixTimestamp
 
     -- vers_payload <- newA VersionPending -- version placeholder
-    recv_buf       <- newA $ BSR.empty
+    -- recv_buf       <- newA $ BSR.empty
     -- msg_list     <- newA []
-    last_seen      <- newA timestamp
-    cur_progress   <- newA $ Progress 0 (-1)
     blacklist_time <- newA 0
     action_list    <- newA [] -- nodeDefaultActionList
     new_action     <- newA []
-    ping_delay     <- newA maxBound -- max time in case the node doesn't reply
+
+    trans_state    <- newA def
+
     alive          <- newA True
 
     return $ Node {
-        conn_trans     = trans,
-        incoming       = False,
+        conn_trans      = trans,
+        incoming        = False,
 
-        thread_id      = undefined,
-        sock_addr      = sock_addr,
-        net_addr       = undefined,
-        vers_payload   = undefined,
+        thread_id       = undefined,
+        sock_addr       = sock_addr,
+        net_addr        = undefined,
+        vers_payload    = undefined,
 
-        recv_buf       = recv_buf,
+        -- recv_buf       = recv_buf,
         -- msg_list     = msg_list,
-        last_seen      = last_seen,
-        cur_progress   = cur_progress,
-        blacklist_time = blacklist_time,
+        -- last_seen      = last_seen,
+        -- cur_progress   = cur_progress,
+        blacklist_time  = blacklist_time,
 
-        action_list    = action_list,
-        new_action     = new_action,
+        action_list     = action_list,
+        new_action      = new_action,
 
-        ping_delay     = ping_delay,
+        -- ping_delay     = ping_delay,
 
-        alive          = alive
+        cur_trans_state = trans_state,
+
+        alive           = alive
     }
 
 envConf :: MainLoopEnv -> (TCKRConf -> t) -> t
@@ -236,8 +278,8 @@ nodeMsg env node msg = do
     envMsg env $ (show node) ++ ": " ++ msg
     return ()
 
-nodeLastSeen :: Node -> IO Word64
-nodeLastSeen = getA . last_seen
+nodeLastSeen :: Node -> IO Timestamp
+nodeLastSeen node = last_seen <$> getA (cur_trans_state node)
 
 nodeBlacklistTime :: Node -> IO Int
 nodeBlacklistTime = getA . blacklist_time
@@ -259,14 +301,20 @@ nodePrependActions node new_actions =
 nodeNetAddr :: Node -> IO NetAddr
 nodeNetAddr = return . net_addr
 
+nodeTransState :: Node -> IO TransferState
+nodeTransState = getA . cur_trans_state
+
+nodeChangeTransState :: Node -> (TransferState -> TransferState) -> IO ()
+nodeChangeTransState node f = appA f (cur_trans_state node) >> return ()
+
 nodeNetDelay :: Node -> IO Word
-nodeNetDelay = getA . ping_delay
+nodeNetDelay node = ping_delay <$> getA (cur_trans_state node)
 
 -- this function will filter out uninit nodes
 envAllNetDelay :: Integral t => MainLoopEnv -> IO [t]
 envAllNetDelay env =
     getA (node_list env) >>=
-    mapM (getA . ping_delay) >>=
+    mapM nodeNetDelay >>=
     (return . map fi . filter (/= maxBound))
 
 -- spread actions to nodes except the ones in the black list
@@ -279,12 +327,13 @@ envSpreadActionExcept blacklist env gen_action tasks = do
     alive_nodes <- filterM (getA . alive) nodes
     -- filter out dead nodes
 
-    delays <- mapM nodeNetDelay nodes
+    states <- mapM nodeTransState nodes
+    -- delays <- mapM nodeNetDelay nodes
 
     -- envMsg env $ "blacklist: " ++ show blacklist
 
-    let sorted = sortBy (\(d1, _) (d2, _) -> compare d1 d2)
-                        (zip delays alive_nodes)
+    let sorted = sortBy (\(d1, _) (d2, _) -> compareTransState d2 d1)
+                        (zip states alive_nodes)
         sorted_nodes =
             filter (`notElem` blacklist) $
             map snd sorted

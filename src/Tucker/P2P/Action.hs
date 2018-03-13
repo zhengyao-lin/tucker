@@ -100,7 +100,11 @@ pingDelay env node msg = do
     recv env node [] BTC_CMD_PONG $ \(PingPongPayload back_nonce) -> do
         if back_nonce == nonce then do
             end <- msCPUTime
-            setA (ping_delay node) (end - start)
+            -- setA (ping_delay node) (end - start)
+
+            nodeChangeTransState node
+                (\ts -> ts { ping_delay = (end - start) })
+
             return [ StopProp, DumpMe ]
         else
             return [] -- skip

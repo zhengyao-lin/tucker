@@ -78,6 +78,8 @@ data TCKRConf =
 
         tckr_node_blacklist  :: [SockAddr],
 
+        tckr_speed_test_span :: Word, -- time span of a download speed test in seconds
+
         tckr_gc_interval     :: Integer,
 
         tckr_max_block_task  :: Int,
@@ -86,8 +88,8 @@ data TCKRConf =
         -- when nIn is greater or equal to this number
         tckr_min_parallel_input_check :: Int,
 
-        tckr_node_alive_span :: Word64,
-        tckr_reping_time     :: Word64,
+        tckr_node_alive_span :: Timestamp,
+        tckr_reping_time     :: Timestamp,
 
         tckr_known_inv_count :: Int,
         -- max number of hashes to send when trying to sync witht the network
@@ -125,7 +127,13 @@ data TCKRConf =
         tckr_p2sh_enable_time :: Word32,
         tckr_mtp_number :: Int,
 
-        tckr_soft_forks :: [SoftFork]
+        tckr_soft_forks :: [SoftFork],
+
+        -- different from the assumevalid in bitcoin core
+        -- because currently tucker does not support header-first
+        -- sync and can not check whether a block is the ancestor
+        -- of the assumevalid block
+        tckr_block_assumed_valid :: Maybe (Word, String)
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -182,10 +190,12 @@ tucker_default_conf_mainnet = do
                 ip4 (0, 0, 0, 0)
             ],
     
+        tckr_speed_test_span = 5,
+
         tckr_gc_interval = 20 * 1000 * 1000, -- 20 sec
         
         tckr_max_block_task = 20,
-        tckr_min_parallel_input_check = 8,
+        tckr_min_parallel_input_check = maxBound,
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min
@@ -240,7 +250,9 @@ tucker_default_conf_mainnet = do
                 fork_timeout = 1510675200,
                 fork_status = FORK_STATUS_DEFINED
             }
-        ]
+        ],
+
+        tckr_block_assumed_valid = Nothing
     }
 
     where
@@ -278,5 +290,8 @@ tucker_default_conf_testnet3 = do
                 fork_timeout = 1493568000,
                 fork_status = FORK_STATUS_DEFINED
             }
-        ]
+        ],
+
+        tckr_block_assumed_valid =
+            Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
     }

@@ -383,10 +383,6 @@ genScriptConf conf out_block =
         script_enable_p2sh = btimestamp out_block >= tckr_p2sh_enable_time conf
     }
 
-verifyInputs :: UTXOMap a => BlockChain -> TxState a -> Branch -> TxPayload -> [Int] -> IO [Value]
-verifyInputs bc tx_state branch tx idxs =
-    mapM (verifyInput bc tx_state branch tx) idxs
-
 verifyInput :: UTXOMap a => BlockChain -> TxState a -> Branch -> TxPayload -> Int -> IO Value
 verifyInput bc@(BlockChain {
     bc_conf = conf,
@@ -542,59 +538,68 @@ addBlockFail bc@(BlockChain {
             --- txns validation ---
             -----------------------
 
+            let skip_tx_check = Just True == do
+                    (height, _) <- tckr_block_assumed_valid conf
+                    return (cur_height branch <= fi height)
+
             -- using cached utxo because any error
             -- in the tx will cause the tx state to roll back
-            withCacheUTXO tx_state $ \tx_state -> do
-                let coinbase = head all_txns
-                    normal_tx = tail all_txns
 
-                all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
-                    expectTrue "more than one coinbase txns" $
-                        not (isCoinbase tx)
+            if not skip_tx_check then
+                withCacheUTXO tx_state $ \tx_state -> do
+                    let coinbase = head all_txns
+                        normal_tx = tail all_txns
 
-                    traceM $ "\rchecking tx " ++ show idx
+                    all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
+                        expectTrue "more than one coinbase txns" $
+                            not (isCoinbase tx)
 
-                    let total_out_value = getOutputValue tx
+                        traceM $ "\rchecking tx " ++ show idx
 
-                    cap <- getNumCapabilities
+                        let total_out_value = getOutputValue tx
 
-                    let len = fi (length (tx_in tx))
-                        idxs = [ 0 .. len - 1 ]
-                        sep_idxs = foldList cap idxs
-                        verifyP = verifyInputs bc tx_state branch tx -- parallel
-                        verify = verifyInput bc tx_state branch tx
-                    -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
+                        cap <- getNumCapabilities
 
-                    in_values <-
-                        if length idxs >= tckr_min_parallel_input_check conf then do
-                            traceM "checking input in parallel"
+                        let len = fi (length (tx_in tx))
+                            idxs = [ 0 .. len - 1 ]
+                            sep_idxs = foldList cap idxs
+                            verify = verifyInput bc tx_state branch tx
+                            verifyP = mapM verify -- parallel
+                        -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
 
-                            mconcat <$>
-                                map (either (reject . show) id) <$>
-                                forkMapM verifyP sep_idxs
-                        else
-                            mapM verify idxs
+                        in_values <-
+                            if length idxs >= tckr_min_parallel_input_check conf then do
+                                traceM "checking input in parallel"
+                                mconcat <$>
+                                    map (either (reject . show) id) <$>
+                                    forkMapM verifyP sep_idxs
+                            else
+                                mapM verify idxs
 
-                    let fee = sum (in_values) - total_out_value
-                    
-                    -- validity of values
-                    expectTrue "sum of inputs less than the sum of output" $
-                        fee >= 0
+                        let fee = sum (in_values) - total_out_value
+                        
+                        -- validity of values
+                        expectTrue "sum of inputs less than the sum of output" $
+                            fee >= 0
 
-                    addTx tx_state block idx
+                        addTx tx_state block idx
 
-                    return fee
+                        return fee
 
-                -- checking coinbase
+                    -- checking coinbase
 
-                let block_fee = feeAtHeight conf (cur_height branch)
-                    tx_fee = sum all_fees
-                    coinbase_out = getOutputValue coinbase
+                    let block_fee = feeAtHeight conf (cur_height branch)
+                        tx_fee = sum all_fees
+                        coinbase_out = getOutputValue coinbase
 
-                expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
-                    coinbase_out <= block_fee + tx_fee
+                    expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
+                        coinbase_out <= block_fee + tx_fee
 
-                addTx tx_state block 0
+                    addTx tx_state block 0
+            else do
+                -- trust all txns
+                traceM "txns assumed valid"
+                mapM_ (addTx tx_state block) [ 0 .. fi (length all_txns) - 1 ]
 
             -- add tx to tx and utxo pool
             -- mapM_ (addTx tx_state block) [ 0 .. length txns - 1 ]

@@ -142,12 +142,12 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                     cur_assign <- getA assign_var
 
                     if not $ null cur_assign then do
-                        progs <- forM cur_assign $ \(n, _) -> getA (cur_progress n)
+                        progs <- forM cur_assign (nodeTransState . fst)
                         envMsg env $ "current progresses: " ++ show progs
 
                         -- separate slow and good nodes
                         (slow, ok) <- flip sepWhenM cur_assign $ \(n, _) -> do
-                            time <- getA (last_seen n)
+                            time <- nodeLastSeen n
                             return $ time < start_time
 
                         -- traceM $ "separated " ++ show (length slow) ++ show (length ok)

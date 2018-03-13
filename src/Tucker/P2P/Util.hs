@@ -199,15 +199,36 @@ nodeRecvOneMsg :: MainLoopEnv
                -> IO ()
                -> IO MsgHead
 nodeRecvOneMsg env node recv_proc timeout_proc = do
-    orig_buf        <- getA $ recv_buf node
+    trans_state <- nodeTransState node
+
+    let orig_buf = recv_buf trans_state
+    
     (msg, buf, len) <- recv_proc (conn_trans node) orig_buf
+
+    now <- unixTimestamp
 
     if len /= 0 then do
         -- at least received some data
-        timestamp <- unixTimestamp
-        setA (last_seen node) timestamp
+        nodeChangeTransState node (\ts -> ts { last_seen = now })
         -- setA (cur_progress node) (Progress (fi $ BSR.length buf) (-1))
     else return ()
+
+    let test_span = fi (envConf env tckr_speed_test_span)
+        time_elapsed = now - speed_test_begin trans_state
+        downloaded = total_download trans_state + fi len
+        speed = fi (downloaded `div` fi time_elapsed)
+
+    -- update max download speed
+    if time_elapsed >= test_span then
+        nodeChangeTransState node (\ts -> ts {
+            total_download = 0,
+            max_download_speed = max speed (max_download_speed ts),
+            speed_test_begin = now -- reset begin time
+        })
+    else
+        nodeChangeTransState node (\ts -> ts {
+            total_download = downloaded -- update download size
+        })
 
     case msg of
         Right msg@(MsgHead {}) ->
@@ -220,15 +241,16 @@ nodeRecvOneMsg env node recv_proc timeout_proc = do
             updateBuf buf
             timeout_proc
 
-            setA (cur_progress node)
-                 (Progress (fi (BSR.length buf)) (fi total))
+            nodeChangeTransState node $ \ts ->
+                ts { cur_progress = Progress (fi (BSR.length buf)) (fi total) }
 
             return (LackData total)
 
         Left err -> throw err
 
     where
-        updateBuf = setA (recv_buf node)
+        updateBuf buf = nodeChangeTransState node $ \ts ->
+            ts { recv_buf = buf }
 
 -- nodeRecvOneMsgTimeout :: MainLoopEnv -> Node -> (MsgHead -> IO ()) -> IO MsgHead
 -- nodeRecvOneMsgTimeout env node timeout_proc = do

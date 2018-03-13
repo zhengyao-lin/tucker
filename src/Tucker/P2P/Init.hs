@@ -55,14 +55,14 @@ pingLoop env =
     forever $ do
         let reping_time = envConf env tckr_reping_time
         
-        delay $ fromIntegral $ reping_time * 1000 * 1000
+        delay $ fi $ reping_time * 1000 * 1000
 
         cur_list <- getA $ node_list env
         now <- unixTimestamp
 
         forM_ cur_list $ \node -> do
             alive <- getA $ alive node
-            last_seen <- getA $ last_seen node
+            last_seen <- nodeLastSeen node
 
             if alive && now - last_seen > reping_time then
                 nodePrependActions node [ NormalAction pingDelay ]
