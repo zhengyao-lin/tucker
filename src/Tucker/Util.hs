@@ -24,6 +24,12 @@ import Tucker.DeepSeq
 class Default a where
     def :: a
 
+class Sizeable a where
+    sizeOf :: a -> Int
+
+u :: a
+u = undefined
+
 data PartialList a = PartialList Int | FullList [a] deriving (Show)
 
 isPartial :: PartialList a -> Bool
@@ -131,6 +137,23 @@ splitList max list =
     ]
     where
         n = length list `divCeiling` max
+
+-- fold a list to n sublists
+foldList :: Int -> [t] -> [[t]]
+foldList n list =
+    [
+        take maxn $ drop (i * maxn) list
+        | i <- [ 0 .. t - 1 ]
+    ] ++ [
+        take minn $ drop (t * maxn + i * minn) list
+        | i <- [ 0 .. n - t - 1 ]
+    ]
+    where
+        oldn = length list
+        -- foldn = old_n `divCeiling` n -- number of tasks to fold together
+        maxn = oldn `divCeiling` n
+        minn = oldn `divFloor` n
+        t = oldn - minn * n
 
 forUntilM_ :: Monad m => [a] -> (a -> m Bool) -> m ()
 forUntilM_ lst mpred =

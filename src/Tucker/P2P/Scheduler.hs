@@ -119,18 +119,21 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
             tid <- myThreadId
             let sched = tmp_sched { sched_tid = tid }
     
+            timeout_us_var <- newA timeout_us
+
             forever $ do
                 start_time <- unixTimestamp
 
                 -- traceM "start waiting"
 
+                timeout_us <- getA timeout_us_var
                 delay timeout_us
 
                 delays <- envAllNetDelay env
                 traceM $ "median " ++ show (median delays) ++
                          "ms, average " ++ show (average delays) ++
                          "ms, last " ++ show (last (sort delays)) ++
-                         "ms, timeout " ++ show timeout_s
+                         "ms, timeout " ++ show timeout_us
 
                 -- traceM "scheduler waiting for the lock"
                 
@@ -166,7 +169,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                             -- retry tasks of slow nodes
                             let retry_tasks = map snd slow
 
-                            -- nodeMsg env node $ "refetching on nodes " ++ show retry_hashes
+                            envMsg env $ "refetching on nodes " ++ show slow_nodes
 
                             new_assign <- reassign sched retry_tasks (SET.toList new_blacklist)
 
@@ -177,7 +180,9 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                                 -- try again with an empty blacklist
                                 -- nodeMsg env node "failed to reassign tasks"
 
-                                traceM "!!! failed to reassign"
+                                traceM "!!! failed to reassign, elongate timeout"
+                                -- elongate timeout
+                                appA (*2) timeout_us_var
 
                                 assign <- failed_reassign sched retry_tasks
 

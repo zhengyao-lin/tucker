@@ -50,7 +50,7 @@ recv' :: MainLoopEnv -> Node
 recv' env node r_act cmd proc =
     return $ r_act ++ [ UpdateMe $ NormalAction handle ]
     where
-        handle env node LackData = return []
+        handle env node (LackData _) = return []
         handle env node (MsgHead {
             command = command,
             payload = payload
@@ -241,8 +241,9 @@ scheduleFetch env init_hashes callback = do
     added_var <- newA 0 :: IO (Atom (Int))
     let total = length tarray
 
-    let reassign sched task blacklist =
-            doFetch sched (fetchTaskToHashes (mconcat task)) blacklist
+    let reassign sched task blacklist = do
+            clearBlacklist sched
+            doFetch sched (fetchTaskToHashes (mconcat task)) []
 
         doFetch sched hashes blacklist =
             envSpreadActionExcept

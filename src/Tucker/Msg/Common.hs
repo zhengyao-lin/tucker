@@ -116,7 +116,7 @@ data Command
     | BTC_CMD_ALERT deriving (Show, Eq)
 
 data MsgHead
-    = LackData -- lack data mark
+    = LackData Int -- lack data mark(taking the total length as the argument)
     | MsgHead {
         magicno :: ByteString, -- 4 bytes
         command :: Command, -- 12 bytes
@@ -219,6 +219,9 @@ instance Decodable Command where
             Just cmd -> return cmd
             Nothing -> fail ("no such command " ++ (show cmdstr))
 
+instance Sizeable MsgHead where
+    sizeOf _ = 4 + 12 + 4
+
 instance Encodable MsgHead where
     encode end (MsgHead {
         magicno = magicno,
@@ -238,14 +241,16 @@ instance Encodable MsgHead where
             e :: Encodable t => t -> ByteString
             e = encode end
 
-    encode _ LackData = error "encoding LackData flag"
+    encode _ (LackData _) = error "encoding LackData flag"
 
 instance Decodable MsgHead where
     decoder = do
-        clen <- checkLenD (4 + 12 + 4 + 4) -- length of header
+        let head_size = sizeOf (u :: MsgHead)
+
+        clen <- checkLenD head_size -- length of header
 
         if not clen then
-            return LackData
+            return (LackData head_size)
         else do
             magicno       <- bsD 4
             command       <- decoder
@@ -258,7 +263,7 @@ instance Decodable MsgHead where
             -- trace ("!!! received: " ++ show command ++ " " ++ show len ++ "/" ++ show payload_len) $
 
             if not clen then
-                return LackData
+                return (LackData (head_size + fi payload_len))
             else do
                 payload       <- bsD $ fi payload_len
 

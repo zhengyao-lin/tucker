@@ -1,4 +1,4 @@
-{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE DuplicateRecordFields, FlexibleContexts #-}
 
 -- block chain implementation
 
@@ -6,11 +6,14 @@ module Tucker.Storage.Chain where
 
 import Data.Int -- hiding (map, findIndex, null)
 import Data.Word
+import Data.Bits
 import qualified Data.Foldable as FD
 
 import Control.Monad
 import Control.Exception
+import Control.Concurrent
 import Control.Monad.Morph
+import Control.Monad.Loops
 import Control.Monad.Trans.Resource
 
 import Debug.Trace
@@ -172,6 +175,11 @@ shouldRetarget :: TCKRConf -> Height -> Bool
 shouldRetarget conf height =
     height /= 0 &&
     height `mod` fi (tckr_retarget_span conf) == 0
+
+feeAtHeight :: TCKRConf -> Height -> Value
+feeAtHeight conf height =
+    fi (tckr_initial_fee conf) `shift`
+    (fi height `div` fi (tckr_fee_half_rate conf))
 
 updateForkDeploy :: BlockChain -> Branch -> IO ()
 updateForkDeploy bc@(BlockChain {
@@ -375,6 +383,64 @@ genScriptConf conf out_block =
         script_enable_p2sh = btimestamp out_block >= tckr_p2sh_enable_time conf
     }
 
+verifyInputs :: UTXOMap a => BlockChain -> TxState a -> Branch -> TxPayload -> [Int] -> IO [Value]
+verifyInputs bc tx_state branch tx idxs =
+    mapM (verifyInput bc tx_state branch tx) idxs
+
+verifyInput :: UTXOMap a => BlockChain -> TxState a -> Branch -> TxPayload -> Int -> IO Value
+verifyInput bc@(BlockChain {
+    bc_conf = conf,
+    bc_chain = chain
+}) tx_state branch tx in_idx = do
+    let inp@(TxInput {
+            prev_out = outp@(OutPoint txid out_idx)
+        }) = tx_in tx !! in_idx
+
+    value <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
+        lookupUTXO tx_state outp
+
+    locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
+        findTxId tx_state txid
+
+    bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+        branchWithHash chain branch (locatorToHash locator)
+
+    bnode <- expectMaybeIO ("failed to load full block for " ++ show bnode) $
+        toFullBlockNode chain bnode
+        -- -- special case -> outpoint is in the current block/top
+        -- if bnode == branch then return bnode
+        -- else expectMaybeIO ("failed to load full block for " ++ show bnode) $
+        --     toFullBlockNode chain bnode
+
+    let prev_tx_idx = locatorToIdx locator
+        prev_tx_body =
+            (txns (block_data bnode)) `index` fi prev_tx_idx
+
+        prev_tx_out = tx_out prev_tx_body !! fi out_idx
+
+    -- if the funding tx is coinbase(idx == 0), check coinbase maturity
+    expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
+        prev_tx_idx /= 0 ||
+        cur_height branch - cur_height bnode >= fi (tckr_coinbase_maturity conf)
+
+    -- generate script configuration
+    script_conf <- genScriptConf conf (block_data bnode)
+
+    -- check script
+    let pk_sc = decodeFailLE (pk_script prev_tx_out)
+        sig_sc = decodeFailLE (sig_script inp)
+        state = initState script_conf prev_tx_body tx (fi in_idx)
+        check_res = runEval state [ sig_sc, pk_sc ]
+
+    expectTrue ("invalid script/signature for outpoint tx " ++
+                show txid ++ ": " ++ show check_res ++
+                ": " ++ show [ sig_sc, pk_sc ]) $
+        check_res == ValidTx
+
+    -- all test passed, return value
+    return value
+
+
 -- locatorToTx :: Chain -> TxLocator -> IO (Maybe TxPayload)
 -- locatorToTx (Chain {
 --     bucket_block = bucket_block
@@ -441,6 +507,15 @@ addBlockFail bc@(BlockChain {
             -- update chain
             bc <- return $ bc { bc_chain = chain }
 
+            -- save the block data first
+            -- all actions below will find the block
+            -- in the chain as other normal blocks
+            saveBlock chain branch
+
+            ----------------------------
+            --- further block checks ---
+            ----------------------------
+
             expectTrueIO "MTP rule not met" $
                 (btimestamp block >=) <$>
                 medianPastTime bc branch (tckr_mtp_number conf)
@@ -459,84 +534,74 @@ addBlockFail bc@(BlockChain {
                 5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
             -}
 
+            -- generally, the tx checking can be performed concurrently
+            -- but there are several special cases
+            -- 1. dependencies in the same block
+
+            -----------------------
+            --- txns validation ---
+            -----------------------
+
             -- using cached utxo because any error
             -- in the tx will cause the tx state to roll back
-            withCacheUTXO tx_state $ \tx_state ->
-                forM_ (zip [0..] all_txns) $ \(idx, tx) -> do
-                    let is_coinbase = isCoinbase tx
+            withCacheUTXO tx_state $ \tx_state -> do
+                let coinbase = head all_txns
+                    normal_tx = tail all_txns
 
+                all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
                     expectTrue "more than one coinbase txns" $
-                        idx == 0 || not is_coinbase
+                        not (isCoinbase tx)
 
                     traceM $ "\rchecking tx " ++ show idx
 
-                    if not is_coinbase then do
-                        in_values <- forM ([0..] `zip` tx_in tx) $ \(in_idx, inp@(TxInput {
-                                prev_out = outp@(OutPoint txid out_idx)
-                            })) -> do
+                    let total_out_value = getOutputValue tx
 
-                            value <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
-                                lookupUTXO tx_state outp
+                    cap <- getNumCapabilities
 
-                            locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
-                                findTxId tx_state txid
+                    let len = fi (length (tx_in tx))
+                        idxs = [ 0 .. len - 1 ]
+                        sep_idxs = foldList cap idxs
+                        verifyP = verifyInputs bc tx_state branch tx -- parallel
+                        verify = verifyInput bc tx_state branch tx
+                    -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
 
-                            bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
-                                branchWithHash chain branch (locatorToHash locator)
-                            
-                            bnode <-
-                                -- special case -> outpoint is in the current block
-                                if bnode == branch then return bnode
-                                else expectMaybeIO ("failed to load full block for " ++ show bnode) $
-                                    toFullBlockNode chain bnode
+                    in_values <-
+                        if length idxs >= tckr_min_parallel_input_check conf then do
+                            traceM "checking input in parallel"
 
-                            let prev_tx_idx = locatorToIdx locator
-                                prev_tx_body =
-                                    (if bnode == branch then
-                                        FullList all_txns
-                                    else
-                                        txns (block_data bnode)) `index` fi prev_tx_idx
+                            mconcat <$>
+                                map (either (reject . show) id) <$>
+                                forkMapM verifyP sep_idxs
+                        else
+                            mapM verify idxs
 
-                                prev_tx_out = tx_out prev_tx_body !! fi out_idx
-
-                            -- if the tx is coinbase(idx == 0), check coinbase maturity
-                            expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
-                                prev_tx_idx /= 0 ||
-                                cur_height branch - cur_height bnode >= fi (tckr_coinbase_maturity conf)
-
-                            -- checkTxInput 
-
-                            script_conf <- genScriptConf conf (block_data bnode)
-
-                            let pk_sc = decodeFailLE (pk_script prev_tx_out)
-                                sig_sc = decodeFailLE (sig_script inp)
-                                state = initState script_conf prev_tx_body tx in_idx
-                                check_res = runEval state [ sig_sc, pk_sc ]
-
-                            -- traceShowM (out_idx, prev_tx_out)
-
-                            expectTrue ("invalid script/signature for outpoint tx " ++
-                                        show txid ++ ": " ++ show check_res ++
-                                        ": " ++ show [ sig_sc, pk_sc ]) $
-                                check_res == ValidTx
-
-                            return value
-
-                        -- validity of values
-                        expectTrue "sum of inputs less than the sum of output" $
-                            sum (in_values) >= getOutputValue tx
-                    else
-                        -- omitting coinbase value check
-                        return ()
+                    let fee = sum (in_values) - total_out_value
+                    
+                    -- validity of values
+                    expectTrue "sum of inputs less than the sum of output" $
+                        fee >= 0
 
                     addTx tx_state block idx
+
+                    return fee
+
+                -- checking coinbase
+
+                let block_fee = feeAtHeight conf (cur_height branch)
+                    tx_fee = sum all_fees
+                    coinbase_out = getOutputValue coinbase
+
+                expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
+                    coinbase_out <= block_fee + tx_fee
+
+                addTx tx_state block 0
 
             -- add tx to tx and utxo pool
             -- mapM_ (addTx tx_state block) [ 0 .. length txns - 1 ]
              
             -- all check passed
             -- write the block into the block database
-            saveBlock chain branch
+            -- saveBlock chain branch -- **moved to above**
 
             -- update fork deploy status
             if isMainBranch chain branch then

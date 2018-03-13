@@ -82,14 +82,19 @@ data TCKRConf =
 
         tckr_max_block_task  :: Int,
 
+        -- do the input checking in parrallel
+        -- when nIn is greater or equal to this number
+        tckr_min_parallel_input_check :: Int,
+
         tckr_node_alive_span :: Word64,
         tckr_reping_time     :: Word64,
 
         tckr_known_inv_count :: Int,
         -- max number of hashes to send when trying to sync witht the network
-
-        tckr_block_tree_path :: FilePath,
         
+        tckr_initial_fee :: Integer,
+        tckr_fee_half_rate :: Integer,
+
         tckr_max_tree_insert_depth :: Int, -- max search depth when inserting a block
 
         tckr_fetch_dup_node  :: Int,
@@ -180,14 +185,13 @@ tucker_default_conf_mainnet = do
         tckr_gc_interval = 20 * 1000 * 1000, -- 20 sec
         
         tckr_max_block_task = 20,
+        tckr_min_parallel_input_check = 8,
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min
         tckr_reping_time = 30, -- 30sec
 
         tckr_known_inv_count = 8,
-
-        tckr_block_tree_path = "test.block.d",
 
         tckr_max_tree_insert_depth = 128,
 
@@ -205,7 +209,7 @@ tucker_default_conf_mainnet = do
 
         tckr_use_special_min_diff = False,
 
-        tckr_block_fetch_timeout = 5,
+        tckr_block_fetch_timeout = 10,
 
         tckr_node_max_blacklist_count = 5,
 
@@ -216,6 +220,9 @@ tucker_default_conf_mainnet = do
         tckr_p2sh_enable_time = 1333238400,
 
         tckr_mtp_number = 11,
+
+        tckr_initial_fee = 50 * 100000000,
+        tckr_fee_half_rate = 210000,
 
         tckr_soft_forks = [
             SoftFork {

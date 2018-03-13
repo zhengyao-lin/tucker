@@ -32,7 +32,7 @@ import qualified Tucker.P2P.Action as A
 -- then re-exec the fetchBlock on other <a> nodes
 
 defaultHandler :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
-defaultHandler env node LackData = do
+defaultHandler env node (LackData _) = do
     delay 100000 -- 100ms
     return []
 

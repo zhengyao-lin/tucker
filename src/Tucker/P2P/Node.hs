@@ -127,21 +127,7 @@ class Monoid t => NodeTask t where
     done :: MainLoopEnv -> Node -> t -> IO ()
 
 taskFold :: NodeTask t => [t] -> Int -> [t]
-taskFold ts n =
-    [
-        mconcat $ take maxn $ drop (i * maxn) ts
-        | i <- [ 0 .. t - 1 ]
-    ] ++ [
-        mconcat $ take minn $ drop (t * maxn + i * minn) ts
-        | i <- [ 0 .. n - t - 1 ]
-    ]
-    where
-        oldn = length ts
-        -- foldn = old_n `divCeiling` n -- number of tasks to fold together
-        maxn = oldn `divCeiling` n
-        minn = oldn `divFloor` n
-
-        t = oldn - minn * n
+taskFold ts n = map mconcat (foldList n ts)
 
 data NullTask = NullTask
 

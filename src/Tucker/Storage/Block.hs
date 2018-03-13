@@ -592,3 +592,4 @@ isMainBranch (Chain {
     edge_branches = branches
 }) branch =
     all (cur_height branch >=) (map cur_height branches)
+    

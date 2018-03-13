@@ -196,7 +196,7 @@ timeoutRetryS sec action = untilJust $ timeoutS sec action
 nodeRecvOneMsg :: MainLoopEnv
                -> Node
                -> (Transport -> ByteString -> IO (Either TCKRError MsgHead, ByteString, Int))
-               -> IO MsgHead
+               -> IO ()
                -> IO MsgHead
 nodeRecvOneMsg env node recv_proc timeout_proc = do
     orig_buf        <- getA $ recv_buf node
@@ -206,32 +206,40 @@ nodeRecvOneMsg env node recv_proc timeout_proc = do
         -- at least received some data
         timestamp <- unixTimestamp
         setA (last_seen node) timestamp
-
-        setA (cur_progress node) (Progress (fi $ BSR.length buf) (-1))
+        -- setA (cur_progress node) (Progress (fi $ BSR.length buf) (-1))
     else return ()
 
     case msg of
         Right msg@(MsgHead {}) ->
             if magicno msg /= envConf env tckr_magic_no then
-                throw $ TCKRError "network magic number not match"
+                throw (TCKRError "network magic number not match")
             else
                 updateBuf buf >> return msg
 
-        Right LackData -> updateBuf buf >> timeout_proc
+        Right (LackData total) -> do
+            updateBuf buf
+            timeout_proc
+
+            setA (cur_progress node)
+                 (Progress (fi (BSR.length buf)) (fi total))
+
+            return (LackData total)
+
         Left err -> throw err
 
     where
         updateBuf = setA (recv_buf node)
 
-nodeRecvOneMsgTimeout :: MainLoopEnv -> Node -> IO MsgHead -> IO MsgHead
-nodeRecvOneMsgTimeout env node timeout_proc = do
-    nodeRecvOneMsg env node (`tRecvOneMsg` timeout_s env) timeout_proc
+-- nodeRecvOneMsgTimeout :: MainLoopEnv -> Node -> (MsgHead -> IO ()) -> IO MsgHead
+-- nodeRecvOneMsgTimeout env node timeout_proc = do
+--     nodeRecvOneMsg env node (`tRecvOneMsg` timeout_s env) timeout_proc
 
 nodeRecvOneMsgNonBlocking :: MainLoopEnv -> Node -> IO MsgHead
 nodeRecvOneMsgNonBlocking env node = do
-    nodeRecvOneMsg env node tRecvOneMsgNonBlocking (return LackData)
+    nodeRecvOneMsg env node tRecvOneMsgNonBlocking (return ())
 
 -- throw an exception when timeout
 nodeExpectOneMsg :: MainLoopEnv -> Node -> IO MsgHead
 nodeExpectOneMsg env node =
-    nodeRecvOneMsgTimeout env node (throw $ TCKRError "recv timeout")
+    nodeRecvOneMsg env node (`tRecvOneMsg` timeout_s env)
+        (throw (TCKRError "recv timeout"))

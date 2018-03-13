@@ -20,12 +20,12 @@ tRecvOneMsg trans timeout_s buf = do
         timeout_us = timeout_s * 1000000
 
     (buf, _, res, recv_len) <-
-        (flip $ iterateUntilM wait) (buf, False, Right LackData, 0) $
+        (flip $ iterateUntilM wait) (buf, False, Right (LackData 0), 0) $
             \(buf, _, _, recv_len) -> do
                 res <- timeout timeout_us $ tRecvSome trans $ 1024 * 1024
 
                 return $ case res of
-                    Nothing -> (buf, True, Right LackData, recv_len)
+                    Nothing -> (buf, True, Right (LackData 0), recv_len)
                     Just res -> do
                         let nbuf = BSR.append buf res
                             recv_inc = BSR.length res
@@ -35,9 +35,9 @@ tRecvOneMsg trans timeout_s buf = do
                                 -- whole message received
                                 (rest, True, msg, recv_len + recv_inc)
 
-                            (Right LackData, _) ->
+                            (Right lack, _) ->
                                 -- continue receiving
-                                (nbuf, False, Right LackData, recv_len + recv_inc)
+                                (nbuf, False, Right lack, recv_len + recv_inc)
 
                             (err@(Left _), _) ->
                                 -- decoding error, return
@@ -57,8 +57,8 @@ tRecvOneMsgNonBlocking trans buf = do
         (msg@(Right (MsgHead {})), rest) ->
             (msg, rest, recv_len) -- whole message received
 
-        (Right LackData, _) ->
-            (Right LackData, nbuf, recv_len) -- continue receiving
+        (Right lack, _) ->
+            (Right lack, nbuf, recv_len) -- continue receiving
 
         (err@(Left _), _) ->
             (err, nbuf, recv_len) -- decoding error, return
