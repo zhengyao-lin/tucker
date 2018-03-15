@@ -79,7 +79,7 @@ encodeNotfoundPayload = encodeInvPayload
 
 data GetblocksPayload =
     GetblocksPayload {
-        vers      :: Word32,
+        gb_vers   :: Word32,
         locator   :: [Hash256],
         stop_hash :: Hash256
     }
@@ -87,21 +87,21 @@ data GetblocksPayload =
 instance MsgPayload GetblocksPayload
 
 instance Encodable GetblocksPayload where
-    encode end (GetblocksPayload vers locator stop_hash) =
+    encode end (GetblocksPayload gb_vers locator stop_hash) =
         mconcat [
-            encode end vers,
+            encode end gb_vers,
             encodeVList end locator,
             encode end stop_hash
         ]
 
 instance Decodable GetblocksPayload where
     decoder = do
-        vers <- decoder
+        gb_vers <- decoder
         locator <- vlistD decoder
         stop_hash <- decoder
 
         return $ GetblocksPayload {
-            vers = vers,
+            gb_vers = gb_vers,
             locator = locator,
             stop_hash = stop_hash
         }
@@ -109,7 +109,7 @@ instance Decodable GetblocksPayload where
 encodeGetblocksPayload :: TCKRConf -> [Hash256] -> Hash256 -> IO ByteString
 encodeGetblocksPayload conf locator stop_hash =
     return $ encodeLE $ GetblocksPayload {
-        vers = fi $ tckr_net_version conf,
+        gb_vers = fi $ tckr_net_version conf,
         locator = locator,
         stop_hash = stop_hash
     }

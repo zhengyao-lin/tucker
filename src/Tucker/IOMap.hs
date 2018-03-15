@@ -17,6 +17,13 @@ class IOMap a k v | a -> k, a -> v where
     insertIO :: a -> k -> v -> IO ()
     deleteIO :: a -> k -> IO ()
 
+    applyIO :: a -> (v -> v) -> k -> IO ()
+    applyIO a f k = do
+        mv <- lookupIO a k
+        case mv of
+            Just v -> insertIO a k (f v)
+            Nothing -> return ()
+
     foldKeyIO :: a -> b -> (b -> k -> IO b) -> IO b
 
     mapKeyIO :: a -> (k -> IO b) -> IO [b]

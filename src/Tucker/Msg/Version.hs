@@ -15,14 +15,14 @@ import Tucker.Msg.Common
 
 data VersionPayload =
     VersionPayload {
-        vers         :: Int32, -- 60002 for modern protocol
+        cli_vers     :: Int32, -- 60002 for modern protocol
         vers_serv    :: NodeServiceType,
         timestamp    :: Int64,
 
         addr_recv    :: NetAddr,
         addr_from    :: NetAddr,
 
-        nonce        :: Word64,
+        vers_nonce   :: Word64,
 
         user_agent   :: VStr,
         start_height :: Int32,
@@ -33,27 +33,27 @@ instance MsgPayload VersionPayload
 
 instance Encodable VersionPayload where
     encode end (VersionPayload {
-        vers = vers,
+        cli_vers = cli_vers,
         vers_serv = vers_serv,
         timestamp = timestamp,
 
         addr_recv = addr_recv,
         addr_from = addr_from,
 
-        nonce = nonce,
+        vers_nonce = vers_nonce,
         user_agent = user_agent,
         start_height = start_height,
         relay = relay
     }) =
         mconcat [
-            e vers,
+            e cli_vers,
             e vers_serv,
             e timestamp,
             
             BSR.drop 4 $ e addr_recv, -- drop 4 bytes from the head(timestamp field)
             BSR.drop 4 $ e addr_from,
 
-            e nonce,
+            e vers_nonce,
             e user_agent,
             e start_height,
             e relay
@@ -64,7 +64,7 @@ instance Encodable VersionPayload where
 
 instance Decodable VersionPayload where
     decoder = do
-        vers <- decoder
+        cli_vers <- decoder
         vers_serv <- decoder
         timestamp <- decoder
 
@@ -74,22 +74,22 @@ instance Decodable VersionPayload where
 
         addr_recv <- decoderAddr
 
-        addr_from <- ifD (vers < 106) addr_recv decoderAddr
+        addr_from <- ifD (cli_vers < 106) addr_recv decoderAddr
 
-        nonce <- ifD (vers < 106) 0 decoder
-        user_agent <- ifD (vers < 106) (VStr "") decoder
+        vers_nonce <- ifD (cli_vers < 106) 0 decoder
+        user_agent <- ifD (cli_vers < 106) (VStr "") decoder
 
-        start_height <- ifD (vers < 106) 0 decoder
-        relay <- ifD (vers < 70001) False decoder
+        start_height <- ifD (cli_vers < 106) 0 decoder
+        relay <- ifD (cli_vers < 70001) False decoder
 
         return $ VersionPayload {
-            vers = vers,
+            cli_vers = cli_vers,
             vers_serv = vers_serv,
             timestamp = timestamp,
             addr_recv = addr_recv,
             addr_from = addr_from,
     
-            nonce = nonce,
+            vers_nonce = vers_nonce,
             user_agent = user_agent,
             start_height = start_height,
             relay = relay
@@ -98,19 +98,19 @@ instance Decodable VersionPayload where
 buildVersionPayload :: TCKRConf -> NetAddr -> IO VersionPayload
 buildVersionPayload conf addr = do
     timestamp <- unixTimestamp
-    nonce <- getStdRandom (randomR (0, maxBound :: Word64))
+    vers_nonce <- getStdRandom (randomR (0, maxBound :: Word64))
 
     -- ip4ToNetAddr "127.0.0.1" (tckr_listen_port conf) btc_cli_service
 
     return $ VersionPayload {
-        vers = fi $ tckr_net_version conf,
+        cli_vers = fi $ tckr_net_version conf,
         vers_serv = tckr_node_service conf,
         timestamp = timestamp,
 
         addr_recv = addr,
         addr_from = addr,
 
-        nonce = nonce,
+        vers_nonce = vers_nonce,
 
         user_agent = VStr $ tckr_user_agent conf,
         start_height = 0,

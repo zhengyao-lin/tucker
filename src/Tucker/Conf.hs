@@ -133,7 +133,10 @@ data TCKRConf =
         -- because currently tucker does not support header-first
         -- sync and can not check whether a block is the ancestor
         -- of the assumevalid block
-        tckr_block_assumed_valid :: Maybe (Word, String)
+        tckr_block_assumed_valid :: Maybe (Word, String),
+
+        tckr_enable_difficulty_check :: Bool,
+        tckr_enable_mtp_check :: Bool
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -252,7 +255,10 @@ tucker_default_conf_mainnet = do
             }
         ],
 
-        tckr_block_assumed_valid = Nothing
+        tckr_block_assumed_valid = Nothing,
+
+        tckr_enable_difficulty_check = False,
+        tckr_enable_mtp_check = False
     }
 
     where
@@ -292,6 +298,6 @@ tucker_default_conf_testnet3 = do
             }
         ],
 
-        tckr_block_assumed_valid =
-            Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
+        tckr_block_assumed_valid = Nothing
+            -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
     }

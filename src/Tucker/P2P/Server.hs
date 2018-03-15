@@ -217,7 +217,7 @@ handshake env node = do
             throw $ TCKRError $ "version decode failed: " ++ show err
 
         (Right vp@(VersionPayload {
-            vers = vers,
+            cli_vers = vers,
             user_agent = VStr user_agent,
             vers_serv = vers_serv
         }), _) -> do

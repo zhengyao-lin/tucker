@@ -30,6 +30,10 @@ data OutPoint = OutPoint {
 instance NFData OutPoint where
     rnf (OutPoint h w) = rnf (h, w)
 
+-- note this has to be signed
+-- given a positive value a
+-- (complement a) means a spent value of a in UTXO
+-- a means a is still valid
 type Value = Int64
 
 data TxInput =

@@ -355,7 +355,7 @@ addBlocks proc bc (block:blocks) = do
     let new_bc = case res of
             Left _ -> bc
             Right bc -> bc
-    
+
     new_bc `seq` addBlocks proc new_bc blocks
 
 -- test & save chain to the disk
@@ -436,6 +436,67 @@ verifyInput bc@(BlockChain {
     -- all test passed, return value
     return value
 
+updateChain :: BlockChain -> Chain -> IO BlockChain
+updateChain bc chain =
+    return $ bc {
+        bc_chain = chain
+    }
+
+verifyBlockTx :: BlockChain -> Branch -> Block -> IO ()
+verifyBlockTx bc branch block = do
+    let all_txns = FD.toList (txns block)
+        conf = bc_conf bc
+
+    withCacheUTXO (bc_tx_state bc) $ \tx_state -> do
+        let coinbase = head all_txns
+            normal_tx = tail all_txns
+
+        all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
+            expectTrue "more than one coinbase txns" $
+                not (isCoinbase tx)
+
+            traceM $ "\rchecking tx " ++ show idx
+
+            let total_out_value = getOutputValue tx
+
+            cap <- getNumCapabilities
+
+            let len = fi (length (tx_in tx))
+                idxs = [ 0 .. len - 1 ]
+                sep_idxs = foldList cap idxs
+                verify = verifyInput bc tx_state branch tx
+                verifyP = mapM verify -- parallel
+            -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
+
+            in_values <-
+                if length idxs >= tckr_min_parallel_input_check conf then do
+                    traceM "checking input in parallel"
+                    mconcat <$>
+                        map (either (reject . show) id) <$>
+                        forkMapM verifyP sep_idxs
+                else
+                    mapM verify idxs
+
+            let fee = sum (in_values) - total_out_value
+            
+            -- validity of values
+            expectTrue "sum of inputs less than the sum of output" $
+                fee >= 0
+
+            addTx tx_state block idx
+
+            return fee
+
+        -- checking coinbase
+
+        let block_fee = feeAtHeight conf (cur_height branch)
+            tx_fee = sum all_fees
+            coinbase_out = getOutputValue coinbase
+
+        expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
+            coinbase_out <= block_fee + tx_fee
+
+        addTx tx_state block 0
 
 -- locatorToTx :: Chain -> TxLocator -> IO (Maybe TxPayload)
 -- locatorToTx (Chain {
@@ -492,131 +553,108 @@ addBlockFail bc@(BlockChain {
     expectTrue "merkle root claimed not correct" $
         merkleRoot block == merkle_root
 
+    let is_orphan_block = chain `hasBlockInOrphan` block
+
     case insertBlock chain block of
         Nothing -> do -- no previous hash found
             -- traceIO "orphan block!"
-            return $ bc { bc_chain = addOrphan chain block }
+            expectFalse "repeated orphan block" is_orphan_block
+            updateChain bc (addOrphan chain block)
 
         Just (branch, chain) -> do
             -- block inserted, new branch leaf created
 
             -- update chain
-            bc <- return $ bc { bc_chain = chain }
+            bc <- updateChain bc chain
+
+            -- traceM (show (isPartial (txns (block_data branch))))
 
             -- save the block data first
             -- all actions below will find the block
             -- in the chain as other normal blocks
-            saveBlock chain branch
+            saveBlock chain (cur_height branch) block
 
-            ----------------------------
-            --- further block checks ---
-            ----------------------------
-
-            expectTrueIO "MTP rule not met" $
-                (btimestamp block >=) <$>
-                medianPastTime bc branch (tckr_mtp_number conf)
-
-            expectTrueIO "wrong difficulty" $
-                hashTargetValid bc branch
-
-            -- TODO: reject if timestamp is the median time of the last 11 blocks or before(MTP?)
-            -- TODO: further block checks
-
-            {-
-                1. input exists(the input points to a valid block and a valid index)
-                2. if referenced transaction is a coinbase, make sure the depth of the input block is >= 100
-                3. verify signature(involves script)
-                4. referenced output is not spent
-                5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
-            -}
-
-            -- generally, the tx checking can be performed concurrently
-            -- but there are several special cases
-            -- 1. dependencies in the same block
-
-            -----------------------
-            --- txns validation ---
-            -----------------------
-
-            let skip_tx_check = Just True == do
-                    (height, _) <- tckr_block_assumed_valid conf
-                    return (cur_height branch <= fi height)
-
-            -- using cached utxo because any error
-            -- in the tx will cause the tx state to roll back
-
-            if not skip_tx_check then
-                withCacheUTXO tx_state $ \tx_state -> do
-                    let coinbase = head all_txns
-                        normal_tx = tail all_txns
-
-                    all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
-                        expectTrue "more than one coinbase txns" $
-                            not (isCoinbase tx)
-
-                        traceM $ "\rchecking tx " ++ show idx
-
-                        let total_out_value = getOutputValue tx
-
-                        cap <- getNumCapabilities
-
-                        let len = fi (length (tx_in tx))
-                            idxs = [ 0 .. len - 1 ]
-                            sep_idxs = foldList cap idxs
-                            verify = verifyInput bc tx_state branch tx
-                            verifyP = mapM verify -- parallel
-                        -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
-
-                        in_values <-
-                            if length idxs >= tckr_min_parallel_input_check conf then do
-                                traceM "checking input in parallel"
-                                mconcat <$>
-                                    map (either (reject . show) id) <$>
-                                    forkMapM verifyP sep_idxs
-                            else
-                                mapM verify idxs
-
-                        let fee = sum (in_values) - total_out_value
-                        
-                        -- validity of values
-                        expectTrue "sum of inputs less than the sum of output" $
-                            fee >= 0
-
-                        addTx tx_state block idx
-
-                        return fee
-
-                    -- checking coinbase
-
-                    let block_fee = feeAtHeight conf (cur_height branch)
-                        tx_fee = sum all_fees
-                        coinbase_out = getOutputValue coinbase
-
-                    expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
-                        coinbase_out <= block_fee + tx_fee
-
-                    addTx tx_state block 0
-            else do
-                -- trust all txns
-                traceM "txns assumed valid"
-                mapM_ (addTx tx_state block) [ 0 .. fi (length all_txns) - 1 ]
-
-            -- add tx to tx and utxo pool
-            -- mapM_ (addTx tx_state block) [ 0 .. length txns - 1 ]
-             
-            -- all check passed
-            -- write the block into the block database
-            -- saveBlock chain branch -- **moved to above**
-
-            -- update fork deploy status
-            if isMainBranch chain branch then
-                updateForkDeploy bc branch
+            if tckr_enable_mtp_check conf then
+                expectTrueIO "MTP rule not met" $
+                    (btimestamp block >=) <$>
+                    medianPastTime bc branch (tckr_mtp_number conf)
             else
                 return ()
 
-            if chain `hasBlockInOrphan` block then
-                return $ bc { bc_chain = removeOrphan chain block }
+            if tckr_enable_difficulty_check conf then
+                expectTrueIO "wrong difficulty" $
+                    hashTargetValid bc branch
+            else
+                return ()
+
+            let main_branch = mainBranch chain
+
+            bc <-
+                if main_branch == branch then do
+                    -- traceM "adding to the main branch"
+                    -- adding to the main branch
+                    
+                    let skip_tx_check = Just True == do
+                            (height, _) <- tckr_block_assumed_valid conf
+                            return (cur_height branch <= fi height)
+
+                    -- using cached utxo because any error
+                    -- in the tx will cause the tx state to roll back
+
+                    if not skip_tx_check then
+                        verifyBlockTx bc branch block
+                    else do
+                        -- trust all txns
+                        traceM "txns assumed valid"
+                        addTxns tx_state block
+
+                    -- update fork deploy status
+                    updateForkDeploy bc branch
+
+                    return bc
+
+                else if branch > main_branch then do
+                    -- branch becoming the main branch
+                    
+                    traceM "main branch change!!!"
+
+                    -- set main branch
+                    bc <- updateChain bc (setMainBranch chain branch)
+
+                    withCacheUTXO tx_state $ \tx_state -> do
+                        let (fp1, fp2) = forkPath chain branch main_branch
+
+                        -- [[TxPayload]]
+                        -- fp1 is in descending order of heights
+                        forM_ fp1 $ \bnode -> do
+                            -- get full node and then get txns
+                            -- to revert the UTXO
+
+                            bnode <- toFullBlockNodeFail chain bnode
+
+                            let all_txns = FD.toList (txns (block_data bnode))
+
+                            -- revert the state in reverse order
+                            mapM_ (revertUTXO tx_state) (reverse all_txns)
+        
+                        -- recheck all new main branch nodes
+                        
+                        -- fp2 is in descending order of heights
+                        forM_ (reverse fp2) $ \bnode -> do
+                            bnode <- toFullBlockNodeFail chain bnode
+                            -- verify all blocks in the new main branch
+                            verifyBlockTx bc branch (block_data bnode)
+
+                    return bc
+                else
+                    -- still not main branch do nothing
+                    return bc
+
+            if is_orphan_block then do
+                -- traceM "orphan removed"
+                updateChain bc (removeOrphan chain block)
             else do
+                -- traceM "collect orphans"
                 -- not orphan, collect other orphan
                 collectOrphan bc >>= trySyncChain
 

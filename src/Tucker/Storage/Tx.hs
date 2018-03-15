@@ -3,6 +3,7 @@
 module Tucker.Storage.Tx where
 
 import Data.Word
+import Data.Bits
 import qualified Data.Set as SET
 import qualified Data.Foldable as FD
 
@@ -22,6 +23,7 @@ txLocator = (,)
 locatorToHash = fst
 locatorToIdx = snd
 
+-- the last byte of indicates whether the outpoint is spent
 type UTXOArg c = c OutPoint Value
 
 type UTXOCache c = UTXOArg (CacheMap c)
@@ -83,32 +85,67 @@ initTxState conf@(TCKRConf {
         tx_orphan_pool = SET.empty
     }
 
+getSpentAndUnspent :: TxPayload -> ([OutPoint], [(OutPoint, Value)])
+getSpentAndUnspent tx =
+    let spent = map prev_out (tx_in tx)
+        len_out = length (tx_out tx)
+
+        -- :: [(OutPoint, Value)]
+        unspent = map (uncurry OutPoint) (replicate len_out (txid tx) `zip` [0..])
+                  `zip`
+                  map value (tx_out tx)
+
+    in (spent, unspent)
+
+-- core state change in bitcoin
+applyUTXO :: UTXOMap a => TxState a -> TxPayload -> IO ()
+applyUTXO (TxState { utxo_map = utxo_map }) tx = do
+    let (spent, unspent) = getSpentAndUnspent tx
+
+    -- remove/add spent/unspent outpoint
+    -- mapM_ (deleteIO utxo_map) spent
+    mapM_ (applyIO utxo_map complement) spent
+    -- take the complement of the value instead of deleting the entry
+    
+    mapM_ (uncurry (insertIO utxo_map)) unspent
+
+-- revert the UTXO state
+-- ASSUMING the tx has already been applied to UTXO
+revertUTXO :: UTXOMap a => TxState a -> TxPayload -> IO ()
+revertUTXO (TxState { utxo_map = utxo_map }) tx = do
+    let (spent, unspent) = getSpentAndUnspent tx
+
+    mapM_ (applyIO utxo_map complement) spent
+    mapM_ (deleteIO utxo_map . fst) unspent
+
 -- add a list of block-included tx and add/remove utxo respectively
 -- this function contains no validation of the tx
 addTx :: UTXOMap a => TxState a -> Block -> Int -> IO ()
-addTx (TxState {
+addTx state@(TxState {
     bucket_tx = bucket_tx,
     utxo_map = utxo_map
 }) block idx = do
     let tx = FD.toList (txns block) !! idx
-        spent = map prev_out (tx_in tx)
-        len_out = length (tx_out tx)
 
-        -- :: [(OutPoint, Value)]
-        unspent =
-            map (uncurry OutPoint) (replicate len_out (txid tx) `zip` [0..])
-            `zip`
-            map value (tx_out tx)
-
+    -- add tx to database
     insertIO bucket_tx (txid tx) (txLocator (block_hash block) (fi idx))
 
-    -- remove/add spent/unspent outpoint
-    mapM_ (deleteIO utxo_map) spent
-    mapM_ (uncurry (insertIO utxo_map)) unspent
+    -- apply utxo
+    applyUTXO state tx
+
+addTxns :: UTXOMap a => TxState a -> Block -> IO ()
+addTxns state block =
+    let len = length (txns block) in
+    mapM_ (addTx state block) [ 0 .. len - 1 ]
 
 -- lookup for a utxo
 lookupUTXO :: UTXOMap a => TxState a -> OutPoint -> IO (Maybe Value)
-lookupUTXO = lookupIO . utxo_map
+lookupUTXO state outpoint = do
+    mvalue <- lookupIO (utxo_map state) outpoint
+
+    return $ mvalue >>= \v ->
+        if v >= 0 then return v
+        else fail "spent value"
 
 -- lookup for a accepted txid
 findTxId :: TxState a -> Hash256 -> IO (Maybe TxLocator)
