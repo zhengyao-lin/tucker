@@ -7,7 +7,6 @@ import System.Mem
 
 import Tucker.Conf
 import Tucker.P2P.Init
-import Tucker.Test
 
 main = do
     -- tmp

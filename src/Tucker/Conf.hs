@@ -298,6 +298,6 @@ tucker_default_conf_testnet3 = do
             }
         ],
 
-        tckr_block_assumed_valid = Nothing
-            -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
+        tckr_block_assumed_valid =
+            Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
     }
