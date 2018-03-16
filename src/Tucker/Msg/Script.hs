@@ -317,7 +317,7 @@ evalOpS (OP_IF exp ofs) = do
     if top == exp then
         -- main branch
         return ()
-    else -- jump to the next OP_ELSE/OP_ENDIF
+    else -- jump to the op after the next OP_ELSE/OP_ENDIF
         ofsPcS ofs
 
 evalOpS (OP_ELSE ofs) = ofsPcS ofs

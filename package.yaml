@@ -50,6 +50,7 @@ dependencies:
 - arithmoi
 - transformers
 - exceptions
+- ansi-terminal
 
 library:
   source-dirs: src

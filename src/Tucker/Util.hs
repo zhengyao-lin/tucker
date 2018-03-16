@@ -7,10 +7,14 @@ import Data.List
 import Data.Time.Clock.POSIX
 import qualified Data.Foldable as FD
 import qualified Data.Set.Ordered as OSET
+import qualified Data.ByteString.Char8 as BS
 
 import Math.NumberTheory.Moduli
 
+import Debug.Trace
+
 import System.CPUTime
+import System.Console.ANSI
 
 import Control.Monad
 import Control.Exception
@@ -268,3 +272,8 @@ average lst' =
 
 deleteAll :: Eq a => a -> [a] -> [a]
 deleteAll a lst = filter (/= a) lst
+
+-- clear line and trace
+traceClear :: String -> IO ()
+traceClear msg =
+    clearLine >> setCursorColumn 0 >> BS.putStr (BS.pack msg)

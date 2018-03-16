@@ -28,10 +28,8 @@ data ScriptOp
     -- flow-control
     | OP_NOP
 
-    -- if <expected value> true_branch false_branch
-    -- the two pc's point to the RELATIVE location of corresponding else and endif respectively
-    | OP_IF Bool ScriptPc
-    | OP_ELSE ScriptPc
+    | OP_IF Bool ScriptPc -- position of the next OP_ELSE/OP_ENDIF
+    | OP_ELSE ScriptPc -- position of the next OP_ELSE/OP_ENDIF
     | OP_ENDIF
 
     | OP_VERIFY
@@ -341,29 +339,24 @@ opIfD = do
         else if i == 0x64 then return False
         else fail "OP_IF/OP_NOTIF invalid first byte"
 
-    b1 <- stmtsD
-
-    -- coubld be OP_ELSE or OP_ENDIF
-    i <- byteD
+    main_body <- stmtsD
     
-    b2 <-
-        if i == 0x67 then do -- ELSE
-            ops <- stmtsD
-            beginWithByteD 0x68 -- ends with OP_ENDIF
-            return ops
-        else if i == 0x68 then return [] -- ENDIF
-        else fail "OP_IF invalid syntax"
+    -- NOTE: multiple OP_ELSE branch is allowed!
+    -- the else branch is executed iff the preceding
+    -- branch is NOT executed
+    else_bodies <- many $ do
+        beginWithByteD 0x67
+        ops <- stmtsD
+        return ops
 
-    let else_ofs = length b1 + 1 -- (pc of OP_IF + else_ofs) points to OP_ELSE/OP_ENDIF
-        endif_ofs = length b2 + 1 -- (pc of OP_ELSE + endif_ofs) points to OP_ENDIF
+    beginWithByteD 0x68 -- OP_ENDIF
 
-        if_op = OP_IF exp else_ofs
-        b2' =
-            if null b2 then []
-            else
-                OP_ELSE endif_ofs : b2
+    let if_branch = OP_IF exp (length main_body + 1) : main_body
+        else_branches =
+            flip map else_bodies $ \else_body ->
+                OP_ELSE (length else_body + 1) : else_body
 
-    return ([ if_op ] ++ b1 ++ b2' ++ [ OP_ENDIF ])
+    return (if_branch ++ concat else_branches ++ [ OP_ENDIF ])
 
 oneByteOpD :: Decoder ScriptOp
 oneByteOpD = do
@@ -397,8 +390,13 @@ instance Decodable [ScriptOp] where
         res <- stmtsD
         len <- lenD
 
+        rest <- getD
+
         if len /= 0 then
-            fail $ "failed to parse " ++ show (hex all) -- reparse and output the last errors
+            fail $ "failed to parse " ++
+                   show (hex all) ++ ", " ++
+                   show (hex rest) ++ ", " ++
+                   show res -- reparse and output the last errors
         else return res
 
 -- -- extract code after the last(if exists) OP_CODESEPARATOR

@@ -198,7 +198,7 @@ tucker_default_conf_mainnet = do
         tckr_gc_interval = 20 * 1000 * 1000, -- 20 sec
         
         tckr_max_block_task = 20,
-        tckr_min_parallel_input_check = maxBound,
+        tckr_min_parallel_input_check = 256, -- maxBound,
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min

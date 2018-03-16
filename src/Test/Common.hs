@@ -44,7 +44,8 @@ module Test.Common (
     module Tucker.P2P.Node,
     module Tucker.P2P.Action,
 
-    module Tucker.Storage.Chain
+    module Tucker.Storage.Chain,
+    module Tucker.Storage.Block
 ) where
 
 import Data.Hex
@@ -91,3 +92,4 @@ import Tucker.P2P.Node
 import Tucker.P2P.Action
 
 import Tucker.Storage.Chain
+import Tucker.Storage.Block

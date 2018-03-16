@@ -381,11 +381,12 @@ fetchBlock task env node _ = do
             block_hash = hash
         }) = decodeFailLE payload
 
+        -- if the hash is in the task list
         if hash `elem` hashes then do
             fetched <- appA (MAP.insert hash payload) fetched_var
 
             if MAP.size fetched == length hashes then do
-                -- all fetched
+                -- all blocks fetched
                 nodeMsg env node "partial task finished"
 
                 done env node (task {

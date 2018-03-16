@@ -447,6 +447,8 @@ verifyBlockTx bc branch block = do
     let all_txns = FD.toList (txns block)
         conf = bc_conf bc
 
+    -- using cached utxo because any error
+    -- in the tx will cause the tx state to roll back
     withCacheUTXO (bc_tx_state bc) $ \tx_state -> do
         let coinbase = head all_txns
             normal_tx = tail all_txns
@@ -455,7 +457,7 @@ verifyBlockTx bc branch block = do
             expectTrue "more than one coinbase txns" $
                 not (isCoinbase tx)
 
-            traceM $ "\rchecking tx " ++ show idx
+            -- traceM $ "checking tx " ++ show idx
 
             let total_out_value = getOutputValue tx
 
@@ -464,18 +466,26 @@ verifyBlockTx bc branch block = do
             let len = fi (length (tx_in tx))
                 idxs = [ 0 .. len - 1 ]
                 sep_idxs = foldList cap idxs
-                verify = verifyInput bc tx_state branch tx
-                verifyP = mapM verify -- parallel
+
+                verify in_parallel in_idx = do
+                    traceClear $
+                        printf "verifying input %d of tx %d %s%s"
+                               in_idx idx (show (txid tx))
+                               (if in_parallel then "(in parallel)" else "")
+
+                    verifyInput bc tx_state branch tx in_idx
+
+                verifyP = mapM (verify True) -- parallel
             -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
 
             in_values <-
                 if length idxs >= tckr_min_parallel_input_check conf then do
-                    traceM "checking input in parallel"
+                    -- traceM "checking input in parallel"
                     mconcat <$>
                         map (either (reject . show) id) <$>
                         forkMapM verifyP sep_idxs
                 else
-                    mapM verify idxs
+                    mapM (verify False) idxs
 
             let fee = sum (in_values) - total_out_value
             
@@ -495,6 +505,8 @@ verifyBlockTx bc branch block = do
 
         expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
             coinbase_out <= block_fee + tx_fee
+
+        traceClear ("verified " ++ show (length all_txns) ++ " txns\n")
 
         addTx tx_state block 0
 
@@ -596,10 +608,7 @@ addBlockFail bc@(BlockChain {
                     
                     let skip_tx_check = Just True == do
                             (height, _) <- tckr_block_assumed_valid conf
-                            return (cur_height branch <= fi height)
-
-                    -- using cached utxo because any error
-                    -- in the tx will cause the tx state to roll back
+                            return (cur_height branch < fi height)
 
                     if not skip_tx_check then
                         verifyBlockTx bc branch block
@@ -621,6 +630,8 @@ addBlockFail bc@(BlockChain {
                     -- set main branch
                     bc <- updateChain bc (setMainBranch chain branch)
 
+                    -- if block check fails here, the new block will be rejected
+                    -- and no update in main branch is possible
                     withCacheUTXO tx_state $ \tx_state -> do
                         let (fp1, fp2) = forkPath chain branch main_branch
 

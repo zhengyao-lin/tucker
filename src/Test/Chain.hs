@@ -11,6 +11,7 @@ add_block_common_proc b r =
         Right _ ->
             putStrLn $ "block added: " ++ show b
 
+-- adding block 1 to 7 in the mainnet
 chainTest1 = TestCase $ do
     removeTestDB
 
@@ -40,6 +41,7 @@ chainTest1 = TestCase $ do
         addBlocks add_block_common_proc bc blocks
         return ()
 
+-- the main branch is exceeded by a fake fork
 chainTest2 = TestCase $ do
     removeTestDB
 
@@ -77,7 +79,13 @@ chainTest2 = TestCase $ do
 
     -- putStrLn ""
     withChain conf $ \bc -> do
-        addBlocks add_block_common_proc bc blocks
+        bc <- addBlocks add_block_common_proc bc blocks
+
+        -- traceM (show (block_data (mainBranch (bc_chain bc))))
+
+        assertEqual "main branch should be the fake branch"
+            (last fake_chain) (block_data (mainBranch (bc_chain bc)))
+
         return ()
 
 chainTests = TestList [

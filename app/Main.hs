@@ -8,12 +8,8 @@ import System.Mem
 import Tucker.Conf
 import Tucker.P2P.Init
 
+import Test.All
+
 main = do
-    -- tmp
-
-    -- performMajorGC
-
-    -- forever yield
-
     tucker_default_conf_testnet3 >>= mainLoop
     forever yield
