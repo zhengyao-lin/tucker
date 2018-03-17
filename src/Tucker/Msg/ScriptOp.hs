@@ -22,7 +22,8 @@ type ScriptPc = Int
 
 data ScriptOp
     -- constant ops
-    = OP_PUSHDATA ByteString
+    = OP_PUSHDATA ByteString (Maybe ByteString)
+    -- the second bytestring is the original data
     | OP_CONST Int8
 
     -- flow-control
@@ -145,7 +146,7 @@ data ScriptOp
 
 one_byte_op_map :: [(ScriptOp, Word8)]
 one_byte_op_map = [
-        (OP_PUSHDATA BSR.empty,  0x00),
+        -- (OP_PUSHDATA BSR.empty,  0x00),
         (OP_NOP,                 0x61),
 
         (OP_VERIFY,              0x69),
@@ -256,15 +257,17 @@ disabled_ops = [
     ]
 
 instance Encodable ScriptOp where
-    encode _ (OP_PUSHDATA dat) =
+    encode _ (OP_PUSHDATA _ (Just cache)) = cache
+
+    encode _ (OP_PUSHDATA dat Nothing) =
         if len <= 0x4b then
-            BSR.concat [ encodeLE (fromIntegral len :: Word8), dat ]
+            BSR.concat [ encodeLE (fi len :: Word8), dat ]
         else if len <= 0xff then
-            BSR.concat [ bchar 0x4c, encodeLE (fromIntegral len :: Word8), dat ]
+            BSR.concat [ bchar 0x4c, encodeLE (fi len :: Word8), dat ]
         else if len <= 0xffff then
-            BSR.concat [ bchar 0x4d, encodeLE (fromIntegral len :: Word16), dat ]
+            BSR.concat [ bchar 0x4d, encodeLE (fi len :: Word16), dat ]
         else -- if len <= 0xffffffff then
-            BSR.concat [ bchar 0x4e, encodeLE (fromIntegral len :: Word32), dat ]
+            BSR.concat [ bchar 0x4e, encodeLE (fi len :: Word32), dat ]
         where
             len = BSR.length dat
 
@@ -308,6 +311,9 @@ instance Encodable ScriptOp where
 
 opPushdataD :: Decoder ScriptOp
 opPushdataD = do
+    orig <- getD
+    len1 <- lenD
+
     i <- byteD
 
     len <-
@@ -320,7 +326,10 @@ opPushdataD = do
 
     dat <- bsD len
 
-    return $ OP_PUSHDATA dat
+    len2 <- lenD
+    let cache = BSR.take (len1 - len2) orig
+
+    return $ OP_PUSHDATA dat (Just cache)
 
 opConstD :: Decoder ScriptOp
 opConstD = do

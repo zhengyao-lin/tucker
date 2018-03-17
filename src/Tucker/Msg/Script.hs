@@ -239,7 +239,7 @@ txSigHashS all_sigs sig_raw = do
         -- (https://en.bitcoin.it/w/images/en/7/70/Bitcoin_OpCheckSig_InDetail.png)
 
         should_keep OP_CODESEPARATOR = False
-        should_keep (OP_PUSHDATA dat) = dat `notElem` all_sigs
+        should_keep (OP_PUSHDATA dat _) = dat `notElem` all_sigs
         should_keep _ = True
 
         subscr = filter should_keep . drop (cs_op + 1)
@@ -307,7 +307,7 @@ shiftR' a b = shiftR a (fi b) :: Integer
 
 evalOpS :: ScriptOp -> EvalState ()
 
-evalOpS (OP_PUSHDATA dat) = pushS dat
+evalOpS (OP_PUSHDATA dat _) = pushS dat
 evalOpS (OP_CONST v) = pushS (fi v)
 
 evalOpS OP_NOP = return ()
@@ -401,7 +401,7 @@ evalOpS OP_CHECKMULTISIG = do
 
     -- for compatibility with a historical bug
     popS :: EvalState ByteString
-
+    
     pushS (matched == length sigs)
 
 evalOpS OP_CHECKMULTISIGVERIFY =
@@ -696,7 +696,7 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     if script_enable_p2sh (script_conf s) then do
         redeem_script <- decodeAllLE redeem
 
-        -- traceM (show redeem_script)
+        -- traceM (show redeem)
         
         ns <- toTCKRErrorM (execStateT popS' s) -- pop out result first
         execEval ns redeem_script -- exec on redeem script
@@ -725,7 +725,7 @@ instance Eq ScriptType where
 
 allPush :: [ScriptOp] -> Bool
 allPush [] = True
-allPush (OP_PUSHDATA _:rst) = allPush rst
+allPush (OP_PUSHDATA _ _:rst) = allPush rst
 allPush _ = False
 
 -- (sig script, pub key script)
@@ -735,30 +735,30 @@ getScriptType :: [[ScriptOp]] -> ScriptType
 -- sig_script: <signature> <public key>
 --  pk_script: OP_DUP OP_HASH160 <public key hash> OP_EQUALVERIFY OP_CHECKSIG
 getScriptType
-    [ [ OP_PUSHDATA _, OP_PUSHDATA _ ],
-      [ OP_DUP, OP_HASH160, OP_PUSHDATA _, OP_EQUALVERIFY, OP_CHECKSIG ] ]
+    [ [ OP_PUSHDATA _ _, OP_PUSHDATA _ _ ],
+      [ OP_DUP, OP_HASH160, OP_PUSHDATA _ _, OP_EQUALVERIFY, OP_CHECKSIG ] ]
     = SCRIPT_P2PKH
 
 -- P2PK
 -- sig_script: <signature>
 --  pk_script: <public key> OP_CHECKSIG
 getScriptType
-    [ [ OP_PUSHDATA _ ], [ OP_PUSHDATA _, OP_CHECKSIG ] ]
+    [ [ OP_PUSHDATA _ _ ], [ OP_PUSHDATA _ _, OP_CHECKSIG ] ]
     = SCRIPT_P2PK
 
 -- P2SH
 -- sig_script: just OP_PUSHDATA's
 --  pk_script: OP_HASH160 <hash160(redeem script)> OP_EQUAL
 getScriptType
-    [ reverse -> OP_PUSHDATA redeem:(allPush -> True),
-      [ OP_HASH160, OP_PUSHDATA _, OP_EQUAL ] ]
+    [ reverse -> OP_PUSHDATA redeem _ : (allPush -> True),
+      [ OP_HASH160, OP_PUSHDATA _ _, OP_EQUAL ] ]
     = SCRIPT_P2SH redeem
 
 -- P2MULTISIG
 -- sig_script: OP_0 <signature 1> <signature 2>
 --  pk_script: M <public key 1> <public key 2> ... <public key N> N OP_CHECKMULTISIG
 getScriptType
-    [ OP_PUSHDATA _:(allPush -> True),
+    [ OP_PUSHDATA _ _ : (allPush -> True),
       OP_CONST _:(reverse -> OP_CHECKMULTISIG:OP_CONST _:(allPush -> True)) ]
     = SCRIPT_P2MULTISIG
 

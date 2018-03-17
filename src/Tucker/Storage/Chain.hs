@@ -447,6 +447,8 @@ verifyBlockTx bc branch block = do
     let all_txns = FD.toList (txns block)
         conf = bc_conf bc
 
+    begin_time <- msCPUTime
+
     -- using cached utxo because any error
     -- in the tx will cause the tx state to roll back
     withCacheUTXO (bc_tx_state bc) $ \tx_state -> do
@@ -506,9 +508,13 @@ verifyBlockTx bc branch block = do
         expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
             coinbase_out <= block_fee + tx_fee
 
-        traceClear ("verified " ++ show (length all_txns) ++ " txns\n")
-
         addTx tx_state block 0
+
+    end_time <- msCPUTime :: IO Integer
+
+    traceClear
+        ("verified " ++ show (length all_txns) ++
+         " txns in " ++ show (end_time - begin_time) ++ "ms\n")
 
 -- locatorToTx :: Chain -> TxLocator -> IO (Maybe TxPayload)
 -- locatorToTx (Chain {

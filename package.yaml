@@ -51,6 +51,8 @@ dependencies:
 - transformers
 - exceptions
 - ansi-terminal
+- binary
+- cpu
 
 library:
   source-dirs: src

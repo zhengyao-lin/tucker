@@ -21,7 +21,7 @@ scriptTest1 = TestCase $ do
                 OP_ENDIF
             ]
 
-        sc4 = [ OP_PUSHDATA $ BSR.pack [ 0x00 ] ]
+        sc4 = [ OP_PUSHDATA (BSR.pack [ 0x00 ]) Nothing ]
 
         sc5 = [
                 OP_CONST 1,

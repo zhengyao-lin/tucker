@@ -9,12 +9,21 @@ import Data.Bits
 import Data.Word
 import Data.Char
 import Data.LargeWord
+import qualified Data.Binary as BIN
 import qualified Data.Monoid as MND
 import qualified Data.Foldable as FD
+import qualified Data.ByteArray as BA
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Lazy as LBSR
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Unsafe as BSU
 import qualified Data.ByteString.Builder as BSB
+
+import Foreign.Ptr
+import Foreign.Storable
+
+import System.IO.Unsafe
+import qualified System.Endian as END
 
 import Control.Monad
 import Control.Exception
@@ -149,27 +158,70 @@ encodeVWord end num =
 encodeFixed :: (Integral a, Integral b) => (b -> BSB.Builder) -> a -> ByteString
 encodeFixed t = LBSR.toStrict . BSB.toLazyByteString . t . fi
 
+-- allocBS n = BSR.pack (replicate n 0)
+
+-- allocate a NEW bytestring with a new memory space
+allocBS n = BA.unsafeCreate n (const (return ()))
+
+-- fast encode
+
+-- encoding fixed-size ints is same as encoding words
+-- fastEncodeWord size le be end num =
+--     unsafePerformIO $ do
+--         let bs = allocBS size
+--         BSU.unsafeUseAsCString bs $ \ptr ->
+--             poke (castPtr ptr) ((if end == LittleEndian then le else be) num)
+
+--         return bs
+
+-- n counting from the lowest bit
+byteAt :: (Bits a, Integral a, Integral b) => a -> Int -> b
+byteAt num n = fi ((num `shiftR` (n * 8)) .&. 0xff)
+
+fastEncodeWord size end num =
+    BSR.pack $ map (byteAt num) $
+        if end == LittleEndian then [ 0 .. size - 1 ]
+        else [ size - 1, size - 2 .. 0 ]
+
+fastEncodeWord8 _ num = bchar (num :: Word8)
+fastEncodeWord16 = fastEncodeWord 2 :: Endian -> Word16 -> ByteString
+fastEncodeWord32 = fastEncodeWord 4 :: Endian -> Word32 -> ByteString
+fastEncodeWord64 = fastEncodeWord 8 :: Endian -> Word64 -> ByteString
+
+{-# INLINE fastEncodeWord #-}
+{-# INLINE fastEncodeWord8 #-}
+{-# INLINE fastEncodeWord16 #-}
+{-# INLINE fastEncodeWord32 #-}
+{-# INLINE fastEncodeWord64 #-}
+
 -- encode int to a fixed-size string(will truncate/fill the resultant string)
 encodeInt :: (Integral t, Bits t) => Int -> Endian -> t -> ByteString
 
-encodeInt 1 _ num = encodeFixed BSB.int8 num
+-- encodeInt 1 end num = fastEncodeWord8 end num
 
-encodeInt 2 LittleEndian num = encodeFixed BSB.int16LE num
-encodeInt 2 BigEndian num    = encodeFixed BSB.int16BE num
+-- encodeInt 2 LittleEndian num = encodeFixed BSB.int16LE num
+-- encodeInt 2 BigEndian num    = encodeFixed BSB.int16BE num
 
-encodeInt 4 LittleEndian num = encodeFixed BSB.int32LE num
-encodeInt 4 BigEndian num    = encodeFixed BSB.int32BE num
+-- encodeInt 4 LittleEndian num = encodeFixed BSB.int32LE num
+-- encodeInt 4 BigEndian num    = encodeFixed BSB.int32BE num
 
-encodeInt 8 LittleEndian num = encodeFixed BSB.int64LE num
-encodeInt 8 BigEndian num    = encodeFixed BSB.int64BE num
+-- encodeInt 8 LittleEndian num = encodeFixed BSB.int64LE num
+-- encodeInt 8 BigEndian num    = encodeFixed BSB.int64BE num
+
+encodeInt 1 end num = fastEncodeWord8 end (fi num)
+encodeInt 2 end num = fastEncodeWord16 end (fi num)
+encodeInt 4 end num = fastEncodeWord32 end (fi num)
+encodeInt 8 end num = fastEncodeWord64 end (fi num)
 
 encodeInt nbyte end num =
     if diff > 0 then -- fill
         if num < 0 then BSR.replicate diff 0xff `fill` res
         else BSR.replicate diff 0x00 `fill` res
     else
-        BSR.take nbyte res
-    
+        case end of
+            LittleEndian -> BSR.take nbyte res
+            BigEndian -> BSR.drop (len - nbyte) res
+
     where res = encodeVInt end num
           len = BSR.length res
           diff = nbyte - len
@@ -182,21 +234,67 @@ decodeInt' :: Integer -> Endian -> ByteString -> Integer
 decodeInt' init LittleEndian = BSR.foldr' (\x a -> shiftL a 8 + fi x) init
 decodeInt' init BigEndian = BSR.foldl' (\a x -> shiftL a 8 + fi x) init
 
+-- fast decoder
+
+-- in cpu endianness
+fastDecodeCPU :: (Storable t, Integral t) => ByteString -> t
+fastDecodeCPU bs =
+    unsafePerformIO $
+    BSU.unsafeUseAsCString bs (peek . castPtr)
+
+fastDecodeInt le be end = fi . (if end == LittleEndian then le else be) . fastDecodeCPU
+fastDecodeWord le be end = (if end == LittleEndian then le else be) . fastDecodeCPU
+
+fastDecodeInt8 _ bs = fi (BSR.head bs) :: Int8
+fastDecodeInt16 = fastDecodeInt END.toLE16 END.toBE16 :: Endian -> ByteString -> Int16
+fastDecodeInt32 = fastDecodeInt END.toLE32 END.toBE32 :: Endian -> ByteString -> Int32
+fastDecodeInt64 = fastDecodeInt END.toLE64 END.toBE64 :: Endian -> ByteString -> Int64
+
+fastDecodeWord8 _ bs = BSR.head bs
+fastDecodeWord16 = fastDecodeWord END.toLE16 END.toBE16 :: Endian -> ByteString -> Word16
+fastDecodeWord32 = fastDecodeWord END.toLE32 END.toBE32 :: Endian -> ByteString -> Word32
+fastDecodeWord64 = fastDecodeWord END.toLE64 END.toBE64 :: Endian -> ByteString -> Word64
+
+{-# INLINE fastDecodeInt #-}
+{-# INLINE fastDecodeWord #-}
+{-# INLINE fastDecodeInt8 #-}
+{-# INLINE fastDecodeInt16 #-}
+{-# INLINE fastDecodeInt32 #-}
+{-# INLINE fastDecodeInt64 #-}
+{-# INLINE fastDecodeWord8 #-}
+{-# INLINE fastDecodeWord16 #-}
+{-# INLINE fastDecodeWord32 #-}
+{-# INLINE fastDecodeWord64 #-}
+
 -- decodes a bytestring as an integer and determines the sign
 decodeVInt :: Integral t => Endian -> ByteString -> t
 decodeVInt end bs =
-    if BSR.null bs then 0
-    else if sign < 0x80 then fi (decodeInt' 0 end bs)
-    else fi (decodeInt' (-1) end bs)
+    case BSR.length bs of
+        0 -> 0
+        1 -> fi (fastDecodeInt8 end bs)
+        2 -> fi (fastDecodeInt16 end bs)
+        4 -> fi (fastDecodeInt32 end bs)
+        8 -> fi (fastDecodeInt64 end bs)
+        _ ->
+            if sign < 0x80 then fi (decodeInt' 0 end bs)
+            else fi (decodeInt' (-1) end bs)
     where
-        sign =
-            case end of
-                LittleEndian -> BSR.last bs
-                BigEndian -> BSR.head bs
+        sign = case end of
+            LittleEndian -> BSR.last bs
+            BigEndian -> BSR.head bs
 
 -- similar to above, but doesn't care about the sign
 decodeVWord :: Integral t => Endian -> ByteString -> t
-decodeVWord end bs = fi (decodeInt' 0 end bs)
+decodeVWord end bs =
+    case BSR.length bs of
+        0 -> 0
+        -- NOTE: cannot swap with fastDecodeInt here because
+        -- the sign extension may change the intended value
+        1 -> fi (fastDecodeWord8 end bs)
+        2 -> fi (fastDecodeWord16 end bs)
+        4 -> fi (fastDecodeWord32 end bs)
+        8 -> fi (fastDecodeWord64 end bs)
+        _ -> fi (decodeInt' 0 end bs)
 
 -- turn a negative Integer to a unsigned positive Integer
 toUnsigned :: Integer -> Integer

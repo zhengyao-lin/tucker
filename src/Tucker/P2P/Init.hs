@@ -73,7 +73,9 @@ gcLoop :: MainLoopEnv -> IO ()
 gcLoop env@(MainLoopEnv {
     global_conf = TCKRConf {
         tckr_node_alive_span = max_alive_span,
-        tckr_node_max_blacklist_count = max_bl_count
+        tckr_node_max_blacklist_count = max_bl_count,
+        tckr_bootstrap_host = boot_host,
+        tckr_seek_min = seek_min
     }
 }) =
     forever $ do
@@ -106,17 +108,22 @@ gcLoop env@(MainLoopEnv {
 
         setA (node_list env) new_list
 
-        -- res <- forM new_list $ \node -> do
-        --     action_list <- getA (action_list node)
-        --     new_action <- getA (new_action node)
-        --     return (length action_list, length new_action)
-
-        -- envMsg env $ "actions: " ++ show res
-
         envMsg env $ "gc: " ++
                      show (length cur_list - length new_list) ++
                      " dead node(s) collected"
         envMsg env $ "all " ++ show (length new_list) ++ " node(s): " ++ show new_list
+
+        if seek_min > length new_list then
+            -- seek for more nodes
+            if null new_list then do
+                envMsg env "!!! lost all connections, try to bootstrap again"
+                bootstrap env boot_host
+            else do
+                envMsg env "!!! too few nodes, start seeking"
+                envSpreadSimpleAction env (NormalAction seekNode) (length new_list)
+                return ()
+        else
+            return ()
 
 -- syncOne env n = do
 --     envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n

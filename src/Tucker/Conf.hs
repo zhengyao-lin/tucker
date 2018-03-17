@@ -183,10 +183,10 @@ tucker_default_conf_mainnet = do
         tckr_trans_timeout = 5, -- 5 sec
         tckr_bootstrap_host = [ "seed.btc.petertodd.org" ],
 
-        tckr_seek_min = 8, -- if node_count < min_seek then seek for more nodes
-        tckr_seek_max = 16, -- if node_count >= max_seek then stop seeking
+        tckr_seek_min = 16, -- if node_count < min_seek then seek for more nodes
+        tckr_seek_max = 32, -- if node_count >= max_seek then stop seeking
 
-        tckr_max_node = 32, -- max number of nodes in total
+        tckr_max_node = 48, -- max number of nodes in total
         
         tckr_node_blacklist = [
                 ip4 (127, 0, 0, 1),

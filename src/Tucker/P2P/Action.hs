@@ -95,7 +95,9 @@ pingDelay env node msg = do
 
     -- setA (ping_delay node) maxBound -- set a maximum in case the node doesn't reply
     start <- msCPUTime
-    timeoutRetryS (timeout_s env) $ tSend trans ping
+    -- timeoutRetryS (timeout_s env) $
+    
+    tSend trans ping
 
     recv env node [] BTC_CMD_PONG $ \(PingPongPayload back_nonce) -> do
         if back_nonce == nonce then do
@@ -204,7 +206,8 @@ syncChain callback env node msg = do
     getblocks <- encodeMsg conf BTC_CMD_GETBLOCKS $
                  encodeGetblocksPayload conf (map block_hash latest) nullHash256
 
-    timeoutRetryS (timeout_s env) $ tSend trans getblocks
+    -- timeoutRetryS (timeout_s env) $
+    tSend trans getblocks
 
     recv env node [] BTC_CMD_INV $ \(InvPayload {
         inv_vect = inv_vect
@@ -247,7 +250,7 @@ scheduleFetch env init_hashes callback = do
 
     let reassign sched task blacklist = do
             clearBlacklist sched
-            doFetch sched (fetchTaskToHashes (mconcat task)) []
+            doFetch sched (fetchTaskToHashes (mconcat task)) blacklist
 
         doFetch sched hashes blacklist =
             envSpreadActionExcept
@@ -367,7 +370,8 @@ fetchBlock task env node _ = do
         invs = map (InvVector INV_TYPE_BLOCK) hashes
 
     getdata <- encodeMsg conf BTC_CMD_GETDATA $ encodeGetdataPayload invs
-    timeoutRetryS (timeout_s env) $ tSend trans getdata
+    -- timeoutRetryS (timeout_s env) $ 
+    tSend trans getdata
 
     -- nodeMsg env node "getdata sent"
 
@@ -398,3 +402,9 @@ fetchBlock task env node _ = do
                 return [ StopProp ]
         else
             return []
+
+seekNode :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+seekNode env node msg = do
+    getaddr <- encodeMsg (global_conf env) BTC_CMD_GETADDR $ encodeGetaddrPayload
+    tSend (conn_trans node) getaddr
+    return []
