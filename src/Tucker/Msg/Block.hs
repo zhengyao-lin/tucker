@@ -8,8 +8,6 @@ import Data.Bits
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
 
-import Debug.Trace
-
 import Tucker.Enc
 import Tucker.Auth
 import Tucker.Conf
@@ -171,12 +169,8 @@ instance Decodable Block where
             txns = txns
         })) <- decoder
 
-        -- traceM "decoding block"
-
         -- read real txns
         txns <- listD (length txns) decoder
-
-        -- traceM "decoding block finished"
 
         final_len <- lenD
 

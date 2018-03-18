@@ -8,8 +8,6 @@ import Data.LargeWord
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
-import Debug.Trace
-
 import Tucker.Enc
 import Tucker.Auth
 import Tucker.Util

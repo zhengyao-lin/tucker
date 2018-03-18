@@ -16,8 +16,6 @@ import Control.Applicative
 import Control.Monad.Loops
 import Control.Concurrent.Thread.Delay
 
-import Debug.Trace
-
 -- import System.IO
 import System.Exit
 import System.Random
@@ -259,10 +257,8 @@ scheduleFetch env init_hashes callback = do
                 buildFetchTasks (tckr_max_block_task conf) hashes (taskDone sched)
 
         taskDone sched node task results = do
-            forkIO $ do
-                -- traceM "task done waiting for the lock"
+            forkIO $
                 LK.with var_lock $ do
-                    -- traceM "task done locked"
                     removeFromBlacklist sched node
                     valid <- removeTask sched task
 
@@ -309,7 +305,6 @@ scheduleFetch env init_hashes callback = do
 
         -- refresh block inventory
         refreshBlock sched node = do
-            -- traceM "enter refreshing"
             LK.with var_lock $ do
                 old_added <- getA added_var
 
@@ -321,7 +316,7 @@ scheduleFetch env init_hashes callback = do
         
                 new_added <- appA (+ new_succ_count) added_var
 
-                traceM (show new_succ_count ++ " block(s) to add")
+                tLnM (show new_succ_count ++ " block(s) to add")
 
                 if new_succ_count /= 0 then do
                     -- NOTE: the downloaded part is cleared first

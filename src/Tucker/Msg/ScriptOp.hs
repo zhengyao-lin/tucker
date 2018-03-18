@@ -12,8 +12,6 @@ import qualified Data.ByteString as BSR
 import Control.Exception
 import Control.Applicative
 
-import Debug.Trace
-
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Error

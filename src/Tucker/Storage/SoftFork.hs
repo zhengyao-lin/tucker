@@ -8,8 +8,6 @@ import Data.List
 import Control.Monad
 import Control.Applicative
 
-import Debug.Trace
-
 import Tucker.DB
 import Tucker.Msg
 import Tucker.Enc
@@ -45,7 +43,7 @@ initForkState conf@(TCKRConf {
     -- filter out existing forks
     let new_forks = filter (`notElem` cur_forks) soft_forks
 
-    traceM ("adding new soft forks deployment " ++ show new_forks)
+    tLnM ("adding new soft forks deployment " ++ show new_forks)
 
     forM_ ([0..] `zip` sortForkById new_forks) $ \(i, forks) ->
         if null forks then return ()
@@ -74,7 +72,7 @@ changeForkStatus :: SoftForkState -> SoftFork -> SoftForkStatus -> IO ()
 changeForkStatus (SoftForkState {
     bucket_fork = bucket_fork
 }) fork status = do
-    traceM ("!!! changing the status fork " ++ show fork ++ " to " ++ show status)
+    tLnM ("!!! changing the status fork " ++ show fork ++ " to " ++ show status)
     error "i wanna die!!!"
 
     forks <- maybe [] id <$> lookupIO bucket_fork bit

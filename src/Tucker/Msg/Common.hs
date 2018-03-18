@@ -10,8 +10,6 @@ import qualified Data.ByteString.Char8 as BS
 
 import Network.Socket
 
-import Debug.Trace
-
 import Tucker.Enc
 import Tucker.Conf
 import Tucker.Util
@@ -260,7 +258,7 @@ instance Decodable MsgHead where
             clen          <- checkLenD $ fi payload_len
             -- len           <- lenD
 
-            -- trace ("!!! received: " ++ show command ++ " " ++ show len ++ "/" ++ show payload_len) $
+            -- tLn ("!!! received: " ++ show command ++ " " ++ show len ++ "/" ++ show payload_len) $
 
             if not clen then
                 return (LackData (head_size + fi payload_len))
@@ -280,7 +278,6 @@ instance Decodable MsgHead where
 vlistD :: Decoder t -> Decoder [t]
 vlistD elemD = do
     VInt len <- decoder
-    -- traceM $ "vlist length " ++ show len
     listD (fi len) elemD
 
 encodeVList :: Encodable t => Endian -> [t] -> ByteString

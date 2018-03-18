@@ -70,7 +70,7 @@ chainTest2 = TestCase $ do
             ]
         -- "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d010bffffffff0100f2052a010000004341047211a824f55b505228e4c3d5194c1fcfaa15a456abdf37f9b9d97a4040afc073dee6c89064984f03385237d92167c13e236446b417ab79a0fcae412ae3316b77ac00000000"
 
-    -- traceM (show (block_hash (head blocks)))
+    -- tLnM (block_hash (head blocks))
 
     let fork_hash = block_hash (blocks' !! 3)
         fake_chain = genChain fork_hash 10
@@ -81,7 +81,7 @@ chainTest2 = TestCase $ do
     withChain conf $ \bc -> do
         bc <- addBlocks add_block_common_proc bc blocks
 
-        -- traceM (show (block_data (mainBranch (bc_chain bc))))
+        -- tLnM (block_data (mainBranch (bc_chain bc)))
 
         assertEqual "main branch should be the fake branch"
             (last fake_chain) (block_data (mainBranch (bc_chain bc)))

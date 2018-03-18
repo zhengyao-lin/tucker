@@ -9,8 +9,6 @@ import Data.Word
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
-import Debug.Trace
-
 import Tucker.Enc
 import Tucker.Conf
 import Tucker.Auth
@@ -131,14 +129,10 @@ instance Encodable TxInput where
 
 instance Decodable TxInput where
     decoder = do
-        -- traceM "decoding tx input"
-
         prev_out <- decoder
         (VInt slen) <- decoder
         sig_script <- bsD $ fi slen
         seqn <- decoder
-
-        -- traceM "decoding tx input finished"
 
         return $ TxInput {
             prev_out = prev_out,
@@ -228,11 +222,8 @@ instance Decodable TxPayload where
             if mark == 0 then byteD
             else return 0
 
-        -- traceM "decoding tx"
         tx_in <- vlistD decoder
-        -- traceM "input finished"
         tx_out <- vlistD decoder
-        -- traceM "output finished"
 
         -- tx_witness is NOT a vlist because the size of it
         -- is implied by the size of tx_in
@@ -435,11 +426,11 @@ txSigHash tx idx' subscript htype =
             -- the hash value 1 is signed
             encodeLE (1 :: Hash256)
         else
-            -- trace (show htype) $
-            -- trace (show final_tx) $
-            -- trace (show (hex $ sha256 $ sha256 $ encodeLE final_tx <> encodeLE raw_htype)) $
+            -- tLn (show htype) $
+            -- tLn (show final_tx) $
+            -- tLn (show (hex $ sha256 $ sha256 $ encodeLE final_tx <> encodeLE raw_htype)) $
             sha256 $ sha256 $ encodeLE final_tx <> encodeLE raw_htype
-        -- trace (show (prev, final_tx, hex final_str)) $
+        -- tLn (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ sha256 $ sha256 final_str
 
 -- generate a standard public key script
@@ -465,7 +456,7 @@ txSigHash tx idx' subscript htype =
 --         hash_raw = sha256 $ raw <> BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
 
 --     -- another sha256 is performed here
---     -- seq (trace (show $ sha256 $ sha256 raw) 0) $
+--     -- seq (tLn (show $ sha256 $ sha256 raw) 0) $
 --     signSHA256DER pair hash_raw
 
 -- stdSigScript :: ECCKeyPair -> ByteString -> ByteString

@@ -17,8 +17,6 @@ import Control.Monad.Trans.Resource
 
 import Network.Socket
 
-import Debug.Trace
-
 import Tucker.DB
 import Tucker.Enc
 import Tucker.Msg
@@ -183,7 +181,7 @@ envMsg env msg = do
     -- force eval
     -- let msg' = BS.pack ("env: " ++ msg)
 
-    traceM ("env: " ++ msg)
+    tLnM ("env: " ++ msg)
 
     -- LK.with (io_lock env) $ BS.putStrLn msg'
 

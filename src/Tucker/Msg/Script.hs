@@ -16,8 +16,6 @@ import Control.Monad.State
 import Control.Monad.Loops
 import Control.Monad.Except
 
-import Debug.Trace
-
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Auth
@@ -230,7 +228,7 @@ txSigHashS all_sigs sig_raw = do
     cs_op    <- last_cs_op <$> get
     code     <- prog_code <$> get
 
-    -- traceM ("wulala " ++ show (intToHashType (BSR.last sig_raw)))
+    -- tLnM ("wulala " ++ show (intToHashType (BSR.last sig_raw)))
 
     let -- turn the current code(should be pk_script) to subscript
         -- that is used in signature
@@ -249,7 +247,7 @@ txSigHashS all_sigs sig_raw = do
         -- NOTE: only sha256 it ONCE because there's another
         -- hashing in the verification process
 
-    -- traceShowM (hex rawtx)
+    -- tLnM (show (hex rawtx))
 
     return hash
 
@@ -288,7 +286,7 @@ eocS = do
 -- checkSig public_key_encoded message signature_encoded
 checkSig :: ByteString -> ByteString -> ByteString -> Bool
 checkSig pub' msg sig =
-    -- trace ("CHECKSIG " ++ show (pub', msg, sig)) $
+    -- tLn ("CHECKSIG " ++ show (pub', msg, sig)) $
     -- NOTE: final hash is encoded in big-endian
     case decodeAllBE pub' of
         Right pub -> verifyDER pub msg sig == Right True
@@ -379,7 +377,7 @@ evalOpS OP_CHECKMULTISIG = do
             let msg = msgs !! idx
                 sig = sigs !! idx
                 nres =
-                    -- trace (show (hex sig, map hex rest_pub's)) $
+                    -- tLn (show (hex sig, map hex rest_pub's)) $
                     dropWhile (\pub' -> not (checkSig pub' msg sig)) rest_pub's
 
             in if idx < length sigs then
@@ -396,8 +394,8 @@ evalOpS OP_CHECKMULTISIG = do
             -- flip map (zip msgs sigs) $ \(msg, sig) ->
             --     findIndex (\pub' -> checkSig pub' msg sig) pub's
 
-    -- traceM (show (m, n, map hex pub's, map hex sigs))
-    -- traceM (show matched)
+    -- tLnM (show (m, n, map hex pub's, map hex sigs))
+    -- tLnM (show matched)
 
     -- for compatibility with a historical bug
     popS :: EvalState ByteString
@@ -574,7 +572,7 @@ evalOpS OP_CHECKSEQUENCEVERIFY = do
     else
         return ()
 
-evalOpS (OP_PRINT msg) = traceM msg
+evalOpS (OP_PRINT msg) = tLnM msg
 
 evalOpS OP_NOP1 = return ()
 evalOpS OP_NOP4 = return ()
@@ -598,13 +596,13 @@ checkValidOp op = do
     -- depth <- depthS
     -- top <- if depth > 0 then peekS else return (BS.pack "no elem")
     -- stack <- eval_stack <$> get
-    -- traceM $ "exec " ++ show op ++ ": " ++ show stack
+    -- tLnM $ "exec " ++ show op ++ ": " ++ show stack
 
     enable_trace <- confS script_enable_trace
 
     if enable_trace then do
         stack <- stackS
-        traceM $ "[trace] exec " ++ show op ++ " " ++ show stack
+        tLnM $ "[trace] exec " ++ show op ++ " " ++ show stack
     else
         return ()
 
@@ -696,7 +694,7 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     if script_enable_p2sh (script_conf s) then do
         redeem_script <- decodeAllLE redeem
 
-        -- traceM (show redeem)
+        -- tLnM (show redeem)
         
         ns <- toTCKRErrorM (execStateT popS' s) -- pop out result first
         execEval ns redeem_script -- exec on redeem script

@@ -33,8 +33,6 @@ import Data.List
 import Data.Hex
 import Data.Word
 
-import Debug.Trace
-
 import Control.Monad.Loops
 
 import Tucker.Enc

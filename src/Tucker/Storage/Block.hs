@@ -56,8 +56,6 @@ import qualified Data.Set.Ordered as OSET
 import Control.Monad
 import Control.Applicative
 
-import Debug.Trace
-
 import Tucker.DB
 import Tucker.Msg
 import Tucker.Enc
@@ -448,7 +446,7 @@ insertBlock chain@(Chain {
                 acc_diff = acc_diff prev_bn + targetBDiff hash_target
             }
 
-    -- traceM (show (edge_branches, prev_bn, elemIndex prev_bn edge_branches))
+    -- tLnM (edge_branches, prev_bn, elemIndex prev_bn edge_branches)
 
     -- previous block found, inserting to the tree
     let new_branches =

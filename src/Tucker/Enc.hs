@@ -2,8 +2,6 @@
 
 module Tucker.Enc where
 
-import Debug.Trace
-
 import Data.Int
 import Data.Bits
 import Data.Word
@@ -459,7 +457,7 @@ peekByteD =
 
 listD :: Int -> Decoder t -> Decoder [t]
 listD = replicateM
-    -- forM [ 1 .. len ] (\l -> traceShowM l >> d)
+    -- forM [ 1 .. len ] (\l -> tLnM (show l >> d))
     -- replicateM
 
 lenD :: Decoder Int

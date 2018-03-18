@@ -21,8 +21,6 @@ import Control.Monad.Morph
 import Control.Monad.Loops
 import Control.Monad.Trans.Resource
 
-import Debug.Trace
-
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Atom

@@ -16,8 +16,6 @@ import Control.Monad.Morph
 import Control.Monad.Loops
 import Control.Monad.Trans.Resource
 
-import Debug.Trace
-
 import Tucker.DB
 import Tucker.Msg
 import Tucker.Enc
@@ -192,7 +190,7 @@ updateForkDeploy bc@(BlockChain {
     let block = block_data branch in
 
     if shouldRetarget conf (cur_height branch) then do
-        traceM ("retarget and update deploy status on block " ++ show block)
+        tLnM ("retarget and update deploy status on block " ++ show block)
 
         -- update
         prev <- expectMaybeIO "no previous branch" (prevBlockNode chain branch)
@@ -201,7 +199,7 @@ updateForkDeploy bc@(BlockChain {
         forks <- lookupNonFinalForks fork_state block
 
         forM_ forks $ \fork -> do
-            traceM ("update status on fork " ++ show fork)
+            tLnM ("update status on fork " ++ show fork)
 
             case fork_status fork of
                 FORK_STATUS_DEFINED ->
@@ -459,7 +457,7 @@ verifyBlockTx bc branch block = do
             expectTrue "more than one coinbase txns" $
                 not (isCoinbase tx)
 
-            -- traceM $ "checking tx " ++ show idx
+            -- tLnM $ "checking tx " ++ show idx
 
             let total_out_value = getOutputValue tx
 
@@ -470,10 +468,10 @@ verifyBlockTx bc branch block = do
                 sep_idxs = foldList cap idxs
 
                 verify in_parallel in_idx = do
-                    traceClear $
-                        printf "verifying input %d of tx %d %s%s"
-                               in_idx idx (show (txid tx))
-                               (if in_parallel then "(in parallel)" else "")
+                    tM $ wss (Color Blue False) $
+                         printf "[verifying input %d of tx %d %s%s]"
+                                in_idx idx (show (txid tx))
+                                (if in_parallel then "(in parallel)" else "")
 
                     verifyInput bc tx_state branch tx in_idx
 
@@ -482,7 +480,7 @@ verifyBlockTx bc branch block = do
 
             in_values <-
                 if length idxs >= tckr_min_parallel_input_check conf then do
-                    -- traceM "checking input in parallel"
+                    -- tLnM "checking input in parallel"
                     mconcat <$>
                         map (either (reject . show) id) <$>
                         forkMapM verifyP sep_idxs
@@ -512,9 +510,8 @@ verifyBlockTx bc branch block = do
 
     end_time <- msCPUTime :: IO Integer
 
-    traceClear
-        ("verified " ++ show (length all_txns) ++
-         " txns in " ++ show (end_time - begin_time) ++ "ms\n")
+    tLnM ("verified " ++ show (length all_txns) ++
+          " txns in " ++ show (end_time - begin_time) ++ "ms")
 
 -- locatorToTx :: Chain -> TxLocator -> IO (Maybe TxPayload)
 -- locatorToTx (Chain {
@@ -575,7 +572,7 @@ addBlockFail bc@(BlockChain {
 
     case insertBlock chain block of
         Nothing -> do -- no previous hash found
-            -- traceIO "orphan block!"
+            -- tLnM "orphan block!"
             expectFalse "repeated orphan block" is_orphan_block
             updateChain bc (addOrphan chain block)
 
@@ -585,7 +582,7 @@ addBlockFail bc@(BlockChain {
             -- update chain
             bc <- updateChain bc chain
 
-            -- traceM (show (isPartial (txns (block_data branch))))
+            -- tLnM (isPartial (txns (block_data branch)))
 
             -- save the block data first
             -- all actions below will find the block
@@ -609,7 +606,7 @@ addBlockFail bc@(BlockChain {
 
             bc <-
                 if main_branch == branch then do
-                    -- traceM "adding to the main branch"
+                    -- tLnM "adding to the main branch"
                     -- adding to the main branch
                     
                     let skip_tx_check = Just True == do
@@ -620,7 +617,7 @@ addBlockFail bc@(BlockChain {
                         verifyBlockTx bc branch block
                     else do
                         -- trust all txns
-                        traceM "txns assumed valid"
+                        tLnM "txns assumed valid"
                         addTxns tx_state block
 
                     -- update fork deploy status
@@ -631,7 +628,7 @@ addBlockFail bc@(BlockChain {
                 else if branch > main_branch then do
                     -- branch becoming the main branch
                     
-                    traceM "main branch change!!!"
+                    tLnM "main branch change!!!"
 
                     -- set main branch
                     bc <- updateChain bc (setMainBranch chain branch)
@@ -668,10 +665,10 @@ addBlockFail bc@(BlockChain {
                     return bc
 
             if is_orphan_block then do
-                -- traceM "orphan removed"
+                -- tLnM "orphan removed"
                 updateChain bc (removeOrphan chain block)
             else do
-                -- traceM "collect orphans"
+                -- tLnM "collect orphans"
                 -- not orphan, collect other orphan
                 collectOrphan bc >>= trySyncChain
 

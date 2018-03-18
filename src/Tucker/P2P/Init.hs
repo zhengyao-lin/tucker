@@ -81,20 +81,20 @@ gcLoop env@(MainLoopEnv {
     forever $ do
         delay $ gc_interv env
 
-        cur_list <- getA $ node_list env
-
         timestamp <- unixTimestamp
 
-        marked <- forM cur_list $ \node -> do
+        cur_list <- getA $ node_list env
+
+        -- filter out dead/should-be-killed nodes
+        new_list <- flip filterM cur_list $ \node -> do
             alive <- getA $ alive node
 
             -- check if the node has not been responding for a long time
             last_seen <- nodeLastSeen node
             bl_count  <- nodeBlacklistTime node
 
-            let kill =
-                    timestamp - last_seen > max_alive_span ||
-                    bl_count > max_bl_count
+            let kill = timestamp - last_seen > max_alive_span ||
+                       bl_count > max_bl_count
 
             if kill then do
                 nodeMsg env node "!!! killed(timeout or too many blacklist count)"
@@ -102,18 +102,19 @@ gcLoop env@(MainLoopEnv {
             else
                 return ()
 
-            return (node, alive && not kill)
+            return (alive && not kill)
 
-        let new_list = map fst $ filter snd marked
-
+        -- update node list
         setA (node_list env) new_list
 
         envMsg env $ "gc: " ++
                      show (length cur_list - length new_list) ++
                      " dead node(s) collected"
-        envMsg env $ "all " ++ show (length new_list) ++ " node(s): " ++ show new_list
+        envMsg env $ "all " ++ show (length new_list) ++ " node(s)"
+        -- ++ " node(s): " ++ show new_list
 
-        if seek_min > length new_list then
+        -- check if there are too few nodes
+        if length new_list < seek_min then
             -- seek for more nodes
             if null new_list then do
                 envMsg env "!!! lost all connections, try to bootstrap again"
@@ -141,8 +142,5 @@ mainLoop conf = runResourceT $ do
 
     -- bootstrap finished, start sync with 3 nodes
     lift $ forkIO $ sync env 3
-
-    -- forkIO $ blockCollectLoop env
-    -- forkIO $ ioLoop env
 
     return env

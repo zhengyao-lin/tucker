@@ -3,9 +3,8 @@ module Tucker.Lock where
 import Control.Concurrent
 import qualified Control.Concurrent.Lock as LK
 
-import Debug.Trace
-
 import Tucker.Atom
+import Tucker.Util
 
 data Lock =
     Lock {
@@ -33,7 +32,7 @@ acquire lock = do
     -- do lock if it's not locked by the current thread
     
     -- tid <- getA (current_tid lock)
-    -- traceShowM (do_lock, tid, my_tid)
+    -- tLnM (do_lock, tid, my_tid)
 
     if do_lock then do
         LK.acquire (raw_lock lock)

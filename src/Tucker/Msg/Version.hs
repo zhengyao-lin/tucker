@@ -4,7 +4,6 @@ import Data.Int
 import Data.Word
 import qualified Data.ByteString as BSR
 
-import Debug.Trace
 import System.Random
 
 import Tucker.Enc

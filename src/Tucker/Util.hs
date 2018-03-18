@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
+
 module Tucker.Util where
 
 import qualified Text.Printf as TP
@@ -11,10 +13,9 @@ import qualified Data.ByteString.Char8 as BS
 
 import Math.NumberTheory.Moduli
 
-import Debug.Trace
-
 import System.CPUTime
-import System.Console.ANSI
+import System.IO.Unsafe
+import qualified System.Console.ANSI as CA
 
 import Control.Monad
 import Control.Exception
@@ -273,7 +274,70 @@ average lst' =
 deleteAll :: Eq a => a -> [a] -> [a]
 deleteAll a lst = filter (/= a) lst
 
--- clear line and trace
-traceClear :: String -> IO ()
-traceClear msg =
-    clearLine >> setCursorColumn 0 >> BS.putStr (BS.pack msg)
+clearLineInit = CA.clearLine >> CA.setCursorColumn 0
+
+-- class TraceShow t where
+--     showT :: t -> String
+
+-- instance {-# OVERLAPPING #-} TraceShow String where
+--     showT = id
+
+-- instance {-# OVERLAPPABLE #-} Show t => TraceShow t where
+--     showT = show
+
+-- tucker trace
+
+tIO :: Bool -> String -> ()
+tIO newline msg = unsafePerformIO $
+    clearLineInit >>
+    (if newline then BS.putStrLn else BS.putStr) (BS.pack msg)
+
+tLn :: String -> a -> a
+tLn msg a = tIO True msg `seq` a
+
+t :: String -> a -> a
+t msg a = tIO False msg `seq` a
+
+tLnM :: Applicative m => String -> m ()
+tLnM msg = tLn msg (pure ())
+
+tM :: Applicative m => String -> m ()
+tM msg = t msg (pure ())
+
+data ConsoleColor
+    = Black
+    | Red
+    | Green
+    | Yellow
+    | Blue
+    | Magenta
+    | Cyan
+    | White
+
+fromConsoleColor :: ConsoleColor -> CA.Color
+fromConsoleColor Black = CA.Black
+fromConsoleColor Red = CA.Red
+fromConsoleColor Green = CA.Green
+fromConsoleColor Yellow = CA.Yellow
+fromConsoleColor Blue = CA.Blue
+fromConsoleColor Magenta = CA.Magenta
+fromConsoleColor Cyan = CA.Cyan
+fromConsoleColor White = CA.White
+
+data ConsoleColorScheme
+    = Color ConsoleColor Bool -- color bold
+    | ColorDark ConsoleColor Bool -- color bold
+
+fromConsoleColorScheme :: ConsoleColorScheme -> [CA.SGR]
+fromConsoleColorScheme (Color c bold) =
+    [ CA.SetColor CA.Foreground CA.Vivid (fromConsoleColor c),
+      CA.SetConsoleIntensity (if bold then CA.BoldIntensity else CA.NormalIntensity) ]
+
+fromConsoleColorScheme (ColorDark c bold) =
+    [ CA.SetColor CA.Foreground CA.Dull (fromConsoleColor c),
+      CA.SetConsoleIntensity (if bold then CA.BoldIntensity else CA.NormalIntensity) ]
+
+-- wrap styled string
+wss :: ConsoleColorScheme -> String -> String
+wss sch msg =
+    CA.setSGRCode (fromConsoleColorScheme sch) ++ msg ++ CA.setSGRCode [CA.Reset]

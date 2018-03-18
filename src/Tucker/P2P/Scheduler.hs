@@ -7,8 +7,6 @@ import Control.Monad
 import Control.Concurrent
 import Control.Concurrent.Thread.Delay
 
-import Debug.Trace
-
 import Tucker.Atom
 import Tucker.Util
 import qualified Tucker.Lock as LK
@@ -124,21 +122,18 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
             forever $ do
                 start_time <- unixTimestamp
 
-                -- traceM "start waiting"
+                -- tLnM "start waiting"
 
                 timeout_us <- getA timeout_us_var
                 delay timeout_us
 
                 delays <- envAllNetDelay env
-                traceM $ "median " ++ show (median delays) ++
-                         "ms, average " ++ show (average delays) ++
-                         "ms, last " ++ show (last (sort delays)) ++
-                         "ms, timeout " ++ show timeout_us
+                tLnM $ "median " ++ show (median delays) ++
+                       "ms, average " ++ show (average delays) ++
+                       "ms, last " ++ show (last (sort delays)) ++
+                       "ms, timeout " ++ show timeout_us
 
-                -- traceM "scheduler waiting for the lock"
-                
                 LK.with var_lock $ do
-                    -- traceM "scheduler locked"
                     cur_assign <- getA assign_var
 
                     if not $ null cur_assign then do
@@ -150,7 +145,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                             time <- nodeLastSeen n
                             return $ time < start_time
 
-                        -- traceM $ "separated " ++ show (length slow) ++ show (length ok)
+                        -- tLnM $ "separated " ++ show (length slow) ++ show (length ok)
 
                         let slow_nodes = unique $ map fst slow
                             ok_nodes = unique $ map fst ok
@@ -158,8 +153,6 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                         -- decrease/increase blacklist count
                         mapM_ nodeBlacklistDec ok_nodes
                         mapM_ nodeBlacklistInc slow_nodes
-
-                        -- traceM "here"
 
                         if not $ null slow then do
                             -- we have slow nodes!
@@ -180,7 +173,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                                 -- try again with an empty blacklist
                                 -- nodeMsg env node "failed to reassign tasks"
 
-                                traceM "!!! failed to reassign, elongate timeout"
+                                tLnM "!!! failed to reassign, elongate timeout"
                                 -- elongate timeout
                                 appA (*2) timeout_us_var
 
@@ -197,13 +190,13 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                     else do
                         -- empty cur_assign
                         -- kill the thread
-                        traceM "self cancelling on empty assignment"
+                        tLnM "self cancelling on empty assignment"
                         cancel sched
 
         -- watchExit mres =
         --     case mres of
-        --         Right _ -> traceM "scheduler exiting"
-        --         Left err -> traceM $ "scheduler exiting in error: " ++ show err
+        --         Right _ -> tLnM "scheduler exiting"
+        --         Left err -> tLnM $ "scheduler exiting in error: " ++ show err
 
     tid <- forkIO watch -- watchExit
 
