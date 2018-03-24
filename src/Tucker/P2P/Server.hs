@@ -212,9 +212,22 @@ handshake env node = do
 
     let decode = doDecode (decoder :: Decoder VersionPayload) LittleEndian
 
+    {-
+    
+    7D110100 version
+    4D00000000000000 service
+    A849B45A00000000 timestamp
+    0100000000000000 00000000000000000000FFFF7011F705 6DEB
+    4D00000000000000 00000000000000000000000000000000 0000
+    431386780C502A6B nonce
+    1B 2F627463776972653A302E352E302F627463643A302E31322E302F
+    E1AA1300 start height
+
+    -}
+
     case decode payload of
         (Left err, _) ->
-            throw $ TCKRError $ "version decode failed: " ++ show err
+            throw $ TCKRError $ "version decode failed: " ++ show err ++ ", " ++ show payload
 
         (Right vp@(VersionPayload {
             cli_vers = vers,

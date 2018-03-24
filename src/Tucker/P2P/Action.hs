@@ -139,7 +139,7 @@ instance NodeTask BlockFetchTask where
             Just proc ->
                 proc node task (fetch_block task)
 
--- sync with n nodes with retry
+-- sync with n nodes
 sync :: MainLoopEnv -> Int -> IO ()
 sync env n = do
     sync_inv_var <- newA OSET.empty
@@ -156,19 +156,22 @@ sync env n = do
             finished <- appA (+1) finished_var
 
             if finished == n then do
-                -- NOTE: if finished > n, also do nothing
+                -- no double execution when finished > n
                 cancel sched
 
                 sync_inv <- getA sync_inv_var
-                let final_hashes = FD.toList sync_inv
 
-                envMsg env $
-                    "fetching final inventory of " ++
-                    show (length final_hashes) ++ " item(s)"
+                if null sync_inv then
+                    -- no sync inv
+                    envMsg env "!!! all blocks syncronized"
+                else do
+                    let final_hashes = FD.toList sync_inv
 
-                -- delay $ 1000 * 1000 * 1000
+                    envMsg env $
+                        "fetching final inventory of " ++
+                        show (length final_hashes) ++ " item(s)"
 
-                scheduleFetch env final_hashes callback
+                    scheduleFetch env final_hashes callback
             else
                 return ()
 

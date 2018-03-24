@@ -37,7 +37,7 @@ type DBOptionW = D.WriteOptions
 instance Default DBOption where
     def = D.defaultOptions {
         D.createIfMissing = True,
-        D.maxOpenFiles = 32
+        D.maxOpenFiles = 16
         -- D.cacheSize = 4, -- 16k
         -- D.writeBufferSize = 4 -- 512K
     }

@@ -4,6 +4,7 @@ module Tucker.Storage.SoftFork where
 
 import Data.Word
 import Data.List
+import qualified Data.Map.Strict as MP
 
 import Control.Monad
 import Control.Applicative
@@ -13,6 +14,7 @@ import Tucker.Msg
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Conf
+import Tucker.Atom
 import Tucker.IOMap
 
 instance Decodable [SoftFork] where
@@ -24,6 +26,8 @@ instance Decodable [Word32] where
 data SoftForkState =
     SoftForkState {
         fork_conf   :: TCKRConf,
+
+        sf_status   :: Atom (MP.Map String SoftFork),
 
         bucket_fork :: CacheMapWrap DBBucket SoftForkId [SoftFork],
         bucket_stat :: CacheMapWrap DBBucket SoftForkId Word32
@@ -42,6 +46,7 @@ initForkState conf@(TCKRConf {
 
     -- filter out existing forks
     let new_forks = filter (`notElem` cur_forks) soft_forks
+        all_forks = cur_forks ++ new_forks
 
     tLnM ("adding new soft forks deployment " ++ show new_forks)
 
@@ -53,12 +58,21 @@ initForkState conf@(TCKRConf {
             -- append new forks
             insertIO bucket_fork i (cur_forks ++ forks)
 
+    sf_status <- newA MP.empty
+
+    -- set up name -> fork mappings
+    forM_ all_forks $ \fork -> do
+        appA (MP.insert (fork_name fork) fork) sf_status
+        return ()
+
     return $ SoftForkState {
         fork_conf = conf,
+        sf_status = sf_status,
         bucket_fork = bucket_fork,
         bucket_stat = bucket_stat
     }
 
+-- sort forks to bit:fork mappings
 sortForkById :: [SoftFork] -> [[SoftFork]]
 sortForkById =
     foldl (\map fork -> replaceApp (fi (fork_bit fork)) (fork:) map) (replicate 32 [])
@@ -68,8 +82,17 @@ sortForkById =
 -- recordBlock :: add block -> record stat
 -- clearRecord :: clear stat
 
+getForkStatus :: SoftForkState -> String -> IO SoftForkStatus
+getForkStatus (SoftForkState {
+    sf_status = sf_status
+}) name =
+    maybe FORK_STATUS_UNDEFINED fork_status <$>
+    MP.lookup name <$>
+    getA sf_status
+
 changeForkStatus :: SoftForkState -> SoftFork -> SoftForkStatus -> IO ()
 changeForkStatus (SoftForkState {
+    sf_status = sf_status,
     bucket_fork = bucket_fork
 }) fork status = do
     tLnM ("!!! changing the status fork " ++ show fork ++ " to " ++ show status)
@@ -77,9 +100,13 @@ changeForkStatus (SoftForkState {
 
     forks <- maybe [] id <$> lookupIO bucket_fork bit
 
+    let new_fork = fork { fork_status = status }
+
     case elemIndex fork forks of
         Just i -> do
-            let nlist = replaceApp i (\f -> f { fork_status = status }) forks
+            let nlist = replace i new_fork forks
+            appA (MP.insert (fork_name fork) new_fork) sf_status
+
             insertIO bucket_fork bit nlist
 
         Nothing -> return ()

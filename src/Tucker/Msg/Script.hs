@@ -529,21 +529,29 @@ evalOpS OP_CHECKLOCKTIMEVERIFY = do
     csv <- confS script_enable_csv
 
     if csv then do
-        return ()
-        -- lt <- peekS
-        -- in_idx <- tx_in_idx <$> get
-        -- cur_tx <- curTxS
+        m_required_lt <- sequenceToLockTime <$> fromInteger <$> peekS
 
-        -- let lt1 = lock_time cur_tx
-        --     sequence = seqn (tx_in cur_tx !! fi in_idx)
+        in_idx <- tx_in_idx <$> get
+        cur_tx <- curTxS
+        let m_in_lt = inputLockTime (tx_in cur_tx !! fi in_idx)
 
-        -- assertMT "invalid locktime value" $ not $
-        --     lt < 0 ||
-        --     ((lt <= 500000000) /= (lt1 <= 500000000)) ||
-        --     sequence == 0xffffffff
+        case m_required_lt of
+            Just required_lt ->
+                case m_in_lt of
+                    Just in_lt -> do
+                        assertMT "tx version not met" $
+                            version cur_tx >= 2
+                        
+                        assertMT "comparing relative lock-times with different types" $
+                            lockTimeType required_lt == lockTimeType in_lt
 
-        -- assertMT "unmatched locktime" $
-        --     fi lt <= lt1
+                        assertMT "relative lock time requirement not met" $
+                            lockTimeValue required_lt <= lockTimeValue in_lt
+
+                    Nothing ->
+                        throwMT "relative lock time not used in tx"
+
+            Nothing -> return ()
     else
         -- treated as OP_NOP2
         return ()
@@ -761,3 +769,66 @@ getScriptType
     = SCRIPT_P2MULTISIG
 
 getScriptType _ = SCRIPT_NONSTD
+
+{-
+
+some notes on segwit
+
+https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki
+
+1. a new structure in tx called tx_witness is introduced(encoding/decoding has already been implemented)
+2. tx_witness is essentially a list of stacks each corresponding to an input
+    [ [ stack items for input 0 ], [ stack items for input 1 ] ]
+   and is used later
+
+3. P2PKH and P2SH are lifted to their new version, P2WPKH and P2WSH
+
+4. an essential part called the 'witness program' can be extracted from every segwit tx
+   (note: it's not a program/script(even it's valid as a script), but a specific structure for validation use)
+
+5. a valid witness program consists ONLY of
+    <1 byte push opcode> <20- or 32-byte data>
+
+6. witness programs can be extracted in two ways(for different usage):
+    1) pk_script is a witness program and sig_script is empty
+    2) in a P2SH tx, the redeem script is a witness program, and sig_script can only have one push(redeem script)
+
+7. VERIFICATION:
+    1) if witness program data is 20 bytes
+        a) the witness stack must be 2 pushes corresponding to a signature and a pubkey
+        b) the public key matches the witness program data
+        c) check signature and the public key
+
+    2) if the witness program data is 32 bytes
+        a) the witness stack can have multiple pushes but with last one as the new redeem script
+        b) the SHA256 of the redeem script must match the witness program data
+        c) run the redeem with the other stack items and the result must be a SINGLE TRUE
+
+8. Block weight(see the bip page for more detail)
+
+9. ONLY COMPRESSED PUBLIC KEYS ARE ALLOWED in P2WPKH and P2WSH
+
+10. and a NEW tx signing/checking process!
+    at https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki
+
+-}
+
+{-
+
+Notes on BIP 68, CHECKSEQUENCEVERIFY
+
+1. redesigned purpose of sequence field
+
+disable                type
+flag 31                flag 22              value(0-15)
+[     ][][][][][][][][][     ][][][][][][]  [][][][][][][][][][][][][][][]
+
+if type == 1 then
+    value has unit 512 sec
+else
+    value is the number of blocks
+
+
+the tx must not be a coinbase
+
+-}

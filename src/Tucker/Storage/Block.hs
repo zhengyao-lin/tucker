@@ -186,7 +186,7 @@ initChain conf@(TCKRConf {
     entries <- countIO bucket_chain
     let height = entries - 1 :: Height
 
-    putStrLn $ "a tree of height " ++ show entries ++ " - 1 found in database"
+    tLnM ("a chain of height " ++ show height ++ " is found in the database")
 
     if entries == 0 then
         -- empty chain
@@ -284,39 +284,6 @@ searchBranch chain pred node =
     else case realPrevNode chain node of
         Nothing -> Nothing
         Just prev -> searchBranch chain pred prev
-
--- edge_branches and buffer_chain are the only place
--- to store BlockNode
--- searchBranch :: Chain -> (Branch -> Bool) -> Branch -> Maybe Branch
--- searchBranch chain pred branch =
---     let (prev, res) = searchBranch' chain pred branch in
-    
---     case res of
---         Just _ -> res -- found, no problem
---         Nothing -> do -- maybe monad
---             -- if not found, we have to consider two situations
---             -- 1. the search has reached the real end(end of buffer chain)
---             --    so no further search for block in memory is possible
---             -- 2. the search reached the end of edge_branches, but has not
---             --    reached the buffer chain, in this way, the search can be continued
---             --    by researching on the buffer chain
-
---             -- we have to compare the height of the end block
---             -- and the height of the buffer chain to determine
---             -- the situation
-
---             bufc@(BlockNode {
---                 cur_height = bufc_height
---             }) <- mbuffer_chain
-
---             if cur_height prev == bufc_height + 1 then
---                 -- it is connected to the buffer chain
---                 -- search on the buffer chain & return the
---                 -- final result
---                 snd (searchBranch' pred bufc)
---             else
---                 -- not connected, end search
---                 Nothing
 
 searchBranchHash chain hash =
     searchBranch chain ((== hash) . block_hash . block_data)

@@ -40,6 +40,13 @@ data BlockChain =
         -- use 1 layer of cache in UTXO
     }
 
+data VerifyConf =
+    VerifyConf {
+        verify_enable_csv :: Bool,
+        verify_cur_mtp    :: Timestamp,
+        verify_cur_bnode  :: Branch
+    }
+
 instance NFData BlockChain where
     rnf (BlockChain {
         bc_chain = bc_chain,
@@ -159,15 +166,34 @@ calNewTarget conf old_target actual_span =
 
         new_target = old_target * (fi new_span) `div` (fi expect_span)
 
-medianPastTime :: BlockChain -> Branch -> Int -> IO Timestamp
-medianPastTime bc@(BlockChain {
-    bc_chain = chain
-}) branch n = do
-    ts <- map btimestamp <$> (topNBlocks chain branch n)
+-- medianTimePast :: BlockChain -> Branch -> Int -> IO Timestamp
+-- medianTimePast bc@(BlockChain {
+--     bc_chain = chain
+-- }) branch n = do
+--     ts <- map btimestamp <$> (topNBlocks chain branch n)
 
-    return $
-        if null ts then 0
-        else median ts
+--     return $
+--         if null ts then 0
+--         else median ts
+
+-- mtp of a branch node
+medianTimePastBranch bc branch = medianTimePast bc branch (cur_height branch)
+
+-- median timestamp of n blocks before height
+medianTimePast :: BlockChain -> Branch -> Height -> IO Timestamp
+medianTimePast bc@(BlockChain {
+    bc_conf = conf,
+    bc_chain = chain
+}) branch height = do
+    let n = tckr_mtp_number conf
+
+    mblocks <-
+        mapM (blockAtHeight chain branch) [ height - 1, height - 2 .. height - fi n ]
+
+    let ts = map btimestamp (maybeCat mblocks)
+
+    return $ if null ts then 0
+             else median ts
 
 shouldRetarget :: TCKRConf -> Height -> Bool
 shouldRetarget conf height =
@@ -181,9 +207,7 @@ feeAtHeight conf height =
 
 updateForkDeploy :: BlockChain -> Branch -> IO ()
 updateForkDeploy bc@(BlockChain {
-    bc_conf = conf@(TCKRConf {
-        tckr_mtp_number = mtp_number
-    }),
+    bc_conf = conf,
     bc_chain = chain,
     bc_fork_state = fork_state
 }) branch =
@@ -193,9 +217,10 @@ updateForkDeploy bc@(BlockChain {
         tLnM ("retarget and update deploy status on block " ++ show block)
 
         -- update
-        prev <- expectMaybeIO "no previous branch" (prevBlockNode chain branch)
+        -- prev <- expectMaybeIO "no previous branch" (prevBlockNode chain branch)
 
-        mtp <- medianPastTime bc prev mtp_number
+        -- mtp of the parent block
+        mtp <- medianTimePast bc branch (cur_height branch - 1)
         forks <- lookupNonFinalForks fork_state block
 
         forM_ forks $ \fork -> do
@@ -266,28 +291,6 @@ if height % 2016 == 0 and the block is in the main branch then
                 set status to active
 
             _ -> nothing
--}
-
-{-
-
-Notes on BIP 68
-
-1. redesigned purpose of sequence field
-
-disable                type
-flag 31                flag 22              value(0-15)
-[     ][][][][][][][][][     ][][][][][][]  [][][][][][][][][][][][][][][]
-
-if type == 1 then
-    value has unit 512 sec
-else
-    value is the number of blocks
-
-
-the tx must not be a coinbase
-
-
-
 -}
 
 hashTargetValid :: BlockChain -> Branch -> IO Bool
@@ -375,17 +378,37 @@ trySyncChain bc@(BlockChain {
             
             return $ bc { bc_chain = chain }
 
-genScriptConf :: TCKRConf -> Block -> IO ScriptConf
-genScriptConf conf out_block =
+genScriptConf :: BlockChain -> VerifyConf -> Block -> IO ScriptConf
+genScriptConf bc ver_conf out_block =
     return $ def {
-        script_enable_p2sh = btimestamp out_block >= tckr_p2sh_enable_time conf
+        script_enable_csv = verify_enable_csv ver_conf,
+        script_enable_p2sh = btimestamp out_block >=
+                             tckr_p2sh_enable_time (bc_conf bc)
     }
 
-verifyInput :: UTXOMap a => BlockChain -> TxState a -> Branch -> TxPayload -> Int -> IO Value
+genVerifyConf :: BlockChain -> Branch -> Branch -> IO VerifyConf
+genVerifyConf bc@(BlockChain {
+    bc_conf = conf,
+    bc_chain = bc_chain,
+    bc_fork_state = fork_state
+}) branch bnode = do
+    csv_status <- getForkStatus fork_state "csv"
+    mtp <- medianTimePast bc branch (cur_height bnode)
+
+    return $ VerifyConf {
+        verify_enable_csv = isActiveStatus csv_status,
+        verify_cur_mtp = mtp,
+        verify_cur_bnode = bnode
+    }
+
+verifyInput :: UTXOMap a
+            => BlockChain -> TxState a -> VerifyConf
+            -> Branch -> TxPayload -> Int -> IO Value
 verifyInput bc@(BlockChain {
     bc_conf = conf,
-    bc_chain = chain
-}) tx_state branch tx in_idx = do
+    bc_chain = chain,
+    bc_fork_state = fork_state
+}) tx_state ver_conf branch tx in_idx = do
     let inp@(TxInput {
             prev_out = outp@(OutPoint txid out_idx)
         }) = tx_in tx !! in_idx
@@ -396,11 +419,34 @@ verifyInput bc@(BlockChain {
     locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
         findTxId tx_state txid
 
-    bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+    prev_bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
         branchWithHash chain branch (locatorToHash locator)
 
-    bnode <- expectMaybeIO ("failed to load full block for " ++ show bnode) $
-        toFullBlockNode chain bnode
+    if verify_enable_csv ver_conf &&
+       version tx >= 2 then do
+        error "CSV!!!"
+        -- check BIP 68
+        case inputLockTime inp of
+            Just lock_time ->
+                let v = lockTimeValue lock_time in
+                case lockTimeType lock_time of
+                    LOCK_TIME_HEIGHT ->
+                        expectTrue "relative lock-time(block time) not met" $
+                            cur_height (verify_cur_bnode ver_conf) >=
+                            fi v + cur_height prev_bnode
+
+                    LOCK_TIME_512S -> do
+                        prev_time <- medianTimePastBranch bc prev_bnode
+                        
+                        expectTrue "relative lock-time not met" $
+                            verify_cur_mtp ver_conf >= fi v * 512 + prev_time
+
+            Nothing -> return () -- no requirement for lock time
+    else
+        return ()
+
+    prev_bnode <- expectMaybeIO ("failed to load full block for " ++ show prev_bnode) $
+        toFullBlockNode chain prev_bnode
         -- -- special case -> outpoint is in the current block/top
         -- if bnode == branch then return bnode
         -- else expectMaybeIO ("failed to load full block for " ++ show bnode) $
@@ -408,17 +454,17 @@ verifyInput bc@(BlockChain {
 
     let prev_tx_idx = locatorToIdx locator
         prev_tx_body =
-            (txns (block_data bnode)) `index` fi prev_tx_idx
+            (txns (block_data prev_bnode)) `index` fi prev_tx_idx
 
         prev_tx_out = tx_out prev_tx_body !! fi out_idx
 
     -- if the funding tx is coinbase(idx == 0), check coinbase maturity
     expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
         prev_tx_idx /= 0 ||
-        cur_height branch - cur_height bnode >= fi (tckr_coinbase_maturity conf)
+        cur_height branch - cur_height prev_bnode >= fi (tckr_coinbase_maturity conf)
 
     -- generate script configuration
-    script_conf <- genScriptConf conf (block_data bnode)
+    script_conf <- genScriptConf bc ver_conf (block_data prev_bnode)
 
     -- check script
     let pk_sc = decodeFailLE (pk_script prev_tx_out)
@@ -440,12 +486,17 @@ updateChain bc chain =
         bc_chain = chain
     }
 
+-- NOTE: the block given is not necessarily the tip block
 verifyBlockTx :: BlockChain -> Branch -> Block -> IO ()
 verifyBlockTx bc branch block = do
     let all_txns = FD.toList (txns block)
         conf = bc_conf bc
 
+    bnode <- expectMaybeIO "the block being verified is not in the given branch" $
+        branchWithHash (bc_chain bc) branch (block_hash block)
+
     begin_time <- msCPUTime
+    ver_conf <- genVerifyConf bc branch bnode
 
     -- using cached utxo because any error
     -- in the tx will cause the tx state to roll back
@@ -473,7 +524,7 @@ verifyBlockTx bc branch block = do
                                 in_idx idx (show (txid tx))
                                 (if in_parallel then "(in parallel)" else "")
 
-                    verifyInput bc tx_state branch tx in_idx
+                    verifyInput bc tx_state ver_conf branch tx in_idx
 
                 verifyP = mapM (verify True) -- parallel
             -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
@@ -591,8 +642,7 @@ addBlockFail bc@(BlockChain {
 
             if tckr_enable_mtp_check conf then
                 expectTrueIO "MTP rule not met" $
-                    (btimestamp block >=) <$>
-                    medianPastTime bc branch (tckr_mtp_number conf)
+                    (btimestamp block >=) <$> medianTimePastBranch bc branch
             else
                 return ()
 

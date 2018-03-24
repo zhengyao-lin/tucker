@@ -6,6 +6,8 @@ import qualified Data.ByteString as BSR
 
 import System.Random
 
+import Control.Applicative
+
 import Tucker.Enc
 import Tucker.Conf
 import Tucker.Util
@@ -69,7 +71,8 @@ instance Decodable VersionPayload where
 
         -- net_addr in version payload does not have timestamp field
         -- so fill in a temporary timestamp field
-        let decoderAddr = (appendD $ encodeLE (fromIntegral timestamp :: Word32)) >> decoder
+        let decoderAddr =
+                (appendD $ encodeLE (fi timestamp :: Word32)) >> decoder
 
         addr_recv <- decoderAddr
 
@@ -79,7 +82,8 @@ instance Decodable VersionPayload where
         user_agent <- ifD (cli_vers < 106) (VStr "") decoder
 
         start_height <- ifD (cli_vers < 106) 0 decoder
-        relay <- ifD (cli_vers < 70001) False decoder
+
+        relay <- ifD (cli_vers < 70001) True (decoder <|> return True)
 
         return $ VersionPayload {
             cli_vers = cli_vers,

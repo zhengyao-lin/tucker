@@ -17,14 +17,18 @@ data InvType
     | INV_TYPE_TX
     | INV_TYPE_BLOCK
     | INV_TYPE_FILTERED_BLOCK
-    | INV_TYPE_CMPCT_BLOCK deriving (Show, Eq)
+    | INV_TYPE_CMPCT_BLOCK
+    | INV_TYPE_WITNESS_TX
+    | INV_TYPE_WITNESS_BLOCK deriving (Show, Eq)
 
 inv_type_map = [
-        (INV_TYPE_ERROR,            0),
-        (INV_TYPE_TX,               1),
-        (INV_TYPE_BLOCK,            2),
-        (INV_TYPE_FILTERED_BLOCK,   3),
-        (INV_TYPE_CMPCT_BLOCK,      4)
+        (INV_TYPE_ERROR,                0x0),
+        (INV_TYPE_TX,                   0x1),
+        (INV_TYPE_BLOCK,                0x2),
+        (INV_TYPE_FILTERED_BLOCK,       0x3),
+        (INV_TYPE_CMPCT_BLOCK,          0x4),
+        (INV_TYPE_WITNESS_TX,    0x40000001),
+        (INV_TYPE_WITNESS_BLOCK, 0x40000002)
     ]
 
 inv_type_map_r = map (\(a, b) -> (b, a)) inv_type_map

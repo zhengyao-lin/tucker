@@ -16,7 +16,12 @@ import Crypto.PubKey.ECC.Types
 
 tucker_curve = getCurveByName SEC_p256k1
 
-data NodeServiceTypeSingle = TCKR_NODE_NETWORK | TCKR_NODE_GETUTXO | TCKR_NODE_BLOOM deriving (Show, Eq)
+data NodeServiceTypeSingle
+    = TCKR_NODE_NETWORK
+    | TCKR_NODE_GETUTXO
+    | TCKR_NODE_BLOOM
+    | TCKR_NODE_WITNESS deriving (Show, Eq)
+
 data NodeServiceType = NodeServiceType [NodeServiceTypeSingle] deriving (Show, Eq)
 
 type Timestamp = Word32
@@ -24,7 +29,8 @@ type Timestamp = Word32
 type SoftForkId = Int32
 
 data SoftForkStatus
-    = FORK_STATUS_DEFINED
+    = FORK_STATUS_UNDEFINED -- should not occur in the database
+    | FORK_STATUS_DEFINED
     | FORK_STATUS_STARTED
     | FORK_STATUS_LOCKED_IN
 
@@ -32,6 +38,12 @@ data SoftForkStatus
     | FORK_STATUS_FAILED
     | FORK_STATUS_ACTIVE
     deriving (Eq, Show)
+
+isActiveStatus :: SoftForkStatus -> Bool
+isActiveStatus status =
+    status == FORK_STATUS_STARTED ||
+    status == FORK_STATUS_LOCKED_IN ||
+    status == FORK_STATUS_ACTIVE
 
 data SoftFork =
     SoftFork {
@@ -206,7 +218,7 @@ tucker_default_conf_mainnet = do
 
         tckr_known_inv_count = 8,
 
-        tckr_max_tree_insert_depth = 128,
+        tckr_max_tree_insert_depth = 32,
 
         tckr_max_block_batch = 500,
         -- receive 200 blocks a time(if inv is greater than that, trim the tail)
@@ -298,6 +310,8 @@ tucker_default_conf_testnet3 = do
             }
         ],
 
-        tckr_block_assumed_valid =
-            Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
+        tckr_block_assumed_valid = -- Nothing
+            -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
+            -- Just (600000, "000000000000624f06c69d3a9fe8d25e0a9030569128d63ad1b704bbb3059a16")
+            Just (700000, "000000000000406178b12a4dea3b27e13b3c4fe4510994fd667d7c1e6a3f4dc1 ")
     }

@@ -6,6 +6,7 @@ import Data.Hex
 import Data.Int
 import Data.Char
 import Data.Word
+import Data.Bits
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -41,6 +42,30 @@ data TxInput =
         seqn            :: Word32 -- sequence, currently not used
     } deriving (Eq, Show, Read)
 
+data LockTimeType = LOCK_TIME_512S | LOCK_TIME_HEIGHT deriving (Eq, Show)
+data LockTime = LockTime LockTimeType Word deriving (Show)
+
+sequenceToLockTime :: Word32 -> Maybe LockTime
+sequenceToLockTime s =
+    if s .&. 0x800000 == 0 then
+        -- disable flag not set
+        if s .&. 0x00400000 == 0 then
+            Just (LockTime LOCK_TIME_HEIGHT (fi v))
+        else
+            Just (LockTime LOCK_TIME_512S (fi v))
+    else
+        Nothing
+    where v = s .&. 0xffff
+
+inputLockTime :: TxInput -> Maybe LockTime
+inputLockTime input = sequenceToLockTime (seqn input)
+
+lockTimeType :: LockTime -> LockTimeType
+lockTimeType (LockTime t _) = t
+
+lockTimeValue :: LockTime -> Word
+lockTimeValue (LockTime _ v) = v
+
 instance NFData TxInput where
     rnf (TxInput a b c) = rnf (a, b, c)
 
@@ -55,7 +80,7 @@ instance NFData TxOutput where
 
 nullTxOutput = TxOutput { value = -1, pk_script = BSR.empty }
 
--- TxWitness is a list of stack items in general
+-- TxWitness is a list of stack items
 data TxWitness =
     TxWitness [ByteString] deriving (Eq, Show)
 
@@ -200,8 +225,8 @@ instance Encodable TxPayload where
             encodeVList end tx_in,
             encodeVList end tx_out,
 
-            if flag == 0 then BSR.empty else
-                encode end tx_witness, -- just an ordinary list, not vlist
+            if flag == 0 then BSR.empty
+            else encode end tx_witness, -- just an ordinary list, not vlist
             
             e lock_time
         ]
