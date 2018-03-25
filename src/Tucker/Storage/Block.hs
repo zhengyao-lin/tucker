@@ -183,8 +183,10 @@ initChain conf@(TCKRConf {
             main_branch = 0
         }
 
-    entries <- countIO bucket_chain
+    entries <- quickCountIO bucket_chain
     let height = entries - 1 :: Height
+
+    -- error "exit"
 
     tLnM ("a chain of height " ++ show height ++ " is found in the database")
 

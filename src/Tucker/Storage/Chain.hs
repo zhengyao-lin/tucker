@@ -44,7 +44,8 @@ data VerifyConf =
     VerifyConf {
         verify_enable_csv :: Bool,
         verify_cur_mtp    :: Timestamp,
-        verify_cur_bnode  :: Branch
+        verify_cur_bnode  :: Branch,
+        verify_check_dup_tx :: Bool
     }
 
 instance NFData BlockChain where
@@ -232,7 +233,8 @@ updateForkDeploy bc@(BlockChain {
                         changeForkStatus fork_state fork FORK_STATUS_FAILED
                     else if mtp > fork_start fork then
                         changeForkStatus fork_state fork FORK_STATUS_STARTED
-                    else
+                    else do
+                        tLnM "no status change"
                         return ()
                 
                 FORK_STATUS_STARTED ->
@@ -398,7 +400,8 @@ genVerifyConf bc@(BlockChain {
     return $ VerifyConf {
         verify_enable_csv = isActiveStatus csv_status,
         verify_cur_mtp = mtp,
-        verify_cur_bnode = bnode
+        verify_cur_bnode = bnode,
+        verify_check_dup_tx = mtp >= tckr_dup_tx_disable_time conf
     }
 
 verifyInput :: UTXOMap a
@@ -503,6 +506,20 @@ verifyBlockTx bc branch block = do
     withCacheUTXO (bc_tx_state bc) $ \tx_state -> do
         let coinbase = head all_txns
             normal_tx = tail all_txns
+
+        if verify_check_dup_tx ver_conf then
+            forM_ (zip [0..] all_txns) $ \(idx, tx) -> do
+                -- check duplicated tx
+                mlocator <- findTxId tx_state (txid tx)
+                
+                case mlocator of
+                    Nothing -> return () -- no record
+                    Just locator ->
+                        expectTrue ("duplicated transaction " ++ show (txid tx)) $
+                            locatorToHash locator == block_hash block &&
+                            locatorToIdx locator == idx
+        else
+            return ()
 
         all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
             expectTrue "more than one coinbase txns" $

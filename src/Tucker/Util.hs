@@ -341,3 +341,17 @@ fromConsoleColorScheme (ColorDark c bold) =
 wss :: ConsoleColorScheme -> String -> String
 wss sch msg =
     CA.setSGRCode (fromConsoleColorScheme sch) ++ msg ++ CA.setSGRCode [CA.Reset]
+
+-- perform a binary search on the range [lo, hi) to find i in [lo, hi)
+-- such that (pred i == EQ)
+-- pred = compare expected given
+binarySearchIO :: Integral a => (a -> IO Ordering) -> a -> a -> IO (Maybe a)
+binarySearchIO pred lo hi =
+    if lo >= hi then return Nothing
+    else do
+        let half = (hi - lo) `div` 2 + lo
+        res <- pred half
+        case res of
+            LT -> binarySearchIO pred lo half
+            EQ -> return (Just half)
+            GT -> binarySearchIO pred (half + 1) hi

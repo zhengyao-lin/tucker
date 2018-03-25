@@ -28,6 +28,8 @@ type Timestamp = Word32
 
 type SoftForkId = Int32
 
+soft_fork_id_range = [ 0 .. 28 ] :: [SoftForkId] -- only the lowest 29 bits are used(see BIP 9)
+
 data SoftForkStatus
     = FORK_STATUS_UNDEFINED -- should not occur in the database
     | FORK_STATUS_DEFINED
@@ -136,7 +138,8 @@ data TCKRConf =
 
         tckr_coinbase_maturity :: Int,
 
-        tckr_p2sh_enable_time :: Word32,
+        tckr_p2sh_enable_time :: Timestamp,
+        tckr_dup_tx_disable_time :: Timestamp,
         tckr_mtp_number :: Int,
 
         tckr_soft_forks :: [SoftFork],
@@ -163,10 +166,10 @@ hex2bs = BS.pack . (!! 0) . unhex . map toUpper
 
 -- tucker_cache_tree_chunk = 1
 
-tucker_default_conf_mainnet = do
+tucker_default_conf_mainnet mpath = do
     user_home <- getHomeDirectory
 
-    let tucker_path = user_home </> ".tucker"
+    let tucker_path = maybe (user_home </> ".tucker") id mpath
 
     createDirectoryIfMissing False tucker_path
 
@@ -218,7 +221,7 @@ tucker_default_conf_mainnet = do
 
         tckr_known_inv_count = 8,
 
-        tckr_max_tree_insert_depth = 32,
+        tckr_max_tree_insert_depth = 64,
 
         tckr_max_block_batch = 500,
         -- receive 200 blocks a time(if inv is greater than that, trim the tail)
@@ -243,6 +246,7 @@ tucker_default_conf_mainnet = do
         tckr_coinbase_maturity = 100,
 
         tckr_p2sh_enable_time = 1333238400,
+        tckr_dup_tx_disable_time = 1331769600,
 
         tckr_mtp_number = 11,
 
@@ -276,8 +280,8 @@ tucker_default_conf_mainnet = do
     where
         ip4 = SockAddrInet 0 . tupleToHostAddress
 
-tucker_default_conf_testnet3 = do
-    conf <- tucker_default_conf_mainnet
+tucker_default_conf_testnet3 mpath = do
+    conf <- tucker_default_conf_mainnet mpath
     return $ conf {
         tckr_wif_pref = 0xef,
         tckr_pub_pref = 0x6f,
@@ -291,6 +295,7 @@ tucker_default_conf_testnet3 = do
         tckr_use_special_min_diff = True,
 
         tckr_p2sh_enable_time = 1329264000,
+        tckr_dup_tx_disable_time = 1329696000,
 
         tckr_soft_forks = [
             SoftFork {

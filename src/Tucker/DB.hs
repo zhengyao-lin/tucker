@@ -7,6 +7,7 @@ module Tucker.DB where
 
 import Data.Hex
 import Data.Word
+import Data.Maybe
 import qualified Data.Map.Strict as MP
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
@@ -37,7 +38,7 @@ type DBOptionW = D.WriteOptions
 instance Default DBOption where
     def = D.defaultOptions {
         D.createIfMissing = True,
-        D.maxOpenFiles = 16
+        D.maxOpenFiles = 128
         -- D.cacheSize = 4, -- 16k
         -- D.writeBufferSize = 4 -- 512K
     }
@@ -147,7 +148,6 @@ openBucket db name = do
 
 instance (Encodable k, Decodable k, Encodable v, Decodable v)
          => IOMap (DBBucket k v) k v where
-
     lookupIO = lookupAsIO
     insertIO (DBBucket pref db) k v = insertIO db (pref <> encodeLE k) (encodeLE v)
     deleteIO (DBBucket pref db) k = deleteIO db (pref <> encodeLE k)
@@ -158,6 +158,33 @@ instance (Encodable k, Decodable k, Encodable v, Decodable v)
                 proc init (decodeFailLE (BSR.drop (BSR.length pref) k))
             else
                 return init
+
+-- assuming
+-- forall i, j. bucket has i and bucket doesn't have j => i < j
+-- returning the minimum e such that bucket doesn't have e
+quickCountIO :: (Encodable t, Decodable t,
+                 Encodable v, Decodable v,
+                 Show t, Integral t) => DBBucket t v -> IO t
+quickCountIO bucket = do
+    Just hi <- flip firstM [ 2 ^ n | n <- [0..] ] $ \i ->
+        isNothing <$> lookupIO bucket i
+
+    let lo = hi `div` 2
+        comp i = do
+            -- tLnM ("searching " ++ show i)
+
+            next <- isJust <$> lookupIO bucket i
+            edge <- isJust <$> lookupIO bucket (i - 1)
+    
+            return $
+                if next then GT
+                else
+                    if edge then EQ
+                    else LT
+
+    -- tLnM ("[" ++ show lo ++ ", " ++ show hi ++ ")")
+
+    maybe 0 id <$> binarySearchIO comp lo hi
 
 -- lookup a key and return differently decoded value
 -- ONLY supported for DBBucket

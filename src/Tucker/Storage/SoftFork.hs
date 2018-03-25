@@ -42,7 +42,7 @@ initForkState conf@(TCKRConf {
     bucket_fork <- openBucket db bucket_fork_name >>= wrapCacheMap
     bucket_stat <- openBucket db bucket_stat_name >>= wrapCacheMap
 
-    cur_forks <- concat . maybeCat <$> mapKeyIO bucket_fork (lookupIO bucket_fork)
+    cur_forks <- concat . maybeCat <$> mapM (lookupIO bucket_fork) soft_fork_id_range
 
     -- filter out existing forks
     let new_forks = filter (`notElem` cur_forks) soft_forks
@@ -143,7 +143,8 @@ clearRecord :: SoftForkState -> IO ()
 clearRecord (SoftForkState {
     bucket_stat = bucket_stat
 }) =
-    foldKeyIO bucket_stat () (const (deleteIO bucket_stat))
+    -- foldKeyIO bucket_stat () (const (deleteIO bucket_stat))
+    mapM_ (deleteIO bucket_stat) soft_fork_id_range
 
 syncForkState :: SoftForkState -> IO ()
 syncForkState (SoftForkState {

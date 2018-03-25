@@ -15,7 +15,7 @@ add_block_common_proc b r =
 chainTest1 = TestCase $ do
     removeTestDB
 
-    def_conf <- tucker_default_conf_mainnet
+    def_conf <- tucker_default_conf_mainnet Nothing
 
     let conf = def_conf {
             tckr_block_db_path = test_db_path </> "chain",
@@ -45,7 +45,7 @@ chainTest1 = TestCase $ do
 chainTest2 = TestCase $ do
     removeTestDB
 
-    def_conf <- tucker_default_conf_mainnet
+    def_conf <- tucker_default_conf_mainnet Nothing
 
     let conf = def_conf {
             tckr_block_db_path = test_db_path </> "chain",

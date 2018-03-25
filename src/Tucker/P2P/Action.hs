@@ -173,7 +173,8 @@ sync env n = do
 
                     scheduleFetch env final_hashes callback
             else
-                return ()
+                envMsg env "excess inv received"
+                -- return ()
 
         action sched = NormalAction (syncChain (taskDone sched))
          
