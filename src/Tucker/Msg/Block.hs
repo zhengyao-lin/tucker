@@ -288,3 +288,40 @@ isFinalSoftFork d =
     status == FORK_STATUS_ACTIVE ||
     status == FORK_STATUS_FAILED
     where status = fork_status d
+
+merkleParents :: [Hash256] -> [Hash256]
+merkleParents [] = []
+merkleParents [a] =
+    [ stdHash256 $ hash256ToBS a <> hash256ToBS a ]
+
+merkleParents (l:r:leaves) =
+    (stdHash256 $ hash256ToBS l <> hash256ToBS r) :
+    merkleParents leaves
+
+merkleRoot' :: [Hash256] -> [Hash256]
+merkleRoot' [] = [nullHash256]
+merkleRoot' [single] = [single]
+merkleRoot' leaves = merkleRoot' $ merkleParents leaves
+
+merkleRoot :: Block -> Hash256
+merkleRoot (Block {
+    txns = txns
+}) = head $ merkleRoot' (map txid (FD.toList txns))
+
+updateBlockHashes :: Block -> Block
+updateBlockHashes block =
+    let block1 = block {
+                merkle_root = merkleRoot block
+            }
+
+        block2 = block1 {
+                block_hash = hashBlock block1
+            }
+    in block2
+
+appendTx :: Block -> TxPayload -> Block
+appendTx block tx =
+    let new_txns = (FD.toList (txns block) ++ [ tx ]) in
+    updateBlockHashes $ block {
+        txns = FullList new_txns
+    }

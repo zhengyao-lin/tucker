@@ -127,18 +127,22 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                 timeout_us <- getA timeout_us_var
                 delay timeout_us
 
-                delays <- envAllNetDelay env
-                tLnM $ "median " ++ show (median delays) ++
-                       "ms, average " ++ show (average delays) ++
-                       "ms, last " ++ show (last (sort delays)) ++
-                       "ms, timeout " ++ show timeout_us
+                -- delays <- envAllNetDelay env
+                -- tLnM $ "median " ++ show (median delays) ++
+                --        "ms, average " ++ show (average delays) ++
+                --        "ms, last " ++ show (last (sort delays)) ++
+                --        "ms, timeout " ++ show timeout_us
 
                 LK.with var_lock $ do
                     cur_assign <- getA assign_var
 
                     if not $ null cur_assign then do
-                        progs <- forM cur_assign (nodeTransState . fst)
-                        envMsg env $ "current progresses: " ++ show progs
+                        let unique_nodes = unique (map fst cur_assign)
+
+                        -- progs <- forM unique_nodes (nodeTransState)
+                        -- envMsg env $ "current progresses: " ++ show progs
+                        envMsg env $ "load: " ++ show (length unique_nodes) ++
+                                     " node(s) on " ++ show (length cur_assign) ++ " task(s)"
 
                         -- separate slow and good nodes
                         (slow, ok) <- flip sepWhenM cur_assign $ \(n, _) -> do

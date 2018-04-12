@@ -188,6 +188,10 @@ envMsg env msg = do
     -- appA (++ [ "env: " ++ msg ]) (io_buf env)
     -- putStrLn' $ "env: " ++ msg
 
+envWarn :: MainLoopEnv -> String -> IO ()
+envWarn env msg =
+    tLnM (wss (Color Yellow False) ("env: " ++ msg))
+
 initEnv :: TCKRConf -> ResIO MainLoopEnv
 initEnv conf = do
     tid <- lift myThreadId
@@ -272,9 +276,10 @@ envExit :: Exception e => MainLoopEnv -> e -> IO ()
 envExit env e = throwTo (main_proc_tid env) e
 
 nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
-nodeMsg env node msg = do
-    envMsg env $ (show node) ++ ": " ++ msg
-    return ()
+nodeMsg env node msg = envMsg env $ (show node) ++ ": " ++ msg
+
+nodeWarn :: MainLoopEnv -> Node -> String -> IO ()
+nodeWarn env node msg = envWarn env $ (show node) ++ ": " ++ msg
 
 nodeLastSeen :: Node -> IO Timestamp
 nodeLastSeen node = last_seen <$> getA (cur_trans_state node)
@@ -322,7 +327,14 @@ envSpreadActionExcept :: NodeTask t
 envSpreadActionExcept blacklist env gen_action tasks = do
     nodes <- getA (node_list env)
 
-    alive_nodes <- filterM (getA . alive) nodes
+    alive_nodes <- flip filterM nodes $ \node -> do
+        alive <- getA (alive node)
+        tcount <- length <$> getA (action_list node)
+
+        -- limit the maximum task load on one node
+        return $
+            alive && tcount <= envConf env tckr_node_max_task + 1 -- base handler
+
     -- filter out dead nodes
 
     states <- mapM nodeTransState nodes

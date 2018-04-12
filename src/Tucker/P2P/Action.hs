@@ -261,43 +261,42 @@ scheduleFetch env init_hashes callback = do
                 buildFetchTasks (tckr_max_block_task conf) hashes (taskDone sched)
 
         taskDone sched node task results = do
-            forkIO $
-                LK.with var_lock $ do
-                    removeFromBlacklist sched node
-                    valid <- removeTask sched task
+            removeFromBlacklist sched node
+            valid <- removeTask sched task
 
-                    added <- getA added_var
-                    
-                    -- is this still a valid task
-                    if valid then do
-                        -- fill in the block
-                        forM_ results $ \(hash, payload) -> do
-                            -- decode now
-                            let block = decodeFailLE payload
-                                midx = findIndex ((== hash) . fst) tarray
+            forkIO $ LK.with var_lock $ do
+                added <- getA added_var
+                
+                -- is this still a valid task
+                if valid then do
+                    -- fill in the block
+                    forM_ results $ \(hash, payload) -> do
+                        -- decode now
+                        let block = decodeFailLE payload
+                            midx = findIndex ((== hash) . fst) tarray
 
-                            -- here if the hash already exists, no decoding will be needed
-                            case midx of
-                                Just idx ->
-                                    if idx >= added then -- not added
-                                        setA (snd (tarray !! idx)) (Just block)
-                                    else
-                                        return ()
-                                Nothing ->
-                                    nodeMsg env node $ "irrelavent block " ++ show block
+                        -- here if the hash already exists, no decoding will be needed
+                        case midx of
+                            Just idx ->
+                                if idx >= added then -- not added
+                                    setA (snd (tarray !! idx)) (Just block)
+                                else
+                                    return ()
+                            Nothing ->
+                                nodeMsg env node $ "irrelavent block " ++ show block
 
-                        forkFinally (refreshBlock sched node) (refreshFinal node)
-                        return ()
-                        -- nodeMsg env node $ "task decoding finished"
-                    else do
-                        -- task already finished
-                        nodeMsg env node $ "duplicated assignment"
+                    refreshBlock sched node
+                    return ()
+                    -- nodeMsg env node $ "task decoding finished"
+                else do
+                    -- task already finished
+                    nodeMsg env node $ "duplicated assignment"
 
             return ()
 
         refreshFinal node res =
             case res of
-                Right _ -> nodeMsg env node "refresh finished"
+                Right _ -> return ()
                 Left err -> do
                     -- need to release the lock
                     LK.release var_lock
@@ -309,47 +308,48 @@ scheduleFetch env init_hashes callback = do
 
         -- refresh block inventory
         refreshBlock sched node = do
-            LK.with var_lock $ do
-                old_added <- getA added_var
+            flip forkFinally (refreshFinal node) $ do
+                LK.with var_lock $ do
+                    old_added <- getA added_var
 
-                let all_blocks = mapM (getA . snd) tarray
-                    new_succ = all_blocks >>= return . takeWhile maybeToBool . drop old_added
+                    let all_blocks = mapM (getA . snd) tarray
+                        new_succ = all_blocks >>= return . takeWhile maybeToBool . drop old_added
 
-                -- newly received successive blocks
-                new_succ_count <- length <$> new_succ
-        
-                new_added <- appA (+ new_succ_count) added_var
+                    -- newly received successive blocks
+                    new_succ_count <- length <$> new_succ
+            
+                    new_added <- appA (+ new_succ_count) added_var
 
-                tLnM (show new_succ_count ++ " block(s) to add")
+                    if new_succ_count /= 0 then do
+                        tLnM (show new_succ_count ++ " block(s) to add")
 
-                if new_succ_count /= 0 then do
-                    -- NOTE: the downloaded part is cleared first
-                    -- so that there won't be a double increase in memory usage
-                    -- when addind the block(becasue of the reference to these fields)
+                        -- NOTE: the downloaded part is cleared first
+                        -- so that there won't be a double increase in memory usage
+                        -- when addind the block(becasue of the reference to these fields)
 
-                    let clear_fields = drop old_added $ take new_added tarray
+                        let clear_fields = drop old_added $ take new_added tarray
 
-                    -- clear corresponding fields to free some memory
-                    -- and pass alone the blocks to add to the chain
-                    -- hopefully the block list is stored in stack so it can be free'd soon
-                    let readNClear =
-                            forM clear_fields $ \(_, blockv) -> do
-                                (Just block) <- getA blockv
-                                setA blockv Nothing
-                                return block
-                        
-                    readNClear >>= envAddBlocks env node
+                        -- clear corresponding fields to free some memory
+                        -- and pass alone the blocks to add to the chain
+                        -- hopefully the block list is stored in stack so it can be free'd soon
+                        let readNClear =
+                                forM clear_fields $ \(_, blockv) -> do
+                                    (Just block) <- getA blockv
+                                    setA blockv Nothing
+                                    return block
+                            
+                        readNClear >>= envAddBlocks env node
 
-                    nodeMsg env node ("new added block " ++ show new_added)
+                        nodeMsg env node (show new_added ++ " new block(s) added")
 
-                    if new_added == total then do
-                        nodeMsg env node "all fetching finished"
-                        cancel sched
-                        callback
+                        if new_added == total then do
+                            nodeMsg env node "all fetching finished"
+                            cancel sched
+                            callback
+                        else
+                            return ()
                     else
                         return ()
-                else
-                    return ()
 
     newScheduler env (tckr_block_fetch_timeout conf)
         (\sched -> doFetch sched init_hashes []) -- init assign

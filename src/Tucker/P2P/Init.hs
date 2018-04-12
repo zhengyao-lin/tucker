@@ -97,7 +97,7 @@ gcLoop env@(MainLoopEnv {
                        bl_count > max_bl_count
 
             if kill then do
-                nodeMsg env node "!!! killed(timeout or too many blacklist count)"
+                nodeWarn env node "killed because of timeout or too many blacklist count"
                 killThread $ thread_id node
             else
                 return ()
@@ -107,20 +107,22 @@ gcLoop env@(MainLoopEnv {
         -- update node list
         setA (node_list env) new_list
 
-        envMsg env $ "gc: " ++
-                     show (length cur_list - length new_list) ++
-                     " dead node(s) collected"
-        envMsg env $ "all " ++ show (length new_list) ++ " node(s)"
-        -- ++ " node(s): " ++ show new_list
+        let killed = length cur_list - length new_list
+
+        if killed /= 0 then do
+            envMsg env $ "gc: " ++ show killed ++ " dead node(s) collected"
+            envMsg env $ "all " ++ show (length new_list) ++ " node(s)"
+        else
+            return ()
 
         -- check if there are too few nodes
         if length new_list < seek_min then
             -- seek for more nodes
             if null new_list then do
-                envMsg env "!!! lost all connections, try to bootstrap again"
+                envWarn env "lost all connections, try to bootstrap again"
                 bootstrap env boot_host
             else do
-                envMsg env "!!! too few nodes, start seeking"
+                envWarn env "too few nodes, start seeking"
                 envSpreadSimpleAction env (NormalAction seekNode) (length new_list)
                 return ()
         else

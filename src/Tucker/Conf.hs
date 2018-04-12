@@ -142,6 +142,8 @@ data TCKRConf =
         tckr_dup_tx_disable_time :: Timestamp,
         tckr_mtp_number :: Int,
 
+        tckr_node_max_task :: Int,
+
         tckr_soft_forks :: [SoftFork],
 
         -- different from the assumevalid in bitcoin core
@@ -221,10 +223,12 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_known_inv_count = 8,
 
-        tckr_max_tree_insert_depth = 64,
+        tckr_max_tree_insert_depth = 32,
 
         tckr_max_block_batch = 500,
         -- receive 200 blocks a time(if inv is greater than that, trim the tail)
+
+        tckr_node_max_task = 3, -- excluding the base handler
 
         tckr_fetch_dup_node = 8,
         tckr_fetch_dup_max_task = 4,

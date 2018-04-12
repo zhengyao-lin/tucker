@@ -140,6 +140,33 @@ notes for BIP9
 
 -}
 
+-- next empty block on the main branch
+-- note this block does not contain a coinbase
+nextEmptyBlock :: BlockChain -> IO Block
+nextEmptyBlock bc@(BlockChain {
+    bc_conf = conf,
+    bc_chain = chain
+}) = do
+    let main = mainBranch chain
+        next_height = cur_height main + 1
+
+    [tip] <- topNBlocks chain main 1
+
+    target <- targetAtHeight bc main next_height
+    mtp <- medianTimePast bc main next_height
+
+    return $ Block {
+        block_hash = error "not yet met",
+        vers = 0,
+        prev_hash = block_hash tip,
+        merkle_root = 0,
+        btimestamp = mtp,
+        hash_target =  target,
+        nonce = 0,
+        txns = FullList [],
+        enc_cache = Nothing
+    }
+
 latestBlocks :: BlockChain -> Int -> IO [Block]
 latestBlocks (BlockChain { bc_chain = chain }) n =
     fmap concat $
@@ -295,35 +322,36 @@ if height % 2016 == 0 and the block is in the main branch then
             _ -> nothing
 -}
 
-hashTargetValid :: BlockChain -> Branch -> IO Bool
-hashTargetValid bc@(BlockChain {
+-- correct target of a branch at a specific height
+targetAtHeight :: BlockChain -> Branch -> Height -> IO Hash256
+targetAtHeight (BlockChain {
     bc_conf = conf,
     bc_chain = chain
-}) branch@(BlockNode {
-    cur_height = height,
-    block_data = Block {
-        hash_target = hash_target
-    }
-}) = do
+}) branch height = do
     -- previous block
     Just (Block {
         hash_target = old_target,
         btimestamp = t2
     }) <- blockAtHeight chain branch (height - 1)
 
-    target <-
-        if tckr_use_special_min_diff conf then
-            -- TODO: non-standard special-min-diff
-            return $ fi tucker_bdiff_diff1
-        else if shouldRetarget conf height then do
-            Just (Block { btimestamp = t1 }) <-
-                blockAtHeight chain branch (height - 2016)
+    if tckr_use_special_min_diff conf then
+        -- TODO: non-standard special-min-diff
+        return $ fi tucker_bdiff_diff1
+    else if shouldRetarget conf height then do
+        Just (Block { btimestamp = t1 }) <-
+            blockAtHeight chain branch (height - fi (tckr_retarget_span conf))
 
-            return $ calNewTarget conf old_target (t2 - t1)
-        else
-            return old_target
+        return $ calNewTarget conf old_target (t2 - t1)
+    else
+        return old_target
 
-    return $ hash_target <= target
+hashTargetValid :: BlockChain -> Branch -> IO Bool
+hashTargetValid bc branch@(BlockNode {
+    cur_height = height,
+    block_data = Block {
+        hash_target = hash_target
+    }
+}) = (hash_target <=) <$> targetAtHeight bc branch height
 
 -- should not fail
 collectOrphan :: BlockChain -> IO BlockChain
@@ -759,22 +787,3 @@ expectMaybe msg (Just v) = return v
 expectMaybe msg Nothing = reject msg
 
 expectMaybeIO msg m = m >>= expectMaybe msg
-
-merkleParents :: [Hash256] -> [Hash256]
-merkleParents [] = []
-merkleParents [a] =
-    [ stdHash256 $ hash256ToBS a <> hash256ToBS a ]
-
-merkleParents (l:r:leaves) =
-    (stdHash256 $ hash256ToBS l <> hash256ToBS r) :
-    merkleParents leaves
-
-merkleRoot' :: [Hash256] -> [Hash256]
-merkleRoot' [] = [nullHash256]
-merkleRoot' [single] = [single]
-merkleRoot' leaves = merkleRoot' $ merkleParents leaves
-
-merkleRoot :: Block -> Hash256
-merkleRoot (Block {
-    txns = txns
-}) = head $ merkleRoot' (map txid (FD.toList txns))

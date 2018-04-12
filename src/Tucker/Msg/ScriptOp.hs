@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, ViewPatterns #-}
 
 module Tucker.Msg.ScriptOp where
 
@@ -13,7 +13,9 @@ import Control.Exception
 import Control.Applicative
 
 import Tucker.Enc
+import Tucker.Auth
 import Tucker.Util
+import Tucker.Conf
 import Tucker.Error
 
 type ScriptPc = Int
@@ -413,3 +415,68 @@ instance Decodable [ScriptOp] where
 
 -- error when adding block Block 000000000017538a71d012de3a73fcc22415b2aabf7329133c0109aa0a75b4b4: tucker error: tucker error: failed to parse "63BAC0D0E0F0F1F2F3F3F4FF675168"
 -- 63 BAC0D0E0F0F1F2F3F3F4FF6751 68
+
+-- types of script
+data ScriptType
+    = SCRIPT_P2PKH
+    | SCRIPT_P2PK
+    | SCRIPT_P2SH ByteString -- redeem script
+    | SCRIPT_P2MULTISIG
+    | SCRIPT_NONSTD deriving (Show)
+
+instance Eq ScriptType where
+    SCRIPT_P2PKH == SCRIPT_P2PKH = True
+    SCRIPT_P2PK == SCRIPT_P2PK = True
+    (SCRIPT_P2SH _) == (SCRIPT_P2SH _) = True
+    SCRIPT_P2MULTISIG == SCRIPT_P2MULTISIG = True
+    SCRIPT_NONSTD == SCRIPT_NONSTD = True
+    _ == _ = False
+
+allPush :: [ScriptOp] -> Bool
+allPush [] = True
+allPush (OP_PUSHDATA _ _:rst) = allPush rst
+allPush _ = False
+
+-- (sig script, pub key script)
+getScriptType :: [[ScriptOp]] -> ScriptType
+
+-- P2PKH
+-- sig_script: <signature> <public key>
+--  pk_script: OP_DUP OP_HASH160 <public key hash> OP_EQUALVERIFY OP_CHECKSIG
+getScriptType
+    [ [ OP_PUSHDATA _ _, OP_PUSHDATA _ _ ],
+      [ OP_DUP, OP_HASH160, OP_PUSHDATA _ _, OP_EQUALVERIFY, OP_CHECKSIG ] ]
+    = SCRIPT_P2PKH
+
+-- P2PK
+-- sig_script: <signature>
+--  pk_script: <public key> OP_CHECKSIG
+getScriptType
+    [ [ OP_PUSHDATA _ _ ], [ OP_PUSHDATA _ _, OP_CHECKSIG ] ]
+    = SCRIPT_P2PK
+
+-- P2SH
+-- sig_script: just OP_PUSHDATA's
+--  pk_script: OP_HASH160 <hash160(redeem script)> OP_EQUAL
+getScriptType
+    [ reverse -> OP_PUSHDATA redeem _ : (allPush -> True),
+      [ OP_HASH160, OP_PUSHDATA _ _, OP_EQUAL ] ]
+    = SCRIPT_P2SH redeem
+
+-- P2MULTISIG
+-- sig_script: OP_0 <signature 1> <signature 2>
+--  pk_script: M <public key 1> <public key 2> ... <public key N> N OP_CHECKMULTISIG
+getScriptType
+    [ OP_PUSHDATA _ _ : (allPush -> True),
+      OP_CONST _:(reverse -> OP_CHECKMULTISIG:OP_CONST _:(allPush -> True)) ]
+    = SCRIPT_P2MULTISIG
+
+getScriptType _ = SCRIPT_NONSTD
+
+stdPkScriptP2PKH :: TCKRConf -> Address -> [ScriptOp]
+stdPkScriptP2PKH conf addr =
+    [
+        OP_DUP, OP_HASH160,
+        OP_PUSHDATA (either (error . show) id (addr2hash conf addr)) Nothing,
+        OP_EQUALVERIFY, OP_CHECKSIG
+    ]

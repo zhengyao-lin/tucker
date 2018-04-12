@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# OPTIONS_GHC -Wno-overflowed-literals #-}
 
 module Tucker.Msg.Tx where
 
@@ -93,7 +94,7 @@ data TxPayload =
         wtxid       :: Hash256,
 
         version     :: Word32,
-        flag        :: Word8, -- currently only 1 or 0
+        flag        :: Word8, -- currently only 1(contains witness) or 0(nothing)
         
         tx_in       :: [TxInput],
         tx_out      :: [TxOutput],
@@ -458,110 +459,33 @@ txSigHash tx idx' subscript htype =
         -- tLn (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ sha256 $ sha256 final_str
 
--- generate a standard public key script
--- stdPkScript :: TCKRConf
---             -> Address {- alas String, base58check encoded -}
---             -> Either TCKRError ByteString
--- stdPkScript conf addr = do
---     pub_hash <- addr2hash conf addr
---     return $ encodeLE [
---             OP_DUP,
---             OP_HASH160,
---             OP_PUSHDATA pub_hash,
---             OP_EQUALVERIFY,
---             OP_CHECKSIG
---         ]
+-- config, coinbase msg, receiver address, generated value
+buildStdCoinbase :: TCKRConf -> ByteString -> Address -> Value -> TxPayload
+buildStdCoinbase conf msg addr value =
+    updateIds $ TxPayload {
+        txid = undefined,
+        wtxid = undefined,
 
--- sign a raw transaction
--- signRawTx :: ECCKeyPair -> TxPayload -> IO ByteString
--- signRawTx pair tx = do
---     let
---         raw = encodeLE tx
---         -- the first sha256 performed here
---         hash_raw = sha256 $ raw <> BSR.pack [ 0x01, 0x00, 0x00, 0x00 ]
+        version = 0,
+        flag = 0,
+        tx_in = [
+            TxInput {
+                prev_out = OutPoint 0 (-1),
+                sig_script = encodeLE ([ OP_RETURN, OP_PUSHDATA msg Nothing ]),
+                seqn = -1
+            }
+        ],
 
---     -- another sha256 is performed here
---     -- seq (tLn (show $ sha256 $ sha256 raw) 0) $
---     signSHA256DER pair hash_raw
+        tx_out = [
+            TxOutput {
+                value = value,
+                pk_script = encodeLE (stdPkScriptP2PKH conf addr)
+            }
+        ],
 
--- stdSigScript :: ECCKeyPair -> ByteString -> ByteString
--- stdSigScript pair sign =
---     encodeLE [
---         OP_PUSHDATA $ sign <> bchar 0x01,
---         OP_PUSHDATA $ pair2pubenc pair
---     ]
-
--- -- create a standard transaction using the key pair, input, and output given
--- -- assuming the previous transaction is also standard, so we can generate the
--- -- pk_script without pulling it from elsewhere
--- stdTx :: TCKRConf -> ECCKeyPair -> [OutPoint] -> [(Value, Address)] -> Either TCKRError (IO TxPayload)
--- stdTx conf pair input output = do
---     let
---         self_addr = pair2addr conf pair
-
---     in_lst <- mapM (\outp -> do
---         -- assuming the output point has a standard script
---         script <- stdPkScript conf self_addr
---         return TxInput {
---             prev_out = outp,
---             sig_script = script,
---             seqn = -1
---         }) input
-
---     out_lst <- mapM (\(v, a) -> do
---         script <- stdPkScript conf a
---         return TxOutput {
---             value = v,
---             pk_script = script
---         }) output
-
---     let
---         wrap in_lst out_lst = updateIds $ TxPayload {
---             txid = nullHash256,
---             wtxid = nullHash256,
-
---             version = 1,
---             flag = 0,
-
---             tx_in = in_lst,
---             tx_out = out_lst,
-
---             tx_witness = [],
---             lock_time = 0
-
---             -- tx_cache = Nothing
---         }
-
---         raw = wrap in_lst out_lst
-
---     return $ do -- IO
---         sign <- signRawTx pair raw
---         let script = stdSigScript pair sign
-        
---         -- replace all sig_script
-
---         new_in_lst <- mapM (\outp -> do
---             return TxInput {
---                 prev_out = outp,
---                 sig_script = script,
---                 seqn = -1
---             }) input
-        
---         return $ wrap new_in_lst out_lst
-
--- unpackEither :: Either TCKRError a -> a
--- unpackEither (Right v) = v
--- unpackEither (Left err) = error $ show err
-
--- buildTxPayload :: TCKRConf -> WIF -> [OutPoint] -> [(Value, Address)] -> IO TxPayload
--- buildTxPayload conf wif in_lst out_lst =
---     unpackEither $ stdTx conf pair in_lst out_lst
---     where pair = unpackEither $ wif2pair conf wif
-
--- encodeTxPayload :: TCKRConf -> WIF -> [OutPoint] -> [(Value, Address)] -> IO ByteString
--- encodeTxPayload conf wif in_lst out_lst = do
---     tx <- buildTxPayload conf wif in_lst out_lst
---     return $ encodeLE tx
+        tx_witness = [],
+        lock_time = 0
+    }
 
 -- testBuildTx "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9" [ OutPoint "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48" 0 ] [ (10, "5K31VmkAYGwaufdSF7osog9SmGNtzxX9ACsXMFrxJ1NsAmzkje9") ]
 -- testBuildTx "5HusYj2b2x4nroApgfvaSfKYZhRbKFH41bVyPooymbC6KfgSXdD" [ OutPoint (((!! 0) . unhex) "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48") 0 ] [ (91234, "1KKKK6N21XKo48zWKuQKXdvSsCf95ibHFa") ]
