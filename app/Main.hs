@@ -11,15 +11,18 @@ import Tucker.Util
 import Tucker.P2P.Init
 
 import Test.All
+import Test.Chain
+import Test.HUnit
 
 main = do
-    args <- getArgs
+    -- args <- getArgs
     
-    let path =
-            if null args then Nothing
-            else Just (head args)
+    -- let path =
+    --         if null args then Nothing
+    --         else Just (head args)
 
-    conf <- tucker_default_conf_testnet3 path
+    -- conf <- tucker_default_conf_testnet3 path
 
-    mainLoop conf
-    forever yield
+    -- mainLoop conf
+    -- forever yield
+    runTestTT chainTest3

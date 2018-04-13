@@ -190,27 +190,30 @@ instance Decodable BlockPayload where
 
 -- encodeBlock
 
-hashBlock :: Block -> Hash256
-hashBlock (Block {
+-- fixed part of a block in mining
+blockFixedHeader :: Block -> ByteString
+blockFixedHeader (Block {
     vers = vers,
     prev_hash = prev_hash,
     merkle_root = merkle_root,
     btimestamp = btimestamp,
-    hash_target = hash_target,
-    nonce = nonce
+    hash_target = hash_target
 }) =
-    -- sha256^2(vers + prev_hash + merkle_root + time + diff + nonce)
-    stdHash256 $ mconcat [
+    mconcat [
         encodeLE vers,
         encodeLE prev_hash,
         encodeLE merkle_root,
 
         encodeLE btimestamp,
 
-        encodeLE $ packHash256 hash_target,
-
-        encodeLE nonce
+        encodeLE $ packHash256 hash_target
     ]
+
+hashBlock :: Block -> Hash256
+hashBlock block =
+    -- sha256^2(vers + prev_hash + merkle_root + time + diff + nonce)
+    stdHash256 $
+    blockFixedHeader block <> encodeLE (nonce block)
 
 -- target to approximate difficulty(truncated by bitcoin floating point)
 targetBDiff :: Hash256 -> Difficulty
@@ -319,8 +322,8 @@ updateBlockHashes block =
             }
     in block2
 
-appendTx :: Block -> TxPayload -> Block
-appendTx block tx =
+appendTx :: TxPayload -> Block -> Block
+appendTx tx block =
     let new_txns = (FD.toList (txns block) ++ [ tx ]) in
     updateBlockHashes $ block {
         txns = FullList new_txns

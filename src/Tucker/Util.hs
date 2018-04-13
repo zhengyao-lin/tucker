@@ -19,6 +19,7 @@ import qualified System.Console.ANSI as CA
 
 import Control.Monad
 import Control.Exception
+import Control.Concurrent
 import Control.Monad.Loops
 import Control.Monad.Trans
 import qualified Control.Monad.Trans.Maybe as MT
@@ -355,3 +356,13 @@ binarySearchIO pred lo hi =
             LT -> binarySearchIO pred lo half
             EQ -> return (Just half)
             GT -> binarySearchIO pred (half + 1) hi
+
+first :: (a -> Bool) -> [a] -> Maybe a
+first pred lst =
+    case dropWhile (not . pred) lst of
+        x:_ -> Just x
+        [] -> Nothing
+
+killAllThreads :: [ThreadId] -> IO ()
+killAllThreads ids =
+    mapM_ killThread ids

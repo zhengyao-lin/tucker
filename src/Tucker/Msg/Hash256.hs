@@ -74,6 +74,8 @@ instance Decodable Hash256 where
 nullHash256 = 0 :: Hash256
 
 hash256ToBS (Hash256 n) = encodeLE n
+
+bsToHash256 :: ByteString -> Hash256
 bsToHash256 bs =
     case decodeLE bs of
         (Right v, _) -> v

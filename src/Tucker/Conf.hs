@@ -168,6 +168,7 @@ hex2bs = BS.pack . (!! 0) . unhex . map toUpper
 
 -- tucker_cache_tree_chunk = 1
 
+tucker_default_conf_mainnet :: Maybe FilePath -> IO TCKRConf
 tucker_default_conf_mainnet mpath = do
     user_home <- getHomeDirectory
 

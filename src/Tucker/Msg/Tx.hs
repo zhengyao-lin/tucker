@@ -460,8 +460,8 @@ txSigHash tx idx' subscript htype =
         -- bsToHash256 $ sha256 $ sha256 final_str
 
 -- config, coinbase msg, receiver address, generated value
-buildStdCoinbase :: TCKRConf -> ByteString -> Address -> Value -> TxPayload
-buildStdCoinbase conf msg addr value =
+stdCoinbase :: TCKRConf -> ByteString -> Address -> Value -> TxPayload
+stdCoinbase conf msg addr value =
     updateIds $ TxPayload {
         txid = undefined,
         wtxid = undefined,

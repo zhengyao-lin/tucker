@@ -140,8 +140,20 @@ notes for BIP9
 
 -}
 
+nextInitBlock :: BlockChain -> ByteString -> Address -> IO Block
+nextInitBlock bc@(BlockChain {
+    bc_conf = conf,
+    bc_chain = chain
+}) msg addr =
+    let main = mainBranch chain
+        next_height = cur_height main + 1
+        fee = feeAtHeight conf next_height
+        coinbase = stdCoinbase conf msg addr fee
+
+    in appendTx coinbase <$> nextEmptyBlock bc
+
 -- next empty block on the main branch
--- note this block does not contain a coinbase
+-- NOTE that this block does not contain a coinbase
 nextEmptyBlock :: BlockChain -> IO Block
 nextEmptyBlock bc@(BlockChain {
     bc_conf = conf,
@@ -155,8 +167,8 @@ nextEmptyBlock bc@(BlockChain {
     target <- targetAtHeight bc main next_height
     mtp <- medianTimePast bc main next_height
 
-    return $ Block {
-        block_hash = error "not yet met",
+    return $ updateBlockHashes $ Block {
+        block_hash = undefined,
         vers = 0,
         prev_hash = block_hash tip,
         merkle_root = 0,
