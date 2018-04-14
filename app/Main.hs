@@ -1,5 +1,7 @@
 module Main where
 
+import Data.Word
+
 import Control.Monad
 import Control.Concurrent
 
@@ -25,5 +27,5 @@ main = do
 
     mainLoop conf
     forever yield
-    
+
     -- runTestTT chainTest3

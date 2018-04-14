@@ -119,20 +119,16 @@ chainTest3 = TestCase $ do
             ]
 
     withChain conf $ \bc -> do
-        block <- nextInitBlock bc (BS.pack "rodyrodygogogo") "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX"
+        block <- nextInitBlock bc (BS.pack "sonia") "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX"
 
-        addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]
+        -- addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]
 
-        -- traceM (show (hex (blockFixedHeader block)))
+        result <- doMineBlock block
+        traceM (show (encodeLE result))
 
-        -- let dat = blockFixedHeader block <> encodeLE (0 :: Word32)
-        -- traceM (show (hex dat))
-        -- traceShowM ((stdHash256 dat))
+        addBlocks add_block_common_proc bc [result]
 
         return ()
-
-        -- result <- doMineBlock block
-        -- traceM (show (encodeLE result))
 
 chainTests = TestList [
         TestLabel "block chain test 1" chainTest1,

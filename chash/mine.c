@@ -48,6 +48,7 @@ typedef struct {
 
 #define MAX_BOUND ((nonce_t)-1)
 
+// a single worker
 void *miner(void *arg)
 {
     job_t job = *(job_t *)arg;
@@ -62,7 +63,7 @@ void *miner(void *arg)
 
     ctx_t ctx;
 
-    msec_t begin, end;
+    msec_t begin, span0, span1;
     double span;
 
 #define MEASURE_TIME 40960
@@ -71,18 +72,18 @@ void *miner(void *arg)
 
     printf("thread created, job [%u, %u]\n", job.from, job.to);
 
-    begin = get_cpu_ms();
+    span0 = begin = get_cpu_ms();
 
     for (i = 0; i <= j && !job.env->stop; i++) {
         if (i && i % MEASURE_TIME == 0) {
-            end = get_cpu_ms();
-            span = (double)(end - begin) / 1000;
+            span1 = get_cpu_ms();
+            span = (double)(span1 - span0) / 1000;
 
             printf("\rprogress(%d): %u/%u(%.2f%%) global rate: %.1f H/s",
                    job.id, i, j, (double)i / j * 100,
                    MEASURE_TIME / span * job.env->njob);
 
-            begin = end;
+            span0 = span1;
         }
 
         *hole = i + job.from;
@@ -102,7 +103,7 @@ void *miner(void *arg)
         // double_sha256(ndat, job.env->nsize, hash);
 
         if (less_or_equal_to_hash_le(hash, job.env->target)) {
-            printf("found!\n");
+            printf("\nfound after %.1f seconds\n", (double)(get_cpu_ms() - begin) / 1000);
             // print_hash256(hash);
             // print_hash256(job.env->target);
 
