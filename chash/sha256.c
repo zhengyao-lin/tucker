@@ -1,13 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
 
 #include "sha256.h"
 
-#define CHUNK_SIZE (512 / 8) // in bytes
-
-#define INIT_CTX { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 }
 // #define assert(c) ({ if (!(c)) { fprintf(stderr, "assert failure: " #c); fprintf(stderr, "\n"); abort(); } })
 
 /* 32-bit */
@@ -23,13 +19,6 @@
 #define EP1(x) (ROTATER(x, 6) ^ ROTATER(x, 11) ^ ROTATER(x, 25))
 #define SIG0(x) (ROTATER(x, 7) ^ ROTATER(x, 18) ^ ((x) >> 3))
 #define SIG1(x) (ROTATER(x, 17) ^ ROTATER(x, 19) ^ ((x) >> 10))
-
-typedef unsigned char byte_t;
-typedef uint32_t word_t;
-
-typedef struct {
-    word_t h0, h1, h2, h3, h4, h5, h6, h7;
-} ctx_t;
 
 word_t k[] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -73,8 +62,7 @@ to_be64(uint64_t v)
 }
 
 /* see https://en.wikipedia.org/wiki/SHA-2 for the pseudocode */
-void
-digest_chunk(ctx_t *ctx, const word_t chunk[16])
+void digest_chunk(ctx_t *ctx, const word_t chunk[16])
 {
     int i;
     word_t tmp1, tmp2;
@@ -119,8 +107,7 @@ digest_chunk(ctx_t *ctx, const word_t chunk[16])
     ctx->h7 += th.h7;
 }
 
-static inline void
-write_ctx(ctx_t *ctx, byte_t *hash)
+void write_ctx(ctx_t *ctx, hash256_t hash)
 {
     ((word_t *)hash)[0] = to_be(ctx->h0);
     ((word_t *)hash)[1] = to_be(ctx->h1);
@@ -142,40 +129,55 @@ get_k(size_t l)
     return e ? CHUNK_SIZE - e : 0;
 }
 
-static inline void
-sha256_i(const byte_t *dat, size_t osize, byte_t *hash)
+// take as many chunks as possible from data
+// and return the processed length
+size_t sha256_update(ctx_t *ctx, const byte_t *dat, size_t osize)
 {
-    size_t k = get_k(osize);
-    size_t nappend = 1 + k + 8;
-
-    size_t fsize = osize + nappend;
-    size_t nchunk = fsize / CHUNK_SIZE;
-
-    ctx_t ctx = INIT_CTX;
-    word_t last_chunk[16] = {0};
-
     size_t i;
 
-    // printf("chunks: %d\n", nchunk);
-
     for (i = 0; i + CHUNK_SIZE <= osize; i += CHUNK_SIZE) {
-        digest_chunk(&ctx, (word_t *)(dat + i));
+        digest_chunk(ctx, (word_t *)(dat + i));
     }
 
-    // printf("chunks: %d\n", i);
+    return i;
+}
 
-    memcpy(last_chunk, dat + i, osize - i); // copy rest of the data
-    ((byte_t *)last_chunk)[osize - i] = 0x80; // set the appending 1 bit
+void sha256_finalize(ctx_t *ctx, const byte_t *remain, size_t rsize, size_t osize)
+{
+    size_t k = get_k(rsize);
+    size_t nappend = 1 + k + 8;
+
+    size_t fsize = rsize + nappend;
+    size_t nchunk = fsize / CHUNK_SIZE;
+
+    word_t last_chunk[16] = {0};
+
+    // assert rsize < 512
+
+    // fill in the rest of the data
+    memcpy(last_chunk, remain, rsize);
+    // set the appending 1 bit
+    ((byte_t *)last_chunk)[rsize] = 0x80;
 
     if (nappend > CHUNK_SIZE) {
         // digest the data first, then the appending data
-        digest_chunk(&ctx, last_chunk);
+        digest_chunk(ctx, last_chunk);
         memset(last_chunk, 0, sizeof(last_chunk));
     }
 
     *(uint64_t *)(last_chunk + 14) = to_be64(osize * 8); // set bit length
 
-    digest_chunk(&ctx, last_chunk);
+    digest_chunk(ctx, last_chunk);
+}
+
+static inline void
+sha256_i(const byte_t *dat, size_t osize, byte_t *hash)
+{
+    ctx_t ctx = INIT_CTX;
+
+    size_t processed = sha256_update(&ctx, dat, osize);
+
+    sha256_finalize(&ctx, dat + processed, osize - processed, osize);
 
     write_ctx(&ctx, hash);
 }

@@ -1,5 +1,6 @@
 module Test.Chain where
 
+import Data.Word
 import qualified Data.ByteString.Char8 as BS
 
 import Test.Util
@@ -120,10 +121,18 @@ chainTest3 = TestCase $ do
     withChain conf $ \bc -> do
         block <- nextInitBlock bc (BS.pack "rodyrodygogogo") "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX"
 
-        traceM (show block)
+        addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]
 
-        result <- doMineBlock block
-        traceM (show (encodeLE result))
+        -- traceM (show (hex (blockFixedHeader block)))
+
+        -- let dat = blockFixedHeader block <> encodeLE (0 :: Word32)
+        -- traceM (show (hex dat))
+        -- traceShowM ((stdHash256 dat))
+
+        return ()
+
+        -- result <- doMineBlock block
+        -- traceM (show (encodeLE result))
 
 chainTests = TestList [
         TestLabel "block chain test 1" chainTest1,
