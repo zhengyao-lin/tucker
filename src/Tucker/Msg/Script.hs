@@ -111,7 +111,7 @@ data ScriptState =
         -- tx_prev_out :: TxOutput, -- previous tx output point
         tx_in_idx   :: Word32,
 
-        out_tx      :: TxPayload,
+        prev_tx_out :: TxOutput,
         cur_tx      :: TxPayload
     } deriving (Show)
 
@@ -199,20 +199,20 @@ depthS = (length . eval_stack) <$> get
 curTxS :: EvalState TxPayload
 curTxS = cur_tx <$> get
 
-outTxS :: EvalState TxPayload
-outTxS = out_tx <$> get
+-- outTxS :: EvalState TxPayload
+-- outTxS = out_tx <$> get
 
 stackS :: EvalState [StackItem]
 stackS = eval_stack <$> get
 
 pkScriptS :: EvalState [ScriptOp]
 pkScriptS = do
-    cur_tx   <- curTxS
-    out_tx   <- outTxS
-    in_idx   <- tx_in_idx <$> get
+    cur_tx      <- curTxS
+    prev_tx_out <- prev_tx_out <$> get
+    in_idx      <- tx_in_idx <$> get
 
     let OutPoint _ out_idx = prev_out (tx_in cur_tx !! fi in_idx)
-        script = pk_script (tx_out out_tx !! fi out_idx)
+        script = pk_script prev_tx_out
 
     case decodeAllLE script of
         Right ops -> return ops
@@ -627,8 +627,8 @@ execOneS = curOpS >>= checkValidOp >>= evalOpS >> incPcS
 execS :: EvalState ()
 execS = execOneS `untilM_` eocS
 
-initState :: ScriptConf -> TxPayload -> TxPayload -> Word32 -> ScriptState
-initState conf out_tx cur_tx idx =
+initState :: ScriptConf -> TxOutput -> TxPayload -> Word32 -> ScriptState
+initState conf prev_out cur_tx idx =
     ScriptState {
         script_conf = conf,
 
@@ -641,7 +641,7 @@ initState conf out_tx cur_tx idx =
 
         -- tx_prev_out = out,
         tx_in_idx = idx,
-        out_tx = out_tx,
+        prev_tx_out = prev_out,
         cur_tx = cur_tx
     }
 

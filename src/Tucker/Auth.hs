@@ -1,3 +1,4 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
 
 -- SHA-256
 -- RIPEMD 160
@@ -33,6 +34,10 @@ import Data.List
 import Data.Hex
 import Data.Word
 
+import Foreign.Ptr
+
+import System.IO.Unsafe
+
 import Control.Monad.Loops
 
 import Tucker.Enc
@@ -41,11 +46,37 @@ import Tucker.Util
 import Tucker.ASN1
 import Tucker.Error
 
+foreign import ccall "sha256" c_sha256 :: Ptr Word8 -> Word64 -> Ptr Word8 -> IO ()
+foreign import ccall "double_sha256" c_double_sha256 :: Ptr Word8 -> Word64 -> Ptr Word8 -> IO ()
+
 ba2bs :: BA.ByteArrayAccess a => a -> ByteString
 ba2bs = BA.convert
 
-sha256 :: ByteString -> ByteString -- BA.ByteArrayAccess a => a -> Digest SHA256
-sha256 dat = ba2bs (hash dat :: Digest SHA256)
+-- sha256 :: ByteString -> ByteString -- BA.ByteArrayAccess a => a -> Digest SHA256
+-- sha256 dat = ba2bs (hash dat :: Digest SHA256)
+
+sha256 :: ByteString -> ByteString
+sha256 bs = unsafePerformIO (snd <$> res)
+    where
+        res =
+            -- :: IO ((), ByteString)
+            BA.withByteArray bs $ \pdat ->
+                -- :: IO ((), ByteString)
+                BA.allocRet 32 $ \phash ->
+                    c_sha256 pdat (fi (BSR.length bs)) phash
+
+-- doubleSHA256 :: ByteString -> ByteString
+-- doubleSHA256 = sha256 . sha256
+
+doubleSHA256 :: ByteString -> ByteString
+doubleSHA256 bs = unsafePerformIO (snd <$> res)
+    where
+        res =
+            -- :: IO ((), ByteString)
+            BA.withByteArray bs $ \pdat ->
+                -- :: IO ((), ByteString)
+                BA.allocRet 32 $ \phash ->
+                    c_double_sha256 pdat (fi (BSR.length bs)) phash
 
 sha1 :: ByteString -> ByteString
 sha1 dat = ba2bs (hash dat :: Digest SHA1)

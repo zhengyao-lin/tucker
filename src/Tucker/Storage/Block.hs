@@ -65,9 +65,6 @@ import Tucker.Error
 import Tucker.IOMap
 import Tucker.DeepSeq
 
-type Height = Int64
--- height starts from 0(genesis)
-
 data Branch
     = BlockNode {
         prev_node  :: Maybe Branch, -- NOTE: use realPrevNode instead
@@ -204,7 +201,7 @@ initChain conf@(TCKRConf {
                         prev_node = Nothing,
                         block_data = blockHeader genesis,
 
-                        acc_diff = targetBDiff (hash_target genesis),
+                        acc_diff = targetBDiff conf (hash_target genesis),
                         cur_height = 0
                     }]
                 }
@@ -225,7 +222,7 @@ initChain conf@(TCKRConf {
                 Just $ BlockNode {
                     prev_node = Nothing,
                     block_data = block,
-                    acc_diff = targetBDiff (hash_target block),
+                    acc_diff = targetBDiff conf (hash_target block),
                     cur_height = height
                 }
 
@@ -233,7 +230,7 @@ initChain conf@(TCKRConf {
                 Just $ BlockNode {
                     prev_node = Just node,
                     block_data = block,
-                    acc_diff = targetBDiff (hash_target block) + acc_diff node,
+                    acc_diff = targetBDiff conf (hash_target block) + acc_diff node,
                     cur_height = height
                 }
 
@@ -395,6 +392,7 @@ toFullBlockNodeFail chain node = do
 -- find prev block and insert the block to the chain
 insertBlock :: Chain -> Block -> Maybe (Branch, Chain)
 insertBlock chain@(Chain {
+    chain_conf = conf,
     edge_branches = edge_branches
 }) block@(Block {
     hash_target = hash_target,
@@ -412,7 +410,7 @@ insertBlock chain@(Chain {
                 block_data = blockHeader block, -- only store the header
 
                 cur_height = cur_height prev_bn + 1,
-                acc_diff = acc_diff prev_bn + targetBDiff hash_target
+                acc_diff = acc_diff prev_bn + targetBDiff conf hash_target
             }
 
     -- tLnM (edge_branches, prev_bn, elemIndex prev_bn edge_branches)

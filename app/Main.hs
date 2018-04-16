@@ -10,6 +10,7 @@ import System.Environment
 
 import Tucker.Conf
 import Tucker.Util
+import Tucker.Auth
 import Tucker.P2P.Init
 
 import Test.All

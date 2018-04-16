@@ -8,6 +8,7 @@ import Data.Int -- hiding (map, findIndex, null)
 import Data.Word
 import Data.Bits
 import qualified Data.Foldable as FD
+import qualified Data.ByteString as BSR
 
 import Control.Monad
 import Control.Exception
@@ -28,6 +29,9 @@ import Tucker.DeepSeq
 import Tucker.Storage.Tx
 import Tucker.Storage.Block
 import Tucker.Storage.SoftFork
+
+import Tucker.IOMap
+import Unsafe.Coerce
 
 data BlockChain =
     BlockChain {
@@ -66,7 +70,7 @@ initBlockChain conf@(TCKRConf {
     bc_tx_state <- lift $ initTxState conf tx_db
     bc_fork_state <- lift $ initForkState conf block_db
 
-    return $ BlockChain {
+    let tmp = BlockChain {
         bc_conf = conf,
         bc_dbs = [ block_db, tx_db ],
 
@@ -74,6 +78,11 @@ initBlockChain conf@(TCKRConf {
         bc_tx_state = bc_tx_state,
         bc_fork_state = bc_fork_state
     }
+
+    -- lift $ tmpFix tmp
+    -- lift $ forever yield
+
+    return tmp
 
 {-
 
@@ -164,15 +173,17 @@ nextEmptyBlock bc@(BlockChain {
 
     [tip] <- topNBlocks chain main 1
 
-    target <- targetAtHeight bc main next_height
+    now <- unixTimestamp
     mtp <- medianTimePast bc main next_height
+
+    target <- targetAtHeight bc main next_height now
 
     return $ updateBlockHashes $ Block {
         block_hash = undefined,
         vers = 0,
         prev_hash = block_hash tip,
         merkle_root = 0,
-        btimestamp = mtp,
+        btimestamp = max mtp now,
         hash_target =  target,
         nonce = 0,
         txns = FullList [],
@@ -334,21 +345,39 @@ if height % 2016 == 0 and the block is in the main branch then
             _ -> nothing
 -}
 
+-- shouldUseSpecialDiff :: BlockChain -> IO Bool
+-- shouldUseSpecialDiff (BlockChain {
+--     bc_conf = conf,
+--     bc_last_recv = last_recv
+-- }) = do
+--     now <- unixTimestamp
+--     return $ tckr_use_special_min_diff conf &&
+--              (last_recv == 0 || now - last_recv >= tckr_special_min_timeout conf)
+
 -- correct target of a branch at a specific height
-targetAtHeight :: BlockChain -> Branch -> Height -> IO Hash256
-targetAtHeight (BlockChain {
+targetAtHeight :: BlockChain -> Branch -> Height -> Timestamp -> IO Hash256
+targetAtHeight bc@(BlockChain {
     bc_conf = conf,
     bc_chain = chain
-}) branch height = do
+}) branch height check_time = do
     -- previous block
     Just (Block {
         hash_target = old_target,
         btimestamp = t2
     }) <- blockAtHeight chain branch (height - 1)
 
-    if tckr_use_special_min_diff conf then
-        -- TODO: non-standard special-min-diff
-        return $ fi tucker_bdiff_diff1
+    -- NOTE: there is a bug here
+    -- in a chain with special-min-diff rule,
+    -- blocks with lower targets can get in
+    -- after a max target block is added
+    -- we need to look up further up the chain for regular difficulty
+
+    if tckr_use_special_min_diff conf &&
+        check_time - t2 >= tckr_special_min_timeout conf then
+        -- special-min-diff(mainly for testnet)
+        -- allow diff1 blocks when last_recv == 0 as well because
+        -- we don't know the specific time of receiving the last block
+        return $ fi (tckr_bdiff_diff1_target conf)
     else if shouldRetarget conf height then do
         Just (Block { btimestamp = t1 }) <-
             blockAtHeight chain branch (height - fi (tckr_retarget_span conf))
@@ -361,9 +390,10 @@ hashTargetValid :: BlockChain -> Branch -> IO Bool
 hashTargetValid bc branch@(BlockNode {
     cur_height = height,
     block_data = Block {
-        hash_target = hash_target
+        hash_target = hash_target,
+        btimestamp = time
     }
-}) = (hash_target <=) <$> targetAtHeight bc branch height
+}) = (hash_target <=) <$> targetAtHeight bc branch height time
 
 -- should not fail
 collectOrphan :: BlockChain -> IO BlockChain
@@ -420,12 +450,13 @@ trySyncChain bc@(BlockChain {
             
             return $ bc { bc_chain = chain }
 
-genScriptConf :: BlockChain -> VerifyConf -> Block -> IO ScriptConf
-genScriptConf bc ver_conf out_block =
+genScriptConf :: BlockChain -> VerifyConf -> UTXOValue -> IO ScriptConf
+genScriptConf bc ver_conf utxo_value =
     return $ def {
         script_enable_csv = verify_enable_csv ver_conf,
-        script_enable_p2sh = btimestamp out_block >=
-                             tckr_p2sh_enable_time (bc_conf bc)
+        script_enable_p2sh =
+            parent_ts utxo_value >= tckr_p2sh_enable_time (bc_conf bc)
+            -- NOTE: using the block timestamp here(not mtp)
     }
 
 genVerifyConf :: BlockChain -> Branch -> Branch -> IO VerifyConf
@@ -444,6 +475,68 @@ genVerifyConf bc@(BlockChain {
         verify_check_dup_tx = mtp >= tckr_dup_tx_disable_time conf
     }
 
+parentBranchOfTx :: UTXOMap a => BlockChain -> TxState a -> Branch -> Hash256 -> IO (Branch, Word32)
+parentBranchOfTx bc@(BlockChain {
+    bc_chain = chain
+}) tx_state branch txid = do
+    locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
+        findTxId tx_state txid
+
+    -- should ONLY be used if you checking coinbase maturity or csv validity
+    bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+        branchWithHash chain branch (locatorToHash locator)
+
+    -- bnode <- expectMaybeIO ("failed to load full block for " ++ show bnode) $
+    --     toFullBlockNode chain bnode
+
+    return (bnode, locatorToIdx locator)
+
+-- tmp fix for an db update
+-- tmpFix :: BlockChain -> IO ()
+-- tmpFix bc@(BlockChain {
+--     bc_chain = chain,
+--     bc_tx_state = tx_state
+-- }) = do
+--     -- remove all outpoints with illegal value
+--     let utxo = unsafeCoerce (utxo_map tx_state)
+--                :: CacheMap (DBBucket OutPoint ByteString) OutPoint ByteString
+
+--     foldKeyIO utxo 0 $ \count out@(OutPoint txid idx) -> do
+--         Just value <- lookupIO utxo out
+
+--         if count `mod` 256 == 0 then
+--             tM (show count)
+--         else
+--             return ()
+
+--         if BSR.length value > 8 then
+--             return ()
+--         else do
+--             if (decodeFailLE value :: Value) < 0 then do
+--                 -- delete if invalid
+--                 deleteIO (utxo_map tx_state) out
+--                 return ()
+--             else do
+--                 locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
+--                     findTxId tx_state txid
+
+--                 -- should ONLY be used if you checking coinbase maturity or csv validity
+--                 bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+--                     branchWithHash chain (mainBranch chain) (locatorToHash locator)
+
+--                 bnode <- expectMaybeIO ("failed to load full block for " ++ show bnode) $
+--                     toFullBlockNode chain bnode
+
+--                 -- append more info
+--                 addOutput tx_state (cur_height bnode) (block_data bnode)
+--                           (fi $ locatorToIdx locator) (fi idx)
+
+--             syncUTXO tx_state
+
+--         return (count + 1)
+
+--     tLnM "update done"
+
 verifyInput :: UTXOMap a
             => BlockChain -> TxState a -> VerifyConf
             -> Branch -> TxPayload -> Int -> IO Value
@@ -453,17 +546,14 @@ verifyInput bc@(BlockChain {
     bc_fork_state = fork_state
 }) tx_state ver_conf branch tx in_idx = do
     let inp@(TxInput {
-            prev_out = outp@(OutPoint txid out_idx)
+            prev_out = outp@(OutPoint prev_txid out_idx)
         }) = tx_in tx !! in_idx
 
-    value <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
+    -- :: UTXOValue
+    uvalue <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
         lookupUTXO tx_state outp
 
-    locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
-        findTxId tx_state txid
-
-    prev_bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
-        branchWithHash chain branch (locatorToHash locator)
+    -- prev_bnode <- parentBranchOfTx bc tx_state branch prev_txid
 
     if verify_enable_csv ver_conf &&
        version tx >= 2 then do
@@ -476,10 +566,10 @@ verifyInput bc@(BlockChain {
                     LOCK_TIME_HEIGHT ->
                         expectTrue "relative lock-time(block time) not met" $
                             cur_height (verify_cur_bnode ver_conf) >=
-                            fi v + cur_height prev_bnode
+                            fi v + parent_height uvalue
 
                     LOCK_TIME_512S -> do
-                        prev_time <- medianTimePastBranch bc prev_bnode
+                        prev_time <- medianTimePast bc branch (parent_height uvalue)
                         
                         expectTrue "relative lock-time not met" $
                             verify_cur_mtp ver_conf >= fi v * 512 + prev_time
@@ -488,40 +578,30 @@ verifyInput bc@(BlockChain {
     else
         return ()
 
-    prev_bnode <- expectMaybeIO ("failed to load full block for " ++ show prev_bnode) $
-        toFullBlockNode chain prev_bnode
-        -- -- special case -> outpoint is in the current block/top
-        -- if bnode == branch then return bnode
-        -- else expectMaybeIO ("failed to load full block for " ++ show bnode) $
-        --     toFullBlockNode chain bnode
-
-    let prev_tx_idx = locatorToIdx locator
-        prev_tx_body =
-            (txns (block_data prev_bnode)) `index` fi prev_tx_idx
-
-        prev_tx_out = tx_out prev_tx_body !! fi out_idx
+    let prev_tx_idx = tx_index uvalue
+        prev_tx_out = u_tx_out uvalue -- tx_out prev_tx_body !! fi out_idx
 
     -- if the funding tx is coinbase(idx == 0), check coinbase maturity
-    expectTrue ("coinbase maturity not met for outpoint tx " ++ show txid) $
+    expectTrue ("coinbase maturity not met for outpoint tx " ++ show prev_txid) $
         prev_tx_idx /= 0 ||
-        cur_height branch - cur_height prev_bnode >= fi (tckr_coinbase_maturity conf)
+        cur_height branch - parent_height uvalue >= fi (tckr_coinbase_maturity conf)
 
     -- generate script configuration
-    script_conf <- genScriptConf bc ver_conf (block_data prev_bnode)
+    script_conf <- genScriptConf bc ver_conf uvalue
 
     -- check script
     let pk_sc = decodeFailLE (pk_script prev_tx_out)
         sig_sc = decodeFailLE (sig_script inp)
-        state = initState script_conf prev_tx_body tx (fi in_idx)
+        state = initState script_conf prev_tx_out tx (fi in_idx)
         check_res = runEval state [ sig_sc, pk_sc ]
 
     expectTrue ("invalid script/signature for outpoint tx " ++
-                show txid ++ ": " ++ show check_res ++
+                show prev_txid ++ ": " ++ show check_res ++
                 ": " ++ show [ sig_sc, pk_sc ]) $
         check_res == ValidTx
 
     -- all test passed, return value
-    return value
+    return (value (u_tx_out uvalue))
 
 updateChain :: BlockChain -> Chain -> IO BlockChain
 updateChain bc chain =
@@ -529,7 +609,7 @@ updateChain bc chain =
         bc_chain = chain
     }
 
--- NOTE: the block given is not necessarily the tip block
+-- NOTE: the block given is not necessarily the top block
 verifyBlockTx :: BlockChain -> Branch -> Block -> IO ()
 verifyBlockTx bc branch block = do
     let all_txns = FD.toList (txns block)
@@ -601,7 +681,7 @@ verifyBlockTx bc branch block = do
             expectTrue "sum of inputs less than the sum of output" $
                 fee >= 0
 
-            addTx tx_state block idx
+            addTx tx_state (cur_height bnode) block idx
 
             return fee
 
@@ -614,7 +694,7 @@ verifyBlockTx bc branch block = do
         expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
             coinbase_out <= block_fee + tx_fee
 
-        addTx tx_state block 0
+        addTx tx_state (cur_height bnode) block 0
 
     end_time <- msCPUTime :: IO Integer
 
@@ -725,7 +805,7 @@ addBlockFail bc@(BlockChain {
                     else do
                         -- trust all txns
                         tLnM "txns assumed valid"
-                        addTxns tx_state block
+                        addTxns tx_state (cur_height branch) block
 
                     -- update fork deploy status
                     updateForkDeploy bc branch
@@ -735,7 +815,7 @@ addBlockFail bc@(BlockChain {
                 else if branch > main_branch then do
                     -- branch becoming the main branch
                     
-                    tLnM "main branch change!!!"
+                    tLnM "!!! main branch change"
 
                     -- set main branch
                     bc <- updateChain bc (setMainBranch chain branch)
@@ -743,10 +823,11 @@ addBlockFail bc@(BlockChain {
                     -- if block check fails here, the new block will be rejected
                     -- and no update in main branch is possible
                     withCacheUTXO tx_state $ \tx_state -> do
-                        let (fp1, fp2) = forkPath chain branch main_branch
+                        let (fp1, fp2) = forkPath chain main_branch branch
 
                         -- [[TxPayload]]
                         -- fp1 is in descending order of heights
+                        -- fp1 is from the original main branch
                         forM_ fp1 $ \bnode -> do
                             -- get full node and then get txns
                             -- to revert the UTXO
@@ -755,8 +836,23 @@ addBlockFail bc@(BlockChain {
 
                             let all_txns = FD.toList (txns (block_data bnode))
 
+                            -- remove all added outputs
+                            mapM_ (removeTx tx_state (block_data bnode)) [ 0 .. length all_txns - 1 ]
+
+                            -- coinbase doesn't have any input
+                            forM_ (tail all_txns) $ \tx -> do
+                                -- re-add all outputs cancelled
+                                forM_ (tx_in tx) $ \input@(TxInput {
+                                    prev_out = OutPoint prev_txid out_idx
+                                }) -> do
+                                    (prev_bnode, tx_idx) <-
+                                        parentBranchOfTx bc tx_state main_branch prev_txid
+
+                                    addOutput tx_state (cur_height prev_bnode)
+                                              (block_data prev_bnode) (fi tx_idx) (fi out_idx)
+
                             -- revert the state in reverse order
-                            mapM_ (revertUTXO tx_state) (reverse all_txns)
+                            -- mapM_ (revertUTXO tx_state) (reverse all_txns)
         
                         -- recheck all new main branch nodes
                         

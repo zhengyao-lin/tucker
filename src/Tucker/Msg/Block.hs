@@ -21,6 +21,9 @@ import Tucker.Msg.Hash256
 
 type Difficulty = Double
 
+type Height = Int64
+-- height starts from 0(genesis)
+
 data Block =
     Block {
         block_hash  :: Hash256,
@@ -216,9 +219,9 @@ hashBlock block =
     blockFixedHeader block <> encodeLE (nonce block)
 
 -- target to approximate difficulty(truncated by bitcoin floating point)
-targetBDiff :: Hash256 -> Difficulty
-targetBDiff hash =
-    fromIntegral tucker_bdiff_diff1 / fromIntegral hash
+targetBDiff :: TCKRConf -> Hash256 -> Difficulty
+targetBDiff conf hash =
+    fi (tckr_bdiff_diff1_target conf) / fi hash
 
 isHashOf :: Hash256 -> Block -> Bool
 isHashOf hash = (== hash) . block_hash

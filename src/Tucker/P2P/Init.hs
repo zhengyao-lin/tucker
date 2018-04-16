@@ -28,8 +28,9 @@ import System.Mem
 
 bootstrap :: MainLoopEnv -> [String] -> IO ()
 bootstrap env hostnames = do
-    addrs <- mapM (seedLookup $ global_conf env) hostnames >>= (pure . concat)
-    probe env (take (envConf env tckr_max_node) addrs)
+    flip forkMapM__ hostnames $ \hostname -> do
+        addrs <- seedLookup (global_conf env) hostname
+        probe env addrs
     
 {-
 
@@ -138,6 +139,11 @@ mainLoop conf = runResourceT $ do
 
     lift $ bootstrap env (tckr_bootstrap_host conf)
     -- setA (node_list env) init_nodes
+
+    -- wait until enough nodes are connected
+    lift $ yield `untilM_` ((>= envConf env tckr_min_node) <$> length <$> envAliveNodes env)
+
+    lift $ envMsg env "boostrap done"
 
     -- keep the resource, never exit
     gc_tid <- resourceForkIO $ lift $ gcLoop env

@@ -31,7 +31,7 @@ class IOMap a k v | a -> k, a -> v where
         r <- f k
         return (lst ++ [r])
 
-    mapKeyIO_ :: a -> (k -> IO a) -> IO ()
+    mapKeyIO_ :: a -> (k -> IO c) -> IO ()
     mapKeyIO_ a f = foldKeyIO a () (\_ k -> f k >> return ())
 
     countIO :: Integral t => a -> IO t

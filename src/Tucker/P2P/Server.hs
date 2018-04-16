@@ -111,6 +111,7 @@ defaultHandler env node msg@(MsgHead {
 nodeDefaultActionList = [
         -- NormalAction fetchBlock, -- for test
         NormalAction A.pingDelay, -- measure delay
+        NormalAction A.seekNode,
         NormalAction defaultHandler
     ]
 
@@ -171,13 +172,18 @@ nodeExec env unready_node = do
     -- set default action
     nodePrependActions node nodeDefaultActionList
 
-    -- officially inserting the node
-    envAppendNode env node
+    full <- envNodeFull env
 
-    -- enter receiving loop
-    whileM_ (pure True) $ do
-        -- nodeMsg env node "node loop"
-        nodeRecvOneMsgNonBlocking env node >>= nodeProcMsg env node
+    if not full then do
+        -- officially inserting the node
+        envAppendNode env node
+
+        -- enter receiving loop
+        whileM_ (pure True) $ do
+            -- nodeMsg env node "node loop"
+            nodeRecvOneMsgNonBlocking env node >>= nodeProcMsg env node
+    else
+        return ()
 
 nodeFinal :: MainLoopEnv -> Node -> Either SomeException () -> IO ()
 nodeFinal env node res = do
@@ -261,8 +267,8 @@ handshake env node = do
 -- return alive address
 -- timeout in seconds
 probe :: MainLoopEnv -> [AddrInfo] -> IO ()
-probe env addrs = do
-    forM_ addrs $ \addr -> tryT $ do
+probe env addrs =
+    flip forkMapM__ addrs $ \addr -> do
         let sock_addr = addrAddress addr
 
         envMsg env ("probing " ++ show sock_addr)
@@ -274,8 +280,5 @@ probe env addrs = do
         node <- initNode sock_addr trans
 
         forkFinally (nodeExec env node) (nodeFinal env node)
-
-        -- appA (++ [node]) (node_list env)
-        -- return $ Just node
 
         return ()

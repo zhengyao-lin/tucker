@@ -24,7 +24,7 @@ locatorToHash = fst
 locatorToIdx = snd
 
 -- the last byte of indicates whether the outpoint is spent
-type UTXOArg c = c OutPoint Value
+type UTXOArg c = c OutPoint UTXOValue
 
 type UTXOCache c = UTXOArg (CacheMap c)
 
@@ -34,7 +34,54 @@ type UTXOCache1 = UTXOCache UTXOCache0
 type UTXOCache2 = UTXOCache UTXOCache1
 type UTXOCache3 = UTXOCache UTXOCache2
 
-type UTXOMap a = IOMap a OutPoint Value
+type UTXOMap a = IOMap a OutPoint UTXOValue
+
+data UTXOValue =
+    UTXOValue {
+        parent_ts     :: Timestamp,
+        parent_height :: Height,
+        tx_index      :: Word32, -- index of the tx in its parent block
+        u_tx_out      :: TxOutput
+    } deriving (Show)
+
+instance Encodable UTXOValue where
+    encode end (UTXOValue {
+        parent_ts = parent_ts,
+        parent_height = parent_height,
+        tx_index = tx_index,
+        u_tx_out = u_tx_out
+    }) =
+        encode end parent_ts <>
+        encode end parent_height <>
+        encode end tx_index <>
+        encode end u_tx_out
+
+instance Decodable UTXOValue where
+    decoder = do
+        ts <- decoder
+        height <- decoder
+        tx_idx <- decoder
+        tx_out <- decoder
+
+        return $ UTXOValue {
+            parent_ts = ts,
+            parent_height = height,
+            tx_index = tx_idx,
+            u_tx_out = tx_out
+        }
+
+{-
+
+1. a update tool for the current db
+2. change the value of the UTXO map to a TxOutput
+3. change corresponding things in the chain verification
+
+* we need to include more information in the UTXO set
+1. TxOutput
+2. index of the parant tx in its block
+3. mtp of the block
+
+-}
 
 -- class (UTXOMap a, IsCacheMap a) => UTXOCacheN a where
 
@@ -85,67 +132,107 @@ initTxState conf@(TCKRConf {
         tx_orphan_pool = SET.empty
     }
 
-getSpentAndUnspent :: TxPayload -> ([OutPoint], [(OutPoint, Value)])
-getSpentAndUnspent tx =
-    let spent = map prev_out (tx_in tx)
-        len_out = length (tx_out tx)
+-- getSpentAndUnspent :: TxPayload -> ([OutPoint], [(OutPoint, Value)])
+-- getSpentAndUnspent tx =
+--     let spent = map prev_out (tx_in tx)
+--         len_out = length (tx_out tx)
 
-        -- :: [(OutPoint, Value)]
-        unspent = map (uncurry OutPoint) (replicate len_out (txid tx) `zip` [0..])
-                  `zip`
-                  map value (tx_out tx)
+--         -- :: [(OutPoint, Value)]
+--         unspent = map (uncurry OutPoint) (replicate len_out (txid tx) `zip` [0..])
+--                   `zip`
+--                   map value (tx_out tx)
 
-    in (spent, unspent)
+--     in (spent, unspent)
 
 -- core state change in bitcoin
-applyUTXO :: UTXOMap a => TxState a -> TxPayload -> IO ()
-applyUTXO (TxState { utxo_map = utxo_map }) tx = do
-    let (spent, unspent) = getSpentAndUnspent tx
+-- applyUTXO :: UTXOMap a => TxState a -> TxPayload -> IO ()
+-- applyUTXO (TxState { utxo_map = utxo_map }) tx = do
+--     let (spent, unspent) = getSpentAndUnspent tx
 
-    -- remove/add spent/unspent outpoint
-    -- mapM_ (deleteIO utxo_map) spent
-    mapM_ (applyIO utxo_map complement) spent
-    -- take the complement of the value instead of deleting the entry
+--     -- remove/add spent/unspent outpoint
+--     -- mapM_ (deleteIO utxo_map) spent
+--     mapM_ (applyIO utxo_map complement) spent
+--     -- take the complement of the value instead of deleting the entry
     
-    mapM_ (uncurry (insertIO utxo_map)) unspent
+--     mapM_ (uncurry (insertIO utxo_map)) unspent
 
--- revert the UTXO state
--- ASSUMING the tx has already been applied to UTXO
-revertUTXO :: UTXOMap a => TxState a -> TxPayload -> IO ()
-revertUTXO (TxState { utxo_map = utxo_map }) tx = do
-    let (spent, unspent) = getSpentAndUnspent tx
+-- -- revert the UTXO state
+-- -- ASSUMING the tx has already been applied to UTXO
+-- revertUTXO :: UTXOMap a => TxState a -> TxPayload -> IO ()
+-- revertUTXO (TxState { utxo_map = utxo_map }) tx = do
+--     let (spent, unspent) = getSpentAndUnspent tx
 
-    mapM_ (applyIO utxo_map complement) spent
-    mapM_ (deleteIO utxo_map . fst) unspent
+--     mapM_ (applyIO utxo_map complement) spent
+--     mapM_ (deleteIO utxo_map . fst) unspent
 
 -- add a list of block-included tx and add/remove utxo respectively
 -- this function contains no validation of the tx
-addTx :: UTXOMap a => TxState a -> Block -> Int -> IO ()
+addTx :: UTXOMap a => TxState a -> Height -> Block -> Int -> IO ()
 addTx state@(TxState {
     bucket_tx = bucket_tx,
     utxo_map = utxo_map
-}) block idx = do
+}) height block idx = do
     let tx = FD.toList (txns block) !! idx
+        insert =
+            flip map (zip [0..] (tx_out tx)) $ \(i, output) ->
+                -- insert key, value pairs
+                (OutPoint (txid tx) i, UTXOValue {
+                    parent_ts = btimestamp block,
+                    parent_height = height,
+                    tx_index = fi idx,
+                    u_tx_out = output
+                })
+
+        delete = map prev_out (tx_in tx)
 
     -- add tx to database
     insertIO bucket_tx (txid tx) (txLocator (block_hash block) (fi idx))
 
-    -- apply utxo
-    applyUTXO state tx
+    mapM_ (uncurry (insertIO utxo_map)) insert
+    mapM_ (deleteIO utxo_map) delete
 
-addTxns :: UTXOMap a => TxState a -> Block -> IO ()
-addTxns state block =
+    -- apply utxo
+    -- applyUTXO state tx
+
+-- remove the output of a tx from the utxo
+-- NOTE: this function will not recover the outputs
+-- removed previously by this tx
+removeTx :: UTXOMap a => TxState a -> Block -> Int -> IO ()
+removeTx state@(TxState {
+    utxo_map = utxo_map
+}) block idx = do
+    let tx = FD.toList (txns block) !! idx
+        delete = map (OutPoint (txid tx)) [ 0 .. fi (length (tx_out tx)) ]
+
+    mapM_ (deleteIO utxo_map) delete
+
+-- add a specific output
+addOutput :: UTXOMap a => TxState a -> Height -> Block -> Int -> Int -> IO ()
+addOutput state@(TxState {
+    utxo_map = utxo_map
+}) height block idx out_idx =
+    let tx = FD.toList (txns block) !! idx in
+
+    insertIO utxo_map (OutPoint (txid tx) (fi out_idx)) $ UTXOValue {
+        parent_ts = btimestamp block,
+        parent_height = height,
+        tx_index = fi idx,
+        u_tx_out = tx_out tx !! out_idx
+    }
+
+addTxns :: UTXOMap a => TxState a -> Height -> Block -> IO ()
+addTxns state height block =
     let len = length (txns block) in
-    mapM_ (addTx state block) [ 0 .. len - 1 ]
+    mapM_ (addTx state height block) [ 0 .. len - 1 ]
 
 -- lookup for a utxo
-lookupUTXO :: UTXOMap a => TxState a -> OutPoint -> IO (Maybe Value)
+lookupUTXO :: UTXOMap a => TxState a -> OutPoint -> IO (Maybe UTXOValue)
 lookupUTXO state outpoint = do
-    mvalue <- lookupIO (utxo_map state) outpoint
+    lookupIO (utxo_map state) outpoint
 
-    return $ mvalue >>= \v ->
-        if v >= 0 then return v
-        else fail "spent value"
+    -- return $ mvalue >>= \v ->
+    --     if v >= 0 then return v
+    --     else fail "spent value"
 
 -- lookup for a accepted txid
 findTxId :: TxState a -> Hash256 -> IO (Maybe TxLocator)

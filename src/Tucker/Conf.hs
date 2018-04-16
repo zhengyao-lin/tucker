@@ -86,6 +86,7 @@ data TCKRConf =
         tckr_trans_timeout   :: Int, -- in sec
         tckr_bootstrap_host  :: [String],
 
+        tckr_min_node        :: Int,
         tckr_seek_min        :: Int,
         tckr_seek_max        :: Int,
         tckr_max_node        :: Int,
@@ -128,6 +129,7 @@ data TCKRConf =
         tckr_soft_fork_lock_threshold :: Word32, -- roughly 95% of retarget span
 
         tckr_use_special_min_diff :: Bool, -- support special-min-difficulty or not(mainly on testnet)
+        tckr_special_min_timeout :: Timestamp,
 
         tckr_block_fetch_timeout :: Int, -- in sec
         tckr_node_max_blacklist_count :: Int,
@@ -153,16 +155,15 @@ data TCKRConf =
         tckr_block_assumed_valid :: Maybe (Word, String),
 
         tckr_enable_difficulty_check :: Bool,
-        tckr_enable_mtp_check :: Bool
+        tckr_enable_mtp_check :: Bool,
+
+        tckr_bdiff_diff1_target :: Integer
     } deriving (Show)
 
 tucker_version = "0.0.1"
 
 tucker_btp_name_regex = "^btp.(0|[1-9][0-9]*)$"
 tucker_btp_name_gen num = "btp." ++ show num
-
-tucker_bdiff_diff1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
-tucker_pdiff_diff1 = 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 hex2bs = BS.pack . (!! 0) . unhex . map toUpper
 
@@ -201,6 +202,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_trans_timeout = 5, -- 5 sec
         tckr_bootstrap_host = [ "seed.btc.petertodd.org" ],
 
+        tckr_min_node = 8, -- minimum number of nodes to function
         tckr_seek_min = 16, -- if node_count < min_seek then seek for more nodes
         tckr_seek_max = 32, -- if node_count >= max_seek then stop seeking
 
@@ -216,7 +218,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_gc_interval = 20 * 1000 * 1000, -- 20 sec
         
         tckr_max_block_task = 20,
-        tckr_min_parallel_input_check = 256, -- maxBound,
+        tckr_min_parallel_input_check = 100000, -- maxBound,
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min
@@ -241,6 +243,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_soft_fork_lock_threshold = 1916,
 
         tckr_use_special_min_diff = False,
+        tckr_special_min_timeout = 20 * 60, -- 20 min
 
         tckr_block_fetch_timeout = 10,
 
@@ -278,8 +281,10 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_block_assumed_valid = Nothing,
 
-        tckr_enable_difficulty_check = False,
-        tckr_enable_mtp_check = False
+        tckr_enable_difficulty_check = True,
+        tckr_enable_mtp_check = True,
+
+        tckr_bdiff_diff1_target = 0x00000000ffff0000000000000000000000000000000000000000000000000000
     }
 
     where
@@ -293,7 +298,12 @@ tucker_default_conf_testnet3 mpath = do
         tckr_magic_no = BSR.pack [ 0x0b, 0x11, 0x09, 0x07 ],
         tckr_listen_port = 18333,
 
-        tckr_bootstrap_host = [ "testnet-seed.bitcoin.jonasschnelli.ch", "seed.tbtc.petertodd.org" ],
+        tckr_bootstrap_host = [
+            "testnet-seed.bluematt.me",
+            "testnet-seed.bitcoin.jonasschnelli.ch",
+            "seed.tbtc.petertodd.org",
+            "testnet-seed.bitcoin.schildbach.de"    
+        ],
 
         tckr_genesis_raw = hex2bs "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4ADAE5494DFFFF001D1AA4AE180101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000",
     
@@ -320,8 +330,8 @@ tucker_default_conf_testnet3 mpath = do
             }
         ],
 
-        tckr_block_assumed_valid = -- Nothing
+        tckr_block_assumed_valid = Nothing
             -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
             -- Just (600000, "000000000000624f06c69d3a9fe8d25e0a9030569128d63ad1b704bbb3059a16")
-            Just (700000, "000000000000406178b12a4dea3b27e13b3c4fe4510994fd667d7c1e6a3f4dc1 ")
+            -- Just (700000, "000000000000406178b12a4dea3b27e13b3c4fe4510994fd667d7c1e6a3f4dc1 ")
     }

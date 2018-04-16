@@ -9,9 +9,10 @@ import Test.Common
 -- tx0 out_idx tx1 in_idx
 generalTxCase :: ScriptType -> ScriptResult -> TxPayload -> Int -> TxPayload -> Int -> IO ()    
 generalTxCase stype should_be tx0 out_idx tx1 in_idx = do
-    let pk_sc = decodeFailLE (pk_script (tx_out tx0 !! out_idx))
+    let prev_tx_out = tx_out tx0 !! out_idx
+        pk_sc = decodeFailLE (pk_script prev_tx_out)
         sig_sc = decodeFailLE (sig_script (tx_in tx1 !! in_idx))
-        state = initState def tx0 tx1 (fi in_idx)
+        state = initState def prev_tx_out tx1 (fi in_idx)
         obs_stype = getScriptType [ sig_sc, pk_sc ]
 
     -- print ([ sig_sc, pk_sc ])

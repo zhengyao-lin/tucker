@@ -320,6 +320,14 @@ envAllNetDelay env =
     mapM nodeNetDelay >>=
     (return . map fi . filter (/= maxBound))
 
+envAliveNodes :: MainLoopEnv -> IO [Node]
+envAliveNodes env =
+    getA (node_list env) >>= filterM (getA . alive)
+
+envNodeFull :: MainLoopEnv -> IO Bool
+envNodeFull env =
+    (envConf env tckr_seek_max <=) <$> length <$> envAliveNodes env
+
 -- spread actions to nodes except the ones in the black list
 -- return [] if no available node is found
 envSpreadActionExcept :: NodeTask t

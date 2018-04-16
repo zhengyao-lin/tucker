@@ -82,7 +82,7 @@ bsToHash256 bs =
         _ -> error "failed to decode hash256"
 
 stdHash256 :: ByteString -> Hash256
-stdHash256 = bsToHash256 . sha256 . sha256
+stdHash256 = bsToHash256 . doubleSHA256
 
 -- decodeBE $ hex2bs "9b0fc92260312ce44e74ef369f5c66bbb85848f2eddd5a7a1cde251e54ccfdd5" :: (Either TCKRError Hash256, ByteString)
 

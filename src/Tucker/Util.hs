@@ -102,7 +102,7 @@ ns2s t = t `div` 1000000000
 ps2s t = t `div` 1000000000000
 
 msCPUTime :: Integral t => IO t
-msCPUTime = getCPUTime >>= (pure . fromInteger . ps2ms)
+msCPUTime = fi <$> ps2ms <$> getCPUTime
 
 dupFill :: [a] -> Int -> Int -> [a]
 dupFill lst times max =
@@ -366,3 +366,11 @@ first pred lst =
 killAllThreads :: [ThreadId] -> IO ()
 killAllThreads ids =
     mapM_ killThread ids
+
+timeit :: Integral t => IO a -> IO t
+timeit action = do
+    begin <- msCPUTime
+    action
+    end <- msCPUTime
+    
+    return (fi (end - begin))

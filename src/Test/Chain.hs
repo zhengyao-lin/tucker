@@ -123,6 +123,8 @@ chainTest3 = TestCase $ do
 
         -- addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]
 
+        traceM (show (hash_target block))
+
         result <- doMineBlock block
         traceM (show (encodeLE result))
 
