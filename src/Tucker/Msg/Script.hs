@@ -127,8 +127,11 @@ popM' s = toTCKRErrorM (runStateT popS' s)
 popM :: StackItemValue v => ScriptState -> TCKRErrorM (v, ScriptState)
 popM s = toTCKRErrorM (runStateT popS s)
 
-pushM :: StackItemValue v => v -> ScriptState -> TCKRErrorM ScriptState
-pushM v s = toTCKRErrorM (execStateT (pushS v) s)
+pushM :: StackItemValue v => ScriptState -> v -> TCKRErrorM ScriptState
+pushM s v = toTCKRErrorM (execStateT (pushS v) s)
+
+pushNM :: StackItemValue v => ScriptState -> [v] -> TCKRErrorM ScriptState
+pushNM s vs = toTCKRErrorM (execStateT (pushNS vs) s)
 
 invalidTx = throwMT "invalid transaction"
 
@@ -740,19 +743,13 @@ shouldEnableWitness s =
     script_enable_segwit (script_conf s) &&
     isJust (getWitness (cur_tx s) (fi (tx_in_idx s)))
 
-parseVersionByte :: ScriptOp -> Maybe Word8
-parseVersionByte (OP_CONST n) = if n >= 0 then Just (fi n) else Nothing -- 1 - 16
-parseVersionByte (OP_PUSHDATA dat _) = if BSR.null dat then Just 0 else Nothing -- 0
-parseVersionByte _ = Nothing
-
-parseWitnessProgram :: [ScriptOp] -> Maybe (ByteString)
-parseWitnessProgram [ parseVersionByte -> Just 0, OP_PUSHDATA wit _ ] =
-    if BSR.length wit == 20 ||
-       BSR.length wit == 32 then Just wit
-    else
-        Nothing
-
-parsetWitnessProgram _ = Nothing
+enableV0Wit :: ScriptState -> ScriptState
+enableV0Wit s =
+    s {
+        script_conf = (script_conf s) {
+            script_enable_v0_wit_sig = True
+        }
+    }
 
 -- assuming the previous result on the stack is cleaned
 verifyWitness :: ScriptState -> ByteString -> Either TCKRError ScriptState
@@ -770,15 +767,11 @@ verifyWitness s wit@(BSR.length -> 20) = do
     --     (ripemd160 . sha256) pub' == wit
 
     -- set v0 witness signature support
-    let ns = s {
-                script_conf = (script_conf s) {
-                    script_enable_v0_wit_sig = True
-                }
-            }
+    let ns = enableV0Wit s
 
     -- push back two witness data
-    ns <- pushM sig' ns
-    ns <- pushM pub' ns
+    ns <- pushM ns sig'
+    ns <- pushM ns pub'
     execEval ns [
             OP_DUP, OP_HASH160, OP_PUSHDATA wit Nothing,
             OP_EQUALVERIFY, OP_CHECKSIG
@@ -787,8 +780,23 @@ verifyWitness s wit@(BSR.length -> 20) = do
     -- fail "P2WPKH verification not supported yet"
 
 -- P2WSH
-verifyWitness s wit@(BSR.length -> 32) =
-    fail "P2WSH verification not supported yet"
+verifyWitness s wit@(BSR.length -> 32) = do
+    let Just (TxWitness items) = getWitness (cur_tx s) (fi (tx_in_idx s))
+        wit_script_raw = last items
+        args = init items
+
+    assertMT "no enough stack items for P2WSH validation(require at least 1)" $
+        length items >= 1
+
+    assertMT "witness script hash not match" $
+        sha256 wit_script_raw == wit
+
+    wit_script <- decodeAllLE wit_script_raw
+
+    let ns = enableV0Wit s
+    
+    ns <- pushNM ns args
+    execEval ns wit_script
 
 verifyWitness _ _ = fail "illegal witness program length"
 

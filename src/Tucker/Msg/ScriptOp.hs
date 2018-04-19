@@ -422,6 +422,8 @@ data ScriptType
     | SCRIPT_P2PK
     | SCRIPT_P2SH ByteString -- redeem script
     | SCRIPT_P2MULTISIG
+    | SCRIPT_P2WPKH
+    | SCRIPT_P2WSH
     | SCRIPT_NONSTD deriving (Show)
 
 instance Eq ScriptType where
@@ -429,6 +431,8 @@ instance Eq ScriptType where
     SCRIPT_P2PK == SCRIPT_P2PK = True
     (SCRIPT_P2SH _) == (SCRIPT_P2SH _) = True
     SCRIPT_P2MULTISIG == SCRIPT_P2MULTISIG = True
+    SCRIPT_P2WPKH == SCRIPT_P2WPKH = True
+    SCRIPT_P2WSH == SCRIPT_P2WSH = True
     SCRIPT_NONSTD == SCRIPT_NONSTD = True
     _ == _ = False
 
@@ -436,6 +440,20 @@ allPush :: [ScriptOp] -> Bool
 allPush [] = True
 allPush (OP_PUSHDATA _ _:rst) = allPush rst
 allPush _ = False
+
+parseVersionByte :: ScriptOp -> Maybe Word8
+parseVersionByte (OP_CONST n) = if n >= 0 then Just (fi n) else Nothing -- 1 - 16
+parseVersionByte (OP_PUSHDATA dat _) = if BSR.null dat then Just 0 else Nothing -- 0
+parseVersionByte _ = Nothing
+
+parseWitnessProgram :: [ScriptOp] -> Maybe (ByteString)
+parseWitnessProgram [ parseVersionByte -> Just 0, OP_PUSHDATA wit _ ] =
+    if BSR.length wit == 20 ||
+       BSR.length wit == 32 then Just wit
+    else
+        Nothing
+
+parsetWitnessProgram _ = Nothing
 
 -- (sig script, pub key script)
 getScriptType :: [[ScriptOp]] -> ScriptType
@@ -470,6 +488,12 @@ getScriptType
     [ OP_PUSHDATA _ _ : (allPush -> True),
       OP_CONST _:(reverse -> OP_CHECKMULTISIG:OP_CONST _:(allPush -> True)) ]
     = SCRIPT_P2MULTISIG
+
+getScriptType [ [], parseWitnessProgram -> Just wit ] =
+    case BSR.length wit of
+        20 -> SCRIPT_P2WPKH
+        32 -> SCRIPT_P2WSH
+        _ -> SCRIPT_NONSTD
 
 getScriptType _ = SCRIPT_NONSTD
 
