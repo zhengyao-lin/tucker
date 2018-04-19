@@ -36,6 +36,10 @@ toTCKRErrorM :: Either SomeException v -> TCKRErrorM v
 toTCKRErrorM (Right v) = Right v
 toTCKRErrorM (Left err) = Left (TCKRError (show err))
 
+fromTCKRErrorM :: TCKRErrorM v -> Either SomeException v
+fromTCKRErrorM (Right v) = Right v
+fromTCKRErrorM (Left err) = Left (toException err)
+
 #define IS_EXCEPTION(e, t) (isJust (fromException (e) :: Maybe (t)))
 
 -- catches all errors and turn them into TCKRError
@@ -77,3 +81,6 @@ assertMT :: MonadThrow m => String -> Bool -> m ()
 assertMT msg cond =
     if cond then return ()
     else throwMT msg
+
+instance {-# OVERLAPS #-} MonadThrow (Either TCKRError) where
+    throwM = Left . TCKRError . show

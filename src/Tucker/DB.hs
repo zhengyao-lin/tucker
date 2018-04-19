@@ -7,7 +7,6 @@ module Tucker.DB where
 
 import Data.Hex
 import Data.Word
-import Data.Maybe
 import qualified Data.Map.Strict as MP
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
@@ -35,10 +34,16 @@ type DBOptionW = D.WriteOptions
 
 -- type DBKeySpace = ByteString
 
+optMaxFile :: DBOption -> Int -> DBOption
+optMaxFile opt max_file =
+    opt {
+        D.maxOpenFiles = max_file
+    }
+
 instance Default DBOption where
     def = D.defaultOptions {
         D.createIfMissing = True,
-        D.maxOpenFiles = 256
+        D.maxOpenFiles = 64
         -- D.cacheSize = 4, -- 16k
         -- D.writeBufferSize = 4 -- 512K
     }

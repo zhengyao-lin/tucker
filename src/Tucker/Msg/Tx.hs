@@ -245,7 +245,7 @@ instance Decodable TxPayload where
         mark <- peekByteD
         
         flag <-
-            if mark == 0 then byteD
+            if mark == 0 then byteD >> byteD
             else return 0
 
         tx_in <- vlistD decoder
@@ -317,6 +317,13 @@ updateIds tx =
 getOutputValue :: TxPayload -> Value
 getOutputValue tx =
     sum (map value (tx_out tx))
+
+getWitness :: TxPayload -> Int -> Maybe TxWitness
+getWitness tx in_idx =
+    if length (tx_witness tx) > in_idx then
+        Just (tx_witness tx !! in_idx)
+    else
+        Nothing
 
 -- update on Jan 14, 2018
 -- there are(maybe) 5 standard transactions
@@ -392,8 +399,75 @@ stripWitness tx =
 
 -- 1. set all inputs except the current's sequence to 0 if NONE || SINGLE
 
-txSigHash :: TxPayload -> Word32 -> [ScriptOp] -> HashType -> ByteString
-txSigHash tx idx' subscript htype =
+{-
+
+Double SHA256 of the serialization of:
+    1. nVersion of the transaction (4-byte little endian)
+    2. hashPrevouts (32-byte hash)
+    3. hashSequence (32-byte hash)
+    4. outpoint (32-byte hash + 4-byte little endian) 
+    5. scriptCode of the input (serialized as scripts inside CTxOuts)
+    6. value of the output spent by this input (8-byte little endian)
+    7. nSequence of the input (4-byte little endian)
+    8. hashOutputs (32-byte hash)
+    9. nLocktime of the transaction (4-byte little endian)
+   10. sighash type of the signature (4-byte little endian)
+
+-}
+
+txSigHashV0Wit :: TxPayload -> Int -> TxOutput -> HashType -> ByteString -> ByteString
+txSigHashV0Wit tx in_idx outp htype script_code =
+    let
+        inp = tx_in tx !! in_idx
+
+        hash_none = hasHashType htype SIGHASH_NONE
+        hash_single = hasHashType htype SIGHASH_SINGLE
+        hash_anyonecanpay = hasHashType htype SIGHASH_ANYONECANPAY
+
+        sr_hash_prevouts =
+            if not hash_anyonecanpay then
+                doubleSHA256 $ mconcat (map (encodeLE . prev_out) (tx_in tx))
+            else
+                nullHash256BS
+
+        sr_hash_sequence =
+            if hash_anyonecanpay || hash_single || hash_none then
+                nullHash256BS
+            else
+                doubleSHA256 $ mconcat (map (encodeLE . seqn) (tx_in tx))
+
+        sr_hash_outputs =
+            if not hash_single || not hash_none then
+                doubleSHA256 $ encodeLE (tx_out tx)
+            else if hash_single && in_idx < length (tx_out tx) then
+                doubleSHA256 $ encodeLE (tx_out tx !! in_idx)
+            else
+                nullHash256BS
+
+        sr_version = encodeLE (version tx)
+        sr_outpoint = encodeLE (prev_out inp)
+        sr_script_code = script_code
+        sr_value = encodeLE (value outp)
+        sr_sequence = encodeLE (seqn inp)
+        sr_lock_time = encodeLE (lock_time tx)
+        sr_hash_type = encodeLE (hashTypeToInt htype :: Word32)
+
+    in
+        doubleSHA256 $ mconcat [
+            sr_version,
+            sr_hash_prevouts,
+            sr_hash_sequence,
+            sr_outpoint,
+            sr_script_code,
+            sr_value,
+            sr_sequence,
+            sr_hash_outputs,
+            sr_lock_time,
+            sr_hash_type
+        ]
+
+txSigHashLegacy :: TxPayload -> Int -> [ScriptOp] -> HashType -> ByteString
+txSigHashLegacy tx in_idx subscript htype =
     let hash_none = hasHashType htype SIGHASH_NONE
         hash_single = hasHashType htype SIGHASH_SINGLE
         hash_anyonecanpay = hasHashType htype SIGHASH_ANYONECANPAY
@@ -406,18 +480,17 @@ txSigHash tx idx' subscript htype =
                 }) (tx_in tx)
             }
 
-        idx = fi idx'
         raw_htype = hashTypeToInt htype :: Word32
 
-        input = tx_in tx !! idx
+        input = tx_in tx !! in_idx
 
         -- output = assertT "SIGHASH_SINGLE needs more outputs"
         --                  (length (tx_out tx) > idx)
         --                  (tx_out tx !! idx) -- ONLY used when hash_single
         invalid_sighash_single =
-            hash_single && length (tx_out tx) <= idx
+            hash_single && length (tx_out tx) <= in_idx
 
-        output = tx_out tx !! idx
+        output = tx_out tx !! in_idx
 
         new_input = input {
             -- replace the corresponding sig_script
@@ -430,14 +503,14 @@ txSigHash tx idx' subscript htype =
                 -- only the current input is included
                 [ new_input ]
             else
-                replace idx new_input (tx_in tx_copy)
+                replace in_idx new_input (tx_in tx_copy)
 
         new_outputs =
             if hash_none then [] -- no output is included
             else if hash_single then
                 -- only outputs from 0 to idx is included
                 -- require length tx_out > idx
-                map (const nullTxOutput) (take idx (tx_out tx))
+                map (const nullTxOutput) (take in_idx (tx_out tx))
                 ++ [ output ]
             else
                 tx_out tx -- original outputs
@@ -455,7 +528,7 @@ txSigHash tx idx' subscript htype =
             -- tLn (show htype) $
             -- tLn (show final_tx) $
             -- tLn (show (hex $ sha256 $ sha256 $ encodeLE final_tx <> encodeLE raw_htype)) $
-            sha256 $ sha256 $ encodeLE final_tx <> encodeLE raw_htype
+            doubleSHA256 $ encodeLE final_tx <> encodeLE raw_htype
         -- tLn (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ sha256 $ sha256 final_str
 

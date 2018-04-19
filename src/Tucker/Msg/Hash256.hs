@@ -72,6 +72,7 @@ instance Decodable Hash256 where
     decoder = intD 32
 
 nullHash256 = 0 :: Hash256
+nullHash256BS = encodeLE nullHash256
 
 hash256ToBS (Hash256 n) = encodeLE n
 

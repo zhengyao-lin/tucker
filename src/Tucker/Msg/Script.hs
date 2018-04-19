@@ -31,6 +31,8 @@ data ScriptConf =
         script_enable_p2sh               :: Bool,
         script_enable_trace              :: Bool,
         script_enable_csv                :: Bool,
+        script_enable_segwit             :: Bool,
+        script_enable_v0_wit_sig         :: Bool, -- use version 0 witness program signature serialization
         script_max_pubkeys_per_multisig  :: Int
     } deriving (Show)
 
@@ -40,6 +42,8 @@ instance Default ScriptConf where
         script_enable_p2sh = True,
         script_enable_trace = False,
         script_enable_csv = False,
+        script_enable_segwit = False,
+        script_enable_v0_wit_sig = False,
         script_max_pubkeys_per_multisig = 20
     }
 
@@ -116,6 +120,15 @@ data ScriptState =
     } deriving (Show)
 
 type EvalState v = StateT ScriptState (Either SomeException) v
+
+popM' :: ScriptState -> TCKRErrorM (ByteString, ScriptState)
+popM' s = toTCKRErrorM (runStateT popS' s)
+
+popM :: StackItemValue v => ScriptState -> TCKRErrorM (v, ScriptState)
+popM s = toTCKRErrorM (runStateT popS s)
+
+pushM :: StackItemValue v => v -> ScriptState -> TCKRErrorM ScriptState
+pushM v s = toTCKRErrorM (execStateT (pushS v) s)
 
 invalidTx = throwMT "invalid transaction"
 
@@ -218,10 +231,38 @@ pkScriptS = do
         Right ops -> return ops
         Left err -> throwMT ("wrong decoding for pk_script " ++ show err)
 
--- ONE time SHA256 hash of the raw tx body for signature
--- require the raw signature with the htype byte appended
 txSigHashS :: [ByteString] -> ByteString -> EvalState ByteString
 txSigHashS all_sigs sig_raw = do
+    v0_wit <- confS script_enable_v0_wit_sig
+
+    if v0_wit then
+        -- use v0 witness signature
+        txSigHashV0WitS sig_raw
+    else
+        -- use te legacy signature
+        txSigHashLegacyS all_sigs sig_raw
+
+txSigHashV0WitS :: ByteString -> EvalState ByteString
+txSigHashV0WitS sig_raw = do
+    cur_tx   <- curTxS
+    in_idx   <- tx_in_idx <$> get
+    prev_out <- prev_tx_out <$> get
+    cs_op    <- last_cs_op <$> get
+    code     <- prog_code <$> get
+
+    let htype = intToHashType (BSR.last sig_raw)
+        pk_script = encodeLE (drop (cs_op + 1) code)
+        script_code = encodeLE (VInt $ fi $ BSR.length pk_script) <> pk_script
+        -- note the script code signed here is serialized with
+        -- its length prepended as a VInt
+        hash = txSigHashV0Wit cur_tx (fi in_idx) prev_out htype script_code
+
+    return hash
+
+-- ONE time SHA256 hash of the raw tx body for signature
+-- require the raw signature with the htype byte appended
+txSigHashLegacyS :: [ByteString] -> ByteString -> EvalState ByteString
+txSigHashLegacyS all_sigs sig_raw = do
     cur_tx   <- curTxS
     in_idx   <- tx_in_idx <$> get
     cs_op    <- last_cs_op <$> get
@@ -242,7 +283,7 @@ txSigHashS all_sigs sig_raw = do
         subscr = filter should_keep . drop (cs_op + 1)
          
         htype = intToHashType (BSR.last sig_raw)
-        hash = txSigHash cur_tx in_idx (subscr code) htype
+        hash = txSigHashLegacy cur_tx (fi in_idx) (subscr code) htype
         -- NOTE: only sha256 it ONCE because there's another
         -- hashing in the verification process
 
@@ -339,7 +380,7 @@ evalOpS OP_RIPEMD160 = unaryOpS ripemd160
 evalOpS OP_SHA1 = unaryOpS sha1
 evalOpS OP_SHA256 = unaryOpS sha256
 evalOpS OP_HASH160 = unaryOpS (ripemd160 . sha256)
-evalOpS OP_HASH256 = unaryOpS (sha256 . sha256)
+evalOpS OP_HASH256 = unaryOpS doubleSHA256
 
 evalOpS OP_CHECKSIG = do
     (pub', sig') <- pop2S
@@ -694,6 +735,63 @@ runEval s scripts =
         else
             return False
 
+shouldEnableWitness :: ScriptState -> Bool
+shouldEnableWitness s =
+    script_enable_segwit (script_conf s) &&
+    isJust (getWitness (cur_tx s) (fi (tx_in_idx s)))
+
+parseVersionByte :: ScriptOp -> Maybe Word8
+parseVersionByte (OP_CONST n) = if n >= 0 then Just (fi n) else Nothing -- 1 - 16
+parseVersionByte (OP_PUSHDATA dat _) = if BSR.null dat then Just 0 else Nothing -- 0
+parseVersionByte _ = Nothing
+
+parseWitnessProgram :: [ScriptOp] -> Maybe (ByteString)
+parseWitnessProgram [ parseVersionByte -> Just 0, OP_PUSHDATA wit _ ] =
+    if BSR.length wit == 20 ||
+       BSR.length wit == 32 then Just wit
+    else
+        Nothing
+
+parsetWitnessProgram _ = Nothing
+
+-- assuming the previous result on the stack is cleaned
+verifyWitness :: ScriptState -> ByteString -> Either TCKRError ScriptState
+
+-- P2WPKH
+verifyWitness s wit@(BSR.length -> 20) = do
+    let Just (TxWitness items) = getWitness (cur_tx s) (fi (tx_in_idx s))
+        sig' = items !! 0
+        pub' = items !! 1
+
+    assertMT "no enough stack items for P2WPKH validation(require 2)" $
+        length items >= 2
+
+    -- assertMT "hash160 of the public key does not match the required address" $
+    --     (ripemd160 . sha256) pub' == wit
+
+    -- set v0 witness signature support
+    let ns = s {
+                script_conf = (script_conf s) {
+                    script_enable_v0_wit_sig = True
+                }
+            }
+
+    -- push back two witness data
+    ns <- pushM sig' ns
+    ns <- pushM pub' ns
+    execEval ns [
+            OP_DUP, OP_HASH160, OP_PUSHDATA wit Nothing,
+            OP_EQUALVERIFY, OP_CHECKSIG
+        ]
+
+    -- fail "P2WPKH verification not supported yet"
+
+-- P2WSH
+verifyWitness s wit@(BSR.length -> 32) =
+    fail "P2WSH verification not supported yet"
+
+verifyWitness _ _ = fail "illegal witness program length"
+
 specialScript :: ScriptState -> [[ScriptOp]] -> Either TCKRError ScriptState
 
 -- P2SH
@@ -702,13 +800,31 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
         redeem_script <- decodeAllLE redeem
 
         -- tLnM (show redeem)
-        
-        ns <- toTCKRErrorM (execStateT popS' s) -- pop out result first
-        execEval ns redeem_script -- exec on redeem script
+
+        (use_wit, wit) <-
+            if shouldEnableWitness s then
+                case parseWitnessProgram redeem_script of
+                    Just wit -> return (True, wit)
+                    Nothing -> return (False, undefined)
+            else
+                return (False, undefined)
+
+        (_, ns) <- popM' s -- pop out result first
+
+        if use_wit then
+            verifyWitness ns wit
+        else
+            execEval ns redeem_script -- exec on redeem script
     else
         -- p2sh not enabled
         return s
 
+-- sig_script is empty and pk_script is a witness program
+specialScript s@(shouldEnableWitness -> True)
+              ([ [], parseWitnessProgram -> Just wit ]) = do
+    (_, ns) <- popM' s -- pop out result first
+    verifyWitness ns wit
+    
 -- no change in state
 specialScript s _ = return s
 
@@ -719,14 +835,14 @@ some notes on segwit
 https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki
 
 1. a new structure in tx called tx_witness is introduced(encoding/decoding has already been implemented)
-2. tx_witness is essentially a list of stacks each corresponding to an input
+2. tx_witness is essentially a list of stacks each of which corresponds to an input
     [ [ stack items for input 0 ], [ stack items for input 1 ] ]
    and is used later
 
-3. P2PKH and P2SH are lifted to their new version, P2WPKH and P2WSH
+3. P2PKH and P2SH are `lifted` to their new version, P2WPKH and P2WSH
 
 4. an essential part called the 'witness program' can be extracted from every segwit tx
-   (note: it's not a program/script(even it's valid as a script), but a specific structure for validation use)
+   (note: it's not a program/script(but it should have a valid script syntax), but a specific structure for validation use)
 
 5. a valid witness program consists ONLY of
     <1 byte push opcode> <20- or 32-byte data>
@@ -750,7 +866,7 @@ https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki
 
 9. ONLY COMPRESSED PUBLIC KEYS ARE ALLOWED in P2WPKH and P2WSH
 
-10. and a NEW tx signing/checking process!
+10. and a freaking NEW tx signing/checking process!
     at https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki
 
 -}

@@ -374,3 +374,11 @@ timeit action = do
     end <- msCPUTime
     
     return (fi (end - begin))
+
+isJust :: Maybe a -> Bool
+isJust (Just _) = True
+isJust _ = False
+
+isNothing :: Maybe a -> Bool
+isNothing Nothing = True
+isNothing _ = False

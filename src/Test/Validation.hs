@@ -6,23 +6,28 @@ import Test.Util
 import Test.HUnit
 import Test.Common
 
--- tx0 out_idx tx1 in_idx
-generalTxCase :: ScriptType -> ScriptResult -> TxPayload -> Int -> TxPayload -> Int -> IO ()    
-generalTxCase stype should_be tx0 out_idx tx1 in_idx = do
-    let prev_tx_out = tx_out tx0 !! out_idx
+generalTxCase' :: ScriptType -> ScriptResult -> TxOutput -> TxPayload -> Int -> IO ()    
+generalTxCase' stype should_be prev_tx_out tx1 in_idx = do
+    let -- prev_tx_out = tx_out tx0 !! out_idx
         pk_sc = decodeFailLE (pk_script prev_tx_out)
         sig_sc = decodeFailLE (sig_script (tx_in tx1 !! in_idx))
-        state = initState def prev_tx_out tx1 (fi in_idx)
+        state = initState (def {
+                script_enable_segwit = True
+            }) prev_tx_out tx1 (fi in_idx)
         obs_stype = getScriptType [ sig_sc, pk_sc ]
 
     -- print ([ sig_sc, pk_sc ])
 
-    assertBool ("wrong script type for tx " ++ show (txid tx1) ++
-                " from tx " ++ show (txid tx0) ++ "(found " ++ show obs_stype ++ ")")
+    assertBool ("wrong script type for tx " ++ show (txid tx1) ++ "(found " ++ show obs_stype ++ ")")
         (stype == obs_stype)
 
-    assertEqual ("wrong checking result for tx " ++ show (txid tx1) ++ " from tx " ++ show (txid tx0))
+    assertEqual ("wrong checking result for tx " ++ show (txid tx1))
         should_be (runEval state [ sig_sc, pk_sc ])
+
+-- tx0 out_idx tx1 in_idx
+generalTxCase :: ScriptType -> ScriptResult -> TxPayload -> Int -> TxPayload -> Int -> IO ()    
+generalTxCase stype should_be tx0 out_idx tx1 in_idx =
+    generalTxCase' stype should_be (tx_out tx0 !! out_idx) tx1 in_idx
 
 txCase1 = TestCase $ do
     -- tx0 0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9 at block #9
@@ -255,6 +260,65 @@ txCase22 = TestCase $ do
 
 {-
 
+["Valid P2WPKH (Private key of segwit tests is L5AQtV2HDm4xGsseLokK2VAT2EtYKcTm3c7HwqnJBFt9LdaQULsM)"],
+[[["0000000000000000000000000000000000000000000000000000000000000100", 0, "0x00 0x14 0x4c9c3dfac4207d5d8cb89df5722cb3d712385e3f", 1000]],
+"0100000000010100010000000000000000000000000000000000000000000000000000000000000000000000ffffffff01e8030000000000001976a9144c9c3dfac4207d5d8cb89df5722cb3d712385e3f88ac02483045022100cfb07164b36ba64c1b1e8c7720a56ad64d96f6ef332d3d37f9cb3c96477dc44502200a464cd7a9cf94cd70f66ce4f4f0625ef650052c7afcfe29d7d7e01830ff91ed012103596d3451025c19dbbdeb932d6bf8bfb4ad499b95b6f88db8899efac102e5fc7100000000", "P2SH,WITNESS"],
+
+0x00 0x14 0x4c9c3dfac4207d5d8cb89df5722cb3d712385e3f 1000
+
+e8030000000000001600144c9c3dfac4207d5d8cb89df5722cb3d712385e3f
+
+01000000
+0001
+
+01
+000100000000000000000000000000000000000000000000000000000000000000000000
+00
+ffffffff
+
+01
+e803000000000000
+1976a9144c9c3dfac4207d5d8cb89df5722cb3d712385e3f88ac
+
+02
+48 3045022100cfb07164b36ba64c1b1e8c7720a56ad64d96f6ef332d3d37f9cb3c96477dc44502200a464cd7a9cf94cd70f66ce4f4f0625ef650052c7afcfe29d7d7e01830ff91ed01
+21 03596d3451025c19dbbdeb932d6bf8bfb4ad499b95b6f88db8899efac102e5fc71
+
+00000000
+
+-}
+
+txCase23 = TestCase $ do
+    let prev_out = decodeFailLE (hex2bs "e8030000000000001600144c9c3dfac4207d5d8cb89df5722cb3d712385e3f") :: TxOutput
+        tx1 = hex2tx "0100000000010100010000000000000000000000000000000000000000000000000000000000000000000000ffffffff01e8030000000000001976a9144c9c3dfac4207d5d8cb89df5722cb3d712385e3f88ac02483045022100cfb07164b36ba64c1b1e8c7720a56ad64d96f6ef332d3d37f9cb3c96477dc44502200a464cd7a9cf94cd70f66ce4f4f0625ef650052c7afcfe29d7d7e01830ff91ed012103596d3451025c19dbbdeb932d6bf8bfb4ad499b95b6f88db8899efac102e5fc7100000000"
+
+    generalTxCase' SCRIPT_NONSTD ValidTx prev_out tx1 0
+
+{-
+
+["Valid P2SH(P2WPKH)"],
+[[["0000000000000000000000000000000000000000000000000000000000000100", 0, "HASH160 0x14 0xfe9c7dacc9fcfbf7e3b7d5ad06aa2b28c5a7b7e3 EQUAL", 1000]],
+"01000000000101000100000000000000000000000000000000000000000000000000000000000000000000171600144c9c3dfac4207d5d8cb89df5722cb3d712385e3fffffffff01e8030000000000001976a9144c9c3dfac4207d5d8cb89df5722cb3d712385e3f88ac02483045022100cfb07164b36ba64c1b1e8c7720a56ad64d96f6ef332d3d37f9cb3c96477dc44502200a464cd7a9cf94cd70f66ce4f4f0625ef650052c7afcfe29d7d7e01830ff91ed012103596d3451025c19dbbdeb932d6bf8bfb4ad499b95b6f88db8899efac102e5fc7100000000", "P2SH,WITNESS"],
+
+HASH160 0x14 0xfe9c7dacc9fcfbf7e3b7d5ad06aa2b28c5a7b7e3 EQUAL", 1000
+
+-}
+
+txCase24 = TestCase $ do
+    let prev_out = TxOutput {
+                value = 1000,
+                pk_script = encodeLE [
+                    OP_HASH160,
+                    OP_PUSHDATA (hex2bs "fe9c7dacc9fcfbf7e3b7d5ad06aa2b28c5a7b7e3") Nothing,
+                    OP_EQUAL
+                ]
+            }
+        tx1 = hex2tx "01000000000101000100000000000000000000000000000000000000000000000000000000000000000000171600144c9c3dfac4207d5d8cb89df5722cb3d712385e3fffffffff01e8030000000000001976a9144c9c3dfac4207d5d8cb89df5722cb3d712385e3f88ac02483045022100cfb07164b36ba64c1b1e8c7720a56ad64d96f6ef332d3d37f9cb3c96477dc44502200a464cd7a9cf94cd70f66ce4f4f0625ef650052c7afcfe29d7d7e01830ff91ed012103596d3451025c19dbbdeb932d6bf8bfb4ad499b95b6f88db8899efac102e5fc7100000000"
+
+    generalTxCase' (SCRIPT_P2SH undefined) ValidTx prev_out tx1 0
+
+{-
+
 pub keys: 03F779C124BFB32F6015F4854C7FA8BCBF7369687C58B558040150AA8273B82232
           04F779C124BFB32F6015F4854C7FA8BCBF7369687C58B558040150AA8273B82232244D209162C5AFE7116BDD869DEA7539579D85E42A6057F05048451FF0CA4493
 
@@ -328,5 +392,7 @@ validationTests = TestList [
         TestLabel "tx case 19" txCase19,
         TestLabel "tx case 20" txCase20,
         TestLabel "tx case 21" txCase21,
-        TestLabel "tx case 22" txCase22
+        TestLabel "tx case 22" txCase22,
+        TestLabel "tx case 23" txCase23,
+        TestLabel "tx case 24" txCase24
     ]

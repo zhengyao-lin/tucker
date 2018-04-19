@@ -74,6 +74,9 @@ data TCKRConf =
         tckr_bucket_fork_name  :: String,
         tckr_bucket_stat_name  :: String,
 
+        tckr_block_db_max_file :: Int,
+        tckr_tx_db_max_file    :: Int,
+
         tckr_user_agent      :: String,
 
         tckr_wif_pref        :: Word8,
@@ -177,6 +180,8 @@ tucker_default_conf_mainnet mpath = do
 
     createDirectoryIfMissing False tucker_path
 
+    let max_file_limit = 1024
+
     return $ TCKRConf {
         tckr_net_version = 60002,
         tckr_node_service = NodeServiceType [ TCKR_NODE_NETWORK ],
@@ -189,6 +194,10 @@ tucker_default_conf_mainnet mpath = do
         tckr_bucket_utxo_name = "utxo",
         tckr_bucket_fork_name = "fork",
         tckr_bucket_stat_name = "stat",
+
+        -- each file is roughly 2mb
+        tckr_block_db_max_file = 256,
+        tckr_tx_db_max_file = max_file_limit - 256 - 256,
 
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 

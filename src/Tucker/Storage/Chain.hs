@@ -61,10 +61,12 @@ instance NFData BlockChain where
 initBlockChain :: TCKRConf -> ResIO BlockChain
 initBlockChain conf@(TCKRConf {
     tckr_block_db_path = block_db_path,
-    tckr_tx_db_path = tx_db_path
+    tckr_tx_db_path = tx_db_path,
+    tckr_block_db_max_file = block_db_max_file,
+    tckr_tx_db_max_file = tx_db_max_file
 }) = do
-    block_db <- openDB def block_db_path
-    tx_db <- openDB def tx_db_path
+    block_db <- openDB (optMaxFile def block_db_max_file) block_db_path
+    tx_db <- openDB (optMaxFile def tx_db_max_file) tx_db_path
 
     bc_chain <- lift $ initChain conf block_db
     bc_tx_state <- lift $ initTxState conf tx_db
@@ -647,8 +649,6 @@ verifyBlockTx bc branch block = do
 
             -- tLnM $ "checking tx " ++ show idx
 
-            let total_out_value = getOutputValue tx
-
             cap <- getNumCapabilities
 
             let len = fi (length (tx_in tx))
@@ -666,16 +666,17 @@ verifyBlockTx bc branch block = do
                 verifyP = mapM (verify True) -- parallel
             -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
 
-            in_values <-
-                if length idxs >= tckr_min_parallel_input_check conf then do
+            in_value <-
+                if length idxs >= tckr_min_parallel_input_check conf then
                     -- tLnM "checking input in parallel"
-                    mconcat <$>
-                        map (either (reject . show) id) <$>
-                        forkMapM verifyP sep_idxs
+                    (sum . concat) <$>
+                    map (either (reject . show) id) <$>
+                    forkMapM verifyP sep_idxs
                 else
-                    mapM (verify False) idxs
+                    foldM (\val idx -> (val +) <$> verify False idx) 0 idxs
 
-            let fee = sum (in_values) - total_out_value
+            let total_out_value = getOutputValue tx
+                fee = in_value - total_out_value
             
             -- validity of values
             expectTrue "sum of inputs less than the sum of output" $

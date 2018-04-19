@@ -35,3 +35,5 @@ profiling/
 tucker.cabal
 *~
 
+.vscode/
+
