@@ -76,6 +76,7 @@ data TCKRConf =
 
         tckr_block_db_max_file :: Int,
         tckr_tx_db_max_file    :: Int,
+        tckr_max_socket        :: Int,
 
         tckr_user_agent      :: String,
 
@@ -160,7 +161,9 @@ data TCKRConf =
         tckr_enable_difficulty_check :: Bool,
         tckr_enable_mtp_check :: Bool,
 
-        tckr_bdiff_diff1_target :: Integer
+        tckr_bdiff_diff1_target :: Integer,
+
+        tckr_block_weight_limit :: Int
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -197,7 +200,8 @@ tucker_default_conf_mainnet mpath = do
 
         -- each file is roughly 2mb
         tckr_block_db_max_file = 256,
-        tckr_tx_db_max_file = max_file_limit - 256 - 256,
+        tckr_tx_db_max_file = 256,
+        tckr_max_socket = 256,
 
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 
@@ -293,7 +297,9 @@ tucker_default_conf_mainnet mpath = do
         tckr_enable_difficulty_check = True,
         tckr_enable_mtp_check = True,
 
-        tckr_bdiff_diff1_target = 0x00000000ffff0000000000000000000000000000000000000000000000000000
+        tckr_bdiff_diff1_target = 0x00000000ffff0000000000000000000000000000000000000000000000000000,
+
+        tckr_block_weight_limit = 4000000
     }
 
     where
@@ -339,8 +345,8 @@ tucker_default_conf_testnet3 mpath = do
             }
         ],
 
-        tckr_block_assumed_valid = Nothing
+        tckr_block_assumed_valid = -- Nothing
             -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
             -- Just (600000, "000000000000624f06c69d3a9fe8d25e0a9030569128d63ad1b704bbb3059a16")
-            -- Just (700000, "000000000000406178b12a4dea3b27e13b3c4fe4510994fd667d7c1e6a3f4dc1 ")
+            Just (700000, "000000000000406178b12a4dea3b27e13b3c4fe4510994fd667d7c1e6a3f4dc1 ")
     }

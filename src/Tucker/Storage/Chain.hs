@@ -46,10 +46,11 @@ data BlockChain =
 
 data VerifyConf =
     VerifyConf {
-        verify_enable_csv :: Bool,
-        verify_cur_mtp    :: Timestamp,
-        verify_cur_bnode  :: Branch,
-        verify_check_dup_tx :: Bool
+        verify_enable_csv    :: Bool,
+        verify_enable_segwit :: Bool,
+        verify_cur_mtp       :: Timestamp,
+        verify_cur_bnode     :: Branch,
+        verify_check_dup_tx  :: Bool
     }
 
 instance NFData BlockChain where
@@ -456,6 +457,7 @@ genScriptConf :: BlockChain -> VerifyConf -> UTXOValue -> IO ScriptConf
 genScriptConf bc ver_conf utxo_value =
     return $ def {
         script_enable_csv = verify_enable_csv ver_conf,
+        script_enable_segwit = verify_enable_segwit ver_conf,
         script_enable_p2sh =
             parent_ts utxo_value >= tckr_p2sh_enable_time (bc_conf bc)
             -- NOTE: using the block timestamp here(not mtp)
@@ -468,10 +470,12 @@ genVerifyConf bc@(BlockChain {
     bc_fork_state = fork_state
 }) branch bnode = do
     csv_status <- getForkStatus fork_state "csv"
+    segwit_status <- getForkStatus fork_state "segwit"
     mtp <- medianTimePast bc branch (cur_height bnode)
 
     return $ VerifyConf {
         verify_enable_csv = isActiveStatus csv_status,
+        verify_enable_segwit = isActiveStatus segwit_status,
         verify_cur_mtp = mtp,
         verify_cur_bnode = bnode,
         verify_check_dup_tx = mtp >= tckr_dup_tx_disable_time conf
@@ -734,6 +738,9 @@ addBlockFail bc@(BlockChain {
         chain `hasBlockInChain` block
 
     -- don't check if the block is in orphan pool
+
+    expectTrue "block weight limit passed" $
+        blockWeight block <= tckr_block_weight_limit conf
 
     expectTrue "empty tx list" $
         not (null all_txns)

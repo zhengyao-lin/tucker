@@ -71,6 +71,9 @@ instance Encodable Hash256 where
 instance Decodable Hash256 where
     decoder = intD 32
 
+instance Sizeable Hash256 where
+    sizeOf _ = 32
+
 nullHash256 = 0 :: Hash256
 nullHash256BS = encodeLE nullHash256
 

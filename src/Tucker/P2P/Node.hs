@@ -23,10 +23,13 @@ import Tucker.Msg
 import Tucker.Conf
 import Tucker.Atom
 import Tucker.Util
+import Tucker.Error
 import Tucker.Transport
 import qualified Tucker.Lock as LK
 
 import Tucker.Storage.Chain
+
+import Tucker.P2P.Util
 
 -- two parts
 -- 1. main old tree, most common chain for all blocks
@@ -45,6 +48,8 @@ data MainLoopEnv =
 
         -- io_lock       :: LK.Lock,
         io_buf        :: Atom [String],
+
+        cur_socket    :: Atom Int,
 
         chain_lock    :: LK.Lock,
         block_chain   :: Atom BlockChain
@@ -200,6 +205,8 @@ initEnv conf = do
     -- io_lock <- lift $ LK.new
     io_buf <- lift $ newA []
 
+    cur_socket <- lift $ newA 0
+
     -- db_block <- openDB def (tckr_db_path conf) (tckr_ks_block conf)
     -- db_tx <- openDB def (tckr_db_path conf) (tckr_ks_tx conf)
     -- db_chain <- openDB def (tckr_db_path conf) (tckr_ks_chain conf)
@@ -217,6 +224,7 @@ initEnv conf = do
 
         -- io_lock = io_lock,
         io_buf = io_buf,
+        cur_socket = cur_socket,
 
         chain_lock = chain_lock,
         block_chain = block_chain
@@ -271,6 +279,43 @@ envConf env field = field $ global_conf env
 
 envAllNode :: MainLoopEnv -> IO [Node]
 envAllNode = getA . node_list
+
+envCloseTrans :: MainLoopEnv -> Transport -> IO ()
+envCloseTrans env trans = do
+    cur_s <- appA (+(-1)) (cur_socket env)
+    tClose trans
+
+    envMsg env ("transport closed, " ++ show cur_s ++ " left")
+
+-- need timeout
+envConnect :: MainLoopEnv -> AddrInfo -> IO Transport
+envConnect env addr = do
+    let sock_addr = addrAddress addr
+        limit = envConf env tckr_max_socket
+
+    cur_s <- appA (+1) (cur_socket env)
+
+    if cur_s > limit then do
+        appA (+(-1)) (cur_socket env)
+
+        -- wait until an empty place is available and retry
+        waitUntilIO ((< limit) <$> getA (cur_socket env))
+        envConnect env addr
+
+        -- fail "number of sockets has reached the limit"
+    else do
+        envMsg env ("connecting to " ++ show sock_addr ++ "(" ++ show cur_s ++ " sockets)")
+
+        sock <- buildSocketTo addr
+        
+        let conn = do
+                timeoutFailS (timeout_s env) (connect sock sock_addr)
+                tFromSocket sock
+
+        catchT conn $ \e -> do
+            appA (+(-1)) (cur_socket env)
+            close sock -- close the socket even if it's not connected
+            throw e
 
 envExit :: Exception e => MainLoopEnv -> e -> IO ()
 envExit env e = throwTo (main_proc_tid env) e

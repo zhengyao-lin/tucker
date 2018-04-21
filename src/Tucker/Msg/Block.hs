@@ -152,6 +152,26 @@ instance Decodable BlockHeader where
 
         return $ BlockHeader $ tmp { block_hash = hashBlock tmp }
 
+instance Sizeable BlockHeader where
+    sizeOf (BlockHeader (Block {
+        vers = vers,
+        prev_hash = prev_hash,
+        merkle_root = merkle_root,
+
+        btimestamp = btimestamp,
+        hash_target = hash_target,
+        nonce = nonce,
+
+        txns = txns
+    })) =
+        sizeOf vers +
+        sizeOf prev_hash +
+        sizeOf merkle_root +
+        sizeOf btimestamp +
+        sizeOf (packHash256 hash_target) +
+        sizeOf nonce +
+        sizeOf (VInt (fi (length txns)))
+
 instance Encodable Block where
     encode end block@(Block {
         enc_cache = Just cache
@@ -181,6 +201,17 @@ instance Decodable Block where
             txns = FullList txns,
             enc_cache = Just $ BSR.take (init_len - final_len) buf
         }
+
+instance Sizeable Block where
+    sizeOf (Block {
+        enc_cache = Just cache
+    }) = BSR.length cache
+
+    sizeOf block@(Block {
+        txns = txns
+    }) =
+        sizeOf (BlockHeader block) +
+        sizeOf txns
 
 instance Encodable BlockPayload where
     encode end (BlockPayload block) = encode end block
@@ -331,3 +362,24 @@ appendTx tx block =
     updateBlockHashes $ block {
         txns = FullList new_txns
     }
+
+clearEncCache :: Block -> Block
+clearEncCache block =
+    block {
+        enc_cache = Nothing
+    }
+
+stripBlockWitness :: Block -> Block
+stripBlockWitness block@(Block {
+    txns = txns
+}) =
+    block {
+        txns = FullList (map stripWitness (FD.toList txns))
+    }
+
+-- specification see https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki
+-- assuming full block access
+blockWeight :: Block -> Int
+blockWeight block =
+    3 * sizeOf (clearEncCache (stripBlockWitness block))
+    + sizeOf block

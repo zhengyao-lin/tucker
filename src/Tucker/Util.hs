@@ -382,3 +382,6 @@ isJust _ = False
 isNothing :: Maybe a -> Bool
 isNothing Nothing = True
 isNothing _ = False
+
+waitUntilIO :: IO Bool -> IO ()
+waitUntilIO = (yield `untilM_`)

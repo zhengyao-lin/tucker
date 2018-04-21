@@ -32,7 +32,7 @@ typedef struct {
     size_t rsize; // remaining part besides the nonce
     size_t nsize;
     size_t osize;
-    ctx_t *base_ctx;
+    ctx_sha256_t *base_ctx;
 
     nonce_t *answer;
     int njob;
@@ -61,7 +61,7 @@ void *miner(void *arg)
     hash256_t hash0, hash;
     size_t proc;
 
-    ctx_t ctx;
+    ctx_sha256_t ctx;
 
     msec_t begin, span0, span1;
     double span;
@@ -129,7 +129,7 @@ nonce_t do_mine(const byte_t *dat, size_t size, const hash256_t target, int njob
     size_t rsize = size % CHUNK_SIZE,
            preproc = size - rsize;
 
-    ctx_t ctx = INIT_CTX;
+    ctx_sha256_t ctx = INIT_CTX;
 
     nonce_t answer = MAX_BOUND;
 

@@ -137,6 +137,9 @@ instance Decodable OutPoint where
         index <- decoder
         return $ OutPoint hash index
 
+instance Sizeable OutPoint where
+    sizeOf _ = sizeOf (undefined :: Hash256) + sizeOf (undefined :: Word32)
+
 instance Encodable TxInput where
     encode end (TxInput {
         prev_out = prev_out,
@@ -145,8 +148,7 @@ instance Encodable TxInput where
     }) =
         mconcat [
             e prev_out,
-            e (VInt $ fi $ BSR.length sig_script),
-            e sig_script,
+            e (VBStr sig_script),
             e seqn
         ]
         where
@@ -166,6 +168,16 @@ instance Decodable TxInput where
             seqn = seqn
         }
 
+instance Sizeable TxInput where
+    sizeOf (TxInput {
+        prev_out = prev_out,
+        sig_script = sig_script,
+        seqn = seqn
+    }) =
+        sizeOf prev_out +
+        sizeOf (VBStr sig_script) +
+        sizeOf seqn
+
 instance Encodable TxOutput where
     encode end (TxOutput {
         value = value,
@@ -173,8 +185,7 @@ instance Encodable TxOutput where
     }) =
         mconcat [
             e value,
-            e (VInt $ fi $ BSR.length pk_script),
-            e pk_script
+            e (VBStr pk_script)
         ]
         where
             e :: Encodable t => t -> ByteString
@@ -190,6 +201,13 @@ instance Decodable TxOutput where
             pk_script = pk_script
         }
 
+instance Sizeable TxOutput where
+    sizeOf (TxOutput {
+        value = value,
+        pk_script = pk_script
+    }) =
+        sizeOf value + sizeOf (VBStr pk_script)
+
 instance Encodable TxWitness where
     encode end (TxWitness items) =
         encodeVList end $ map VBStr items
@@ -198,6 +216,11 @@ instance Decodable TxWitness where
     decoder =
         vlistD decoder >>=
         return . TxWitness . map vstrToBS
+
+instance Sizeable TxWitness where
+    sizeOf (TxWitness items) =
+        sizeOf (VInt (fi (length items))) +
+        sum (map (sizeOf . VBStr) items)
 
 instance MsgPayload TxPayload
 
@@ -276,6 +299,26 @@ instance Decodable TxPayload where
 
             -- tx_cache = Just $ BSR.take (init_len - final_len) buf
         }
+
+instance Sizeable TxPayload where
+    sizeOf (TxPayload {
+        version = version,
+        flag = flag, -- currently only 1 or 0
+        
+        tx_in = tx_in,
+        tx_out = tx_out,
+        tx_witness = tx_witness,
+
+        lock_time = lock_time
+    }) =
+        sizeOf version +
+        (if flag == 1 then 2 else 0) +
+        sizeOf (VInt (fi (length tx_in))) +
+        sizeOf tx_in +
+        sizeOf (VInt (fi (length tx_out))) +
+        sizeOf tx_out +
+        (if flag == 1 then sizeOf tx_witness else 0) +
+        sizeOf lock_time
 
 -- tx with only 1 input with block hash 0 and n -1
 isCoinbase :: TxPayload -> Bool

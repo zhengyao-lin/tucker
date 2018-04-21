@@ -18,7 +18,7 @@ import qualified Data.ByteString.Unsafe as BSU
 import qualified Data.ByteString.Builder as BSB
 
 import Foreign.Ptr
-import Foreign.Storable
+import Foreign.Storable hiding (sizeOf)
 
 import System.IO.Unsafe
 import qualified System.Endian as END
@@ -553,3 +553,61 @@ instance Decodable ByteString where
 -- -- decode as many t as possible
 -- instance Decodable t => Decodable [t] where
 --     decoder = many decoder
+
+-- sizes
+
+instance Sizeable Placeholder where
+    sizeOf _ = 0
+
+instance Sizeable ByteString where
+    sizeOf = BSR.length
+
+instance Sizeable Bool where
+    sizeOf _ = 1
+
+instance Sizeable Char where
+    sizeOf _ = 1
+
+instance Sizeable Int8 where
+    sizeOf _ = 1
+
+instance Sizeable Word8 where
+    sizeOf _ = 1
+
+instance Sizeable Int16 where
+    sizeOf _ = 2
+
+instance Sizeable Int32 where
+    sizeOf _ = 4
+
+instance Sizeable Int64 where
+    sizeOf _ = 8
+
+instance Sizeable Word16 where
+    sizeOf _ = 2
+
+instance Sizeable Word32 where
+    sizeOf _ = 4
+
+instance Sizeable Word64 where
+    sizeOf _ = 8
+
+instance Sizeable Word256 where
+    sizeOf _ = 32
+
+-- encode an integer with variable length
+-- to the shortest form
+instance Sizeable Integer where
+    sizeOf = BSR.length . encodeLE
+
+instance Sizeable a => Sizeable [a] where
+    sizeOf = sum . map sizeOf
+
+instance Sizeable a => Sizeable (PartialList a) where
+    sizeOf = sum . map sizeOf . FD.toList
+
+instance (Sizeable t1, Sizeable t2) => Sizeable (t1, t2) where
+    sizeOf (a, b) = sizeOf a + sizeOf b
+
+instance (Sizeable t1, Sizeable t2, Sizeable t3) => Sizeable (t1, t2, t3) where
+    sizeOf (a, b, c) = sizeOf a + sizeOf b + sizeOf c

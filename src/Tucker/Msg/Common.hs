@@ -143,6 +143,13 @@ instance Decodable VInt where
             0xff -> (decoder :: Decoder Word64) >>= wrap
             b    -> return $ VInt $ fi b
 
+instance Sizeable VInt where
+    sizeOf (VInt num)
+        | num < 0xfd        = 1
+        | num <= 0xffff     = 3
+        | num <= 0xffffffff = 5
+        | otherwise         = 9
+
 instance Encodable VStr where
     encode end (VStr str) =
         encode end (VInt $ fi $ length str) <> BS.pack str
@@ -155,6 +162,13 @@ instance Decodable VStr where
         VInt len <- decoder :: Decoder VInt
         bs <- bsD $ fromInteger len
         return $ VStr $ BS.unpack bs
+
+instance Sizeable VStr where
+    sizeOf (VStr str) =
+        sizeOf (VInt (fi (length str))) + length str
+
+    sizeOf (VBStr bs) =
+        sizeOf (VInt (fi (BSR.length bs))) + BSR.length bs
 
 instance Encodable NodeServiceType where
     encode end (NodeServiceType serv) =

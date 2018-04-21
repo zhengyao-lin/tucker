@@ -192,7 +192,7 @@ nodeFinal env node res = do
         Left err -> nodeMsg env node ("exiting in error: " ++ show err)
 
     setA (alive node) False
-    tClose $ conn_trans node
+    envCloseTrans env (conn_trans node)
 
 handshake :: MainLoopEnv -> Node -> IO Node
 handshake env node = do
@@ -269,15 +269,8 @@ handshake env node = do
 probe :: MainLoopEnv -> [AddrInfo] -> IO ()
 probe env addrs =
     flip forkMapM__ addrs $ \addr -> do
-        let sock_addr = addrAddress addr
-
-        envMsg env ("probing " ++ show sock_addr)
-
-        sock         <- buildSocketTo addr
-        _            <- timeoutFailS (timeout_s env) $ connect sock sock_addr
-
-        trans <- tFromSocket sock
-        node <- initNode sock_addr trans
+        trans <- envConnect env addr
+        node <- initNode (addrAddress addr) trans
 
         forkFinally (nodeExec env node) (nodeFinal env node)
 

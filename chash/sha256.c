@@ -62,11 +62,11 @@ to_be64(uint64_t v)
 }
 
 /* see https://en.wikipedia.org/wiki/SHA-2 for the pseudocode */
-void digest_chunk(ctx_t *ctx, const word_t chunk[16])
+void digest_chunk(ctx_sha256_t *ctx, const word_t chunk[16])
 {
     int i;
     word_t tmp1, tmp2;
-    ctx_t th;
+    ctx_sha256_t th;
     word_t w[64];
 
     // memcpy(w, chunk, 16 * sizeof(word_t));
@@ -107,7 +107,7 @@ void digest_chunk(ctx_t *ctx, const word_t chunk[16])
     ctx->h7 += th.h7;
 }
 
-void write_ctx(ctx_t *ctx, hash256_t hash)
+void write_ctx(ctx_sha256_t *ctx, hash256_t hash)
 {
     ((word_t *)hash)[0] = to_be(ctx->h0);
     ((word_t *)hash)[1] = to_be(ctx->h1);
@@ -131,7 +131,7 @@ get_k(size_t l)
 
 // take as many chunks as possible from data
 // and return the processed length
-size_t sha256_update(ctx_t *ctx, const byte_t *dat, size_t osize)
+size_t sha256_update(ctx_sha256_t *ctx, const byte_t *dat, size_t osize)
 {
     size_t i;
 
@@ -142,7 +142,7 @@ size_t sha256_update(ctx_t *ctx, const byte_t *dat, size_t osize)
     return i;
 }
 
-void sha256_finalize(ctx_t *ctx, const byte_t *remain, size_t rsize, size_t osize)
+void sha256_finalize(ctx_sha256_t *ctx, const byte_t *remain, size_t rsize, size_t osize)
 {
     size_t k = get_k(rsize);
     size_t nappend = 1 + k + 8;
@@ -173,7 +173,7 @@ void sha256_finalize(ctx_t *ctx, const byte_t *remain, size_t rsize, size_t osiz
 static inline void
 sha256_i(const byte_t *dat, size_t osize, byte_t *hash)
 {
-    ctx_t ctx = INIT_CTX;
+    ctx_sha256_t ctx = INIT_CTX;
 
     size_t processed = sha256_update(&ctx, dat, osize);
 
