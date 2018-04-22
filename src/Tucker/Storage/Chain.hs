@@ -275,7 +275,9 @@ updateForkDeploy bc@(BlockChain {
 
         -- mtp of the parent block
         mtp <- medianTimePast bc branch (cur_height branch - 1)
-        forks <- lookupNonFinalForks fork_state block
+        forks <- lookupNonFinalForks fork_state
+
+        -- tLnM ("non-final forks " ++ forks)
 
         forM_ forks $ \fork -> do
             tLnM ("update status on fork " ++ show fork)
@@ -497,52 +499,6 @@ parentBranchOfTx bc@(BlockChain {
 
     return (bnode, locatorToIdx locator)
 
--- tmp fix for an db update
--- tmpFix :: BlockChain -> IO ()
--- tmpFix bc@(BlockChain {
---     bc_chain = chain,
---     bc_tx_state = tx_state
--- }) = do
---     -- remove all outpoints with illegal value
---     let utxo = unsafeCoerce (utxo_map tx_state)
---                :: CacheMap (DBBucket OutPoint ByteString) OutPoint ByteString
-
---     foldKeyIO utxo 0 $ \count out@(OutPoint txid idx) -> do
---         Just value <- lookupIO utxo out
-
---         if count `mod` 256 == 0 then
---             tM (show count)
---         else
---             return ()
-
---         if BSR.length value > 8 then
---             return ()
---         else do
---             if (decodeFailLE value :: Value) < 0 then do
---                 -- delete if invalid
---                 deleteIO (utxo_map tx_state) out
---                 return ()
---             else do
---                 locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
---                     findTxId tx_state txid
-
---                 -- should ONLY be used if you checking coinbase maturity or csv validity
---                 bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
---                     branchWithHash chain (mainBranch chain) (locatorToHash locator)
-
---                 bnode <- expectMaybeIO ("failed to load full block for " ++ show bnode) $
---                     toFullBlockNode chain bnode
-
---                 -- append more info
---                 addOutput tx_state (cur_height bnode) (block_data bnode)
---                           (fi $ locatorToIdx locator) (fi idx)
-
---             syncUTXO tx_state
-
---         return (count + 1)
-
---     tLnM "update done"
-
 verifyInput :: UTXOMap a
             => BlockChain -> TxState a -> VerifyConf
             -> Branch -> TxPayload -> Int -> IO Value
@@ -716,6 +672,33 @@ verifyBlockTx bc branch block = do
 --         idx = fi (locatorToIdx locator)
 --         hash = locatorToHash locator
 
+mainBranchHeight :: BlockChain -> Height
+mainBranchHeight (BlockChain {
+    bc_chain = chain
+}) =
+    branchHeight (mainBranch chain)
+
+-- revert the change of a block on UTXO
+-- assuming the block is a full block
+revertBlockOnUTXO :: UTXOMap a => BlockChain -> TxState a -> Branch -> Block -> IO ()
+revertBlockOnUTXO bc tx_state branch block = do
+    let all_txns = FD.toList (txns block)
+
+    -- remove all added outputs
+    mapM_ (removeTx tx_state block) [ 0 .. length all_txns - 1 ]
+
+    -- coinbase doesn't have any input
+    forM_ (tail all_txns) $ \tx -> do
+        -- re-add all outputs cancelled
+        forM_ (tx_in tx) $ \input@(TxInput {
+            prev_out = OutPoint prev_txid out_idx
+        }) -> do
+            (prev_bnode, tx_idx) <-
+                parentBranchOfTx bc tx_state branch prev_txid
+
+            addOutput tx_state (cur_height prev_bnode)
+                      (block_data prev_bnode) (fi tx_idx) (fi out_idx)
+
 -- throws a TCKRError when rejecting the block
 addBlockFail :: BlockChain -> Block -> IO BlockChain
 addBlockFail bc@(BlockChain {
@@ -837,30 +820,8 @@ addBlockFail bc@(BlockChain {
                         -- fp1 is in descending order of heights
                         -- fp1 is from the original main branch
                         forM_ fp1 $ \bnode -> do
-                            -- get full node and then get txns
-                            -- to revert the UTXO
-
                             bnode <- toFullBlockNodeFail chain bnode
-
-                            let all_txns = FD.toList (txns (block_data bnode))
-
-                            -- remove all added outputs
-                            mapM_ (removeTx tx_state (block_data bnode)) [ 0 .. length all_txns - 1 ]
-
-                            -- coinbase doesn't have any input
-                            forM_ (tail all_txns) $ \tx -> do
-                                -- re-add all outputs cancelled
-                                forM_ (tx_in tx) $ \input@(TxInput {
-                                    prev_out = OutPoint prev_txid out_idx
-                                }) -> do
-                                    (prev_bnode, tx_idx) <-
-                                        parentBranchOfTx bc tx_state main_branch prev_txid
-
-                                    addOutput tx_state (cur_height prev_bnode)
-                                              (block_data prev_bnode) (fi tx_idx) (fi out_idx)
-
-                            -- revert the state in reverse order
-                            -- mapM_ (revertUTXO tx_state) (reverse all_txns)
+                            revertBlockOnUTXO bc tx_state main_branch (block_data bnode)
         
                         -- recheck all new main branch nodes
                         

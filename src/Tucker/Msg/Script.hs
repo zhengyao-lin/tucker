@@ -603,6 +603,7 @@ evalOpS OP_CHECKSEQUENCEVERIFY = do
     csv <- confS script_enable_csv
     
     if csv then do
+        error "CHECKSEQUENCEVERIFY used"
         return ()
         -- in_idx <- tx_in_idx <$> get
         -- cur_tx <- curTxS

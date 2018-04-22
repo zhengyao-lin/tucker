@@ -300,7 +300,13 @@ envConnect env addr = do
 
         -- wait until an empty place is available and retry
         waitUntilIO ((< limit) <$> getA (cur_socket env))
-        envConnect env addr
+
+        full <- envNodeFull env
+
+        if not full then
+            envConnect env addr
+        else
+            throwMT "node list is full"
 
         -- fail "number of sockets has reached the limit"
     else do
@@ -458,5 +464,7 @@ envAddBlocks env node =
                 Left err ->
                     error $ "error when adding block " ++ show block ++ ": " ++ show err
                 
-                Right _ ->
-                    nodeMsg env node $ "block added: " ++ show block
+                Right bc -> do
+                    nodeMsg env node $
+                        "added " ++ show block ++
+                        "[" ++ show (mainBranchHeight bc) ++ "]"

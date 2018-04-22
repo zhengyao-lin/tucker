@@ -320,12 +320,6 @@ getSoftForkIds (Block { vers = vers }) =
         filter (\n -> (vers `shift` fi n) .&. 1 == 1) [ 0 .. 28 ]
     else []
 
-isFinalSoftFork :: SoftFork -> Bool
-isFinalSoftFork d =
-    status == FORK_STATUS_ACTIVE ||
-    status == FORK_STATUS_FAILED
-    where status = fork_status d
-
 merkleParents :: [Hash256] -> [Hash256]
 merkleParents [] = []
 merkleParents [a] =

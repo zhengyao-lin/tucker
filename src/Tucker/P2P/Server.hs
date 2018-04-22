@@ -77,11 +77,11 @@ defaultHandler env node msg@(MsgHead {
                 }) -> do
                     nodes <- getA $ node_list env
 
-                    let seek_max = envConf env tckr_seek_max
+                    full <- envNodeFull env
 
                     -- nodeMsg env node (show addrmsg)
 
-                    if length nodes < seek_max then do
+                    if not full then do
                         new_list <- forM net_addrs netAddrToAddrInfo
                         filted   <- filterProbingList env new_list
 

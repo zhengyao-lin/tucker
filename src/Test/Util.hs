@@ -85,11 +85,6 @@ assertEitherLeft :: Either TCKRError t -> IO ()
 assertEitherLeft (Right _) = assertFailure "expecting error"
 assertEitherLeft (Left err) = return ()
 
-withChain :: TCKRConf -> (BlockChain -> IO a) -> IO a
-withChain conf proc = runResourceT $ do
-    bc <- initBlockChain conf
-    lift $ proc bc
-
 hex2block :: String -> Block
 hex2block = decodeFailLE . hex2bs
 

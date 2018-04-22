@@ -48,6 +48,8 @@ initForkState conf@(TCKRConf {
     let new_forks = filter (`notElem` cur_forks) soft_forks
         all_forks = cur_forks ++ new_forks
 
+    tLnM ("current forks: " ++ show cur_forks)
+
     tLnM ("adding new soft forks deployment " ++ show new_forks)
 
     forM_ ([0..] `zip` sortForkById new_forks) $ \(i, forks) ->
@@ -90,13 +92,26 @@ getForkStatus (SoftForkState {
     MP.lookup name <$>
     getA sf_status
 
+getForkByName :: SoftForkState -> String -> IO (Maybe SoftFork)
+getForkByName (SoftForkState {
+    sf_status = sf_status
+}) name =
+    MP.lookup name <$> getA sf_status
+
+-- csv 768095(locked in)
+--     770112(active)
 changeForkStatus :: SoftForkState -> SoftFork -> SoftForkStatus -> IO ()
 changeForkStatus (SoftForkState {
     sf_status = sf_status,
     bucket_fork = bucket_fork
 }) fork status = do
-    tLnM ("!!! changing the status fork " ++ show fork ++ " to " ++ show status)
-    error "i wanna die!!!"
+    tLnM ("!!! changing status to " ++ show status ++ " for " ++ show fork)
+
+    -- if status == FORK_STATUS_ACTIVE ||
+    --    status == FORK_STATUS_FAILED then
+    --     error "i wanna die!!!"
+    -- else
+    --     return ()
 
     forks <- maybe [] id <$> lookupIO bucket_fork bit
 
@@ -113,13 +128,18 @@ changeForkStatus (SoftForkState {
 
     where bit = fork_bit fork
 
-lookupNonFinalForks :: SoftForkState -> Block -> IO [SoftFork]
+isFinalSoftFork :: SoftFork -> Bool
+isFinalSoftFork d =
+    status == FORK_STATUS_ACTIVE ||
+    status == FORK_STATUS_FAILED
+    where status = fork_status d
+
+lookupNonFinalForks :: SoftForkState -> IO [SoftFork]
 lookupNonFinalForks (SoftForkState {
     bucket_fork = bucket_fork
-}) block =
+}) =
     (filter (not . isFinalSoftFork) . concat . maybeCat) <$>
-    mapM (lookupIO bucket_fork) idxs
-    where idxs = getSoftForkIds block
+    mapM (lookupIO bucket_fork) soft_fork_id_range
 
 recordBlock :: SoftForkState -> Block -> IO ()
 recordBlock (SoftForkState {

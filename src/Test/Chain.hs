@@ -20,13 +20,13 @@ add_block_common_proc b r =
 chainTest1 = TestCase $ do
     removeTestDB
 
-    def_conf <- tucker_default_conf_mainnet Nothing
+    def_conf <- tucker_default_conf_mainnet (Just test_db_path)
 
-    let conf = def_conf {
-            tckr_block_db_path = test_db_path </> "chain",
-            tckr_tx_db_path = test_db_path </> "tx"
+    let conf = def_conf -- {
+            -- tckr_block_db_path = test_db_path </> "chain",
+            -- tckr_tx_db_path = test_db_path </> "tx"
             -- tckr_max_tree_insert_depth = 10
-        }
+        -- }
 
         blocks =
             map hex2block [
@@ -42,7 +42,7 @@ chainTest1 = TestCase $ do
         -- "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d010bffffffff0100f2052a010000004341047211a824f55b505228e4c3d5194c1fcfaa15a456abdf37f9b9d97a4040afc073dee6c89064984f03385237d92167c13e236446b417ab79a0fcae412ae3316b77ac00000000"
 
     -- putStrLn ""
-    withChain conf $ \bc -> do
+    withBlockChain conf $ \bc -> do
         addBlocks add_block_common_proc bc blocks
         return ()
 
@@ -50,11 +50,11 @@ chainTest1 = TestCase $ do
 chainTest2 = TestCase $ do
     removeTestDB
 
-    def_conf <- tucker_default_conf_mainnet Nothing
+    def_conf <- tucker_default_conf_mainnet (Just test_db_path)
 
     let conf = def_conf {
-            tckr_block_db_path = test_db_path </> "chain",
-            tckr_tx_db_path = test_db_path </> "tx",
+            -- tckr_block_db_path = test_db_path </> "chain",
+            -- tckr_tx_db_path = test_db_path </> "tx",
             tckr_enable_difficulty_check = False,
             tckr_enable_mtp_check = False
         }
@@ -83,7 +83,7 @@ chainTest2 = TestCase $ do
     let blocks = blocks' ++ fake_chain
 
     -- putStrLn ""
-    withChain conf $ \bc -> do
+    withBlockChain conf $ \bc -> do
         bc <- addBlocks add_block_common_proc bc blocks
 
         -- tLnM (block_data (mainBranch (bc_chain bc)))
@@ -97,16 +97,16 @@ chainTest2 = TestCase $ do
 chainTest3 = TestCase $ do
     removeTestDB
 
-    def_conf <- tucker_default_conf_mainnet Nothing
+    def_conf <- tucker_default_conf_mainnet (Just test_db_path)
 
     let conf = def_conf {
-            tckr_block_db_path = test_db_path </> "chain",
-            tckr_tx_db_path = test_db_path </> "tx",
+            -- tckr_block_db_path = test_db_path </> "chain",
+            -- tckr_tx_db_path = test_db_path </> "tx",
             tckr_enable_difficulty_check = False,
             tckr_enable_mtp_check = False
         }
 
-    withChain conf $ \bc -> do
+    withBlockChain conf $ \bc -> do
         block <- nextInitBlock bc (BS.pack "sonia") "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX"
 
         -- addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]

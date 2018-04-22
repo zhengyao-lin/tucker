@@ -44,6 +44,7 @@ module Test.Common (
     module Tucker.P2P.Node,
     module Tucker.P2P.Action,
 
+    module Tucker.Storage.Util,
     module Tucker.Storage.Chain,
     module Tucker.Storage.Block
 ) where
@@ -91,5 +92,6 @@ import Tucker.P2P.Util
 import Tucker.P2P.Node
 import Tucker.P2P.Action
 
+import Tucker.Storage.Util
 import Tucker.Storage.Chain
 import Tucker.Storage.Block

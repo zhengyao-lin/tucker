@@ -8,6 +8,10 @@ module Tucker.Storage.Block (
 
     initChain,
     branchHeights,
+    branchHeight,
+
+    heightInDb,
+    removeHeightInDb,
     
     blocksAtHeight,
     blockAtHeight,
@@ -246,6 +250,16 @@ initChain conf@(TCKRConf {
                     saved_height = last range
                 }
 
+heightInDb :: Chain -> IO Height
+heightInDb chain = (+(-1)) <$> quickCountIO (bucket_chain chain)
+
+-- remove a block at a given height
+-- NOTE: this function should only be used in internal modules
+-- this function takes action immediately on the db
+removeHeightInDb :: Chain -> Height -> IO ()
+removeHeightInDb chain height =
+    deleteIO (bucket_chain chain) height
+
 branchHeights :: Chain -> [Height]
 branchHeights (Chain { edge_branches = branches }) =
     map cur_height branches
@@ -319,7 +333,7 @@ branchAtHeight chain@(Chain {
 }) height =
     if height > max_height || height < 0 then
         return Nothing
-    else if height >= saved_height then do
+    else if height >= saved_height then
         -- the block should be in memory
         return (searchBranchHeight chain height branch)
     else do
