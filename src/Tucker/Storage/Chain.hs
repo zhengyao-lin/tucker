@@ -519,21 +519,20 @@ verifyInput bc@(BlockChain {
 
     if verify_enable_csv ver_conf &&
        version tx >= 2 then do
-        error "CSV!!!"
+        -- error "CSV!!!"
         -- check BIP 68
-        case inputLockTime inp of
-            Just lock_time ->
-                let v = lockTimeValue lock_time in
-                case lockTimeType lock_time of
-                    LOCK_TIME_HEIGHT ->
-                        expectTrue "relative lock-time(block time) not met" $
+        case inputRelLockTime inp of
+            Just rlock_time ->
+                case rlock_time of
+                    RelLockTimeHeight v ->
+                        expectTrue "relative lock-time(block height) not met" $
                             cur_height (verify_cur_bnode ver_conf) >=
                             fi v + parent_height uvalue
 
-                    LOCK_TIME_512S -> do
+                    RelLockTime512S v -> do
                         prev_time <- medianTimePast bc branch (parent_height uvalue)
                         
-                        expectTrue "relative lock-time not met" $
+                        expectTrue "relative lock-time(512s) not met" $
                             verify_cur_mtp ver_conf >= fi v * 512 + prev_time
 
             Nothing -> return () -- no requirement for lock time
@@ -583,11 +582,32 @@ verifyBlockTx bc branch block = do
     begin_time <- msCPUTime
     ver_conf <- genVerifyConf bc branch bnode
 
+    let mtp = verify_cur_mtp ver_conf
+        block_timestamp =
+            if verify_enable_csv ver_conf then mtp
+            else btimestamp block
+
     -- using cached utxo because any error
     -- in the tx will cause the tx state to roll back
     withCacheUTXO (bc_tx_state bc) $ \tx_state -> do
         let coinbase = head all_txns
             normal_tx = tail all_txns
+
+        -- check lock-time
+        forM_ all_txns $ \tx ->
+            if not (isFinalTx tx) then
+                case txLockTime tx of
+                    LockTimeStamp min_stamp ->
+                        expectTrue ("tx lock-time(timestamp) not met(expect " ++ show min_stamp ++
+                                    ", " ++ show mtp ++ " given") $
+                            block_timestamp >= min_stamp
+
+                    LockTimeHeight min_height ->
+                        expectTrue "tx lock-time(height) not met" $
+                            cur_height bnode >= min_height
+            else
+                -- lock-time is irrelevant
+                return ()
 
         if verify_check_dup_tx ver_conf then
             forM_ (zip [0..] all_txns) $ \(idx, tx) -> do

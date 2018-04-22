@@ -100,6 +100,8 @@ getForkByName (SoftForkState {
 
 -- csv 768095(locked in)
 --     770112(active)
+-- segwit around 830000 (locked in)
+--        834624(active)
 changeForkStatus :: SoftForkState -> SoftFork -> SoftForkStatus -> IO ()
 changeForkStatus (SoftForkState {
     sf_status = sf_status,

@@ -43,29 +43,63 @@ data TxInput =
         seqn            :: Word32 -- sequence, currently not used
     } deriving (Eq, Show, Read)
 
-data LockTimeType = LOCK_TIME_512S | LOCK_TIME_HEIGHT deriving (Eq, Show)
-data LockTime = LockTime LockTimeType Word deriving (Show)
+data LockTime
+    = LockTimeStamp Timestamp
+    | LockTimeHeight Height deriving (Eq, Show)
 
-sequenceToLockTime :: Word32 -> Maybe LockTime
-sequenceToLockTime s =
+data RelLockTime
+    = RelLockTime512S Word
+    | RelLockTimeHeight Height deriving (Show)
+
+sequenceToRelLockTime :: Word32 -> Maybe RelLockTime
+sequenceToRelLockTime s =
     if s .&. 0x800000 == 0 then
         -- disable flag not set
         if s .&. 0x00400000 == 0 then
-            Just (LockTime LOCK_TIME_HEIGHT (fi v))
+            Just (RelLockTimeHeight (fi v))
         else
-            Just (LockTime LOCK_TIME_512S (fi v))
+            Just (RelLockTime512S (fi v))
     else
         Nothing
     where v = s .&. 0xffff
 
-inputLockTime :: TxInput -> Maybe LockTime
-inputLockTime input = sequenceToLockTime (seqn input)
+inputRelLockTime :: TxInput -> Maybe RelLockTime
+inputRelLockTime input = sequenceToRelLockTime (seqn input)
 
-lockTimeType :: LockTime -> LockTimeType
-lockTimeType (LockTime t _) = t
+numToLockTime :: Word32 -> LockTime
+numToLockTime n =
+    if n < 500000000 then
+        LockTimeHeight (fi n)
+    else
+        LockTimeStamp (fi n)
 
-lockTimeValue :: LockTime -> Word
-lockTimeValue (LockTime _ v) = v
+txLockTime :: TxPayload -> LockTime
+txLockTime tx = numToLockTime (lock_time tx)
+
+-- see if the given lock time is greater or equal to the expect lock time
+-- given >= expect
+isRelLockTimeAtLeast :: RelLockTime -> RelLockTime -> Bool
+isRelLockTimeAtLeast (RelLockTimeHeight a) (RelLockTimeHeight b) = a >= b
+isRelLockTimeAtLeast (RelLockTime512S a) (RelLockTime512S b) = a >= b
+isRelLockTimeAtLeast _ _ = False -- not comparable
+
+isLockTimeAtLeast :: LockTime -> LockTime -> Bool
+isLockTimeAtLeast (LockTimeHeight a) (LockTimeHeight b) = a >= b
+isLockTimeAtLeast (LockTimeStamp a) (LockTimeStamp b) = a >= b
+isLockTimeAtLeast _ _ = False -- not comparable
+
+isFinalTx :: TxPayload -> Bool
+isFinalTx tx = all ((== maxBound) . seqn) (tx_in tx)
+
+-- compareRelLockTime :: RelLockTime -> RelLockTime -> Maybe (Word32, Word32)
+-- compareRelLockTime (RelLockTimeHeight a) (RelLockTimeHeight b) = Just (a, b)
+-- compareRelLockTime (RelLockTime512S a) (RelLockTime512S b) = Just (a, b)
+-- compareRelLockTime _ _ = Nothing
+
+-- compareLockTime :: LockTime -> LockTime -> Maybe (Word32, Word32)
+-- compareLockTime (LockTimeHeight a) (LockTimeHeight b) = Just (a, b)
+-- compareLockTime (LockTimeStamp a) (LockTimeStamp b) = Just (a, b)
+-- compareLockTime _ _ = Nothing
 
 instance NFData TxInput where
     rnf (TxInput a b c) = rnf (a, b, c)

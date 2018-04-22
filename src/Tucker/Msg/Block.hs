@@ -20,8 +20,6 @@ import Tucker.Msg.Common
 import Tucker.Msg.Hash256
 
 type Difficulty = Double
-
-type Height = Int64
 -- height starts from 0(genesis)
 
 data Block =

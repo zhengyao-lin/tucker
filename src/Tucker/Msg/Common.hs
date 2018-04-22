@@ -1,6 +1,7 @@
 module Tucker.Msg.Common where
 
 import Data.Hex
+import Data.Int
 import Data.Bits
 import Data.Char
 import Data.Word
@@ -14,6 +15,8 @@ import Tucker.Enc
 import Tucker.Conf
 import Tucker.Util
 import Tucker.Auth
+
+type Height = Int64
 
 serv_type = [ TCKR_NODE_NETWORK, TCKR_NODE_GETUTXO, TCKR_NODE_BLOOM ]
 

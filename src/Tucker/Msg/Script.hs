@@ -572,29 +572,19 @@ evalOpS OP_CHECKLOCKTIMEVERIFY = do
     csv <- confS script_enable_csv
 
     if csv then do
-        m_required_lt <- sequenceToLockTime <$> fromInteger <$> peekS
-
+        -- error "OP_CHECKLOCKTIMEVERIFY used"
         in_idx <- tx_in_idx <$> get
         cur_tx <- curTxS
-        let m_in_lt = inputLockTime (tx_in cur_tx !! fi in_idx)
 
-        case m_required_lt of
-            Just required_lt ->
-                case m_in_lt of
-                    Just in_lt -> do
-                        assertMT "tx version not met" $
-                            version cur_tx >= 2
-                        
-                        assertMT "comparing relative lock-times with different types" $
-                            lockTimeType required_lt == lockTimeType in_lt
+        let in_seqn = seqn (tx_in cur_tx !! fi in_idx)
 
-                        assertMT "relative lock time requirement not met" $
-                            lockTimeValue required_lt <= lockTimeValue in_lt
+        expect_lt <- numToLockTime <$> fi <$> peekS
 
-                    Nothing ->
-                        throwMT "relative lock time not used in tx"
+        assertMT "sequence should not be max int" $
+            in_seqn /= maxBound
 
-            Nothing -> return ()
+        assertMT "lock-time not match" $
+            txLockTime cur_tx `isLockTimeAtLeast` expect_lt
     else
         -- treated as OP_NOP2
         return ()
@@ -603,24 +593,33 @@ evalOpS OP_CHECKSEQUENCEVERIFY = do
     csv <- confS script_enable_csv
     
     if csv then do
-        error "CHECKSEQUENCEVERIFY used"
-        return ()
-        -- in_idx <- tx_in_idx <$> get
-        -- cur_tx <- curTxS
-        -- out_tx <- outTxS
-        -- span   <- peekS
-        
-        -- let sequence = seqn (tx_in cur_tx !! fi in_idx)
-        --     lt0 = lock_time out_tx
-        --     lt1 = lock_time cur_tx
+        m_expect_lt <- sequenceToRelLockTime <$> fi <$> peekS
 
-        -- assertMT "invalid span/locktime" $ not $
-        --     span < 0 ||
-        --     not (span .&. (1 `shiftL` 31) == 0 &&
-        --         (version cur_tx < 2 ||
-        --         sequence .&. (1 `shiftL` 31) /= 0 ||
-        --         (lt0 <= 500000000) /= (lt1 <= 500000000) ||
-        --         fi span > lt1 - lt0))
+        in_idx <- tx_in_idx <$> get
+        cur_tx <- curTxS
+        let m_in_lt = inputRelLockTime (tx_in cur_tx !! fi in_idx)
+
+        case m_expect_lt of
+            Just expect_lt ->
+                case m_in_lt of
+                    Just in_lt -> do
+                        assertMT "tx version not met" $
+                            version cur_tx >= 2
+                        
+                        assertMT ("relative lock-times not match. expect " ++ show expect_lt ++
+                                  ", given " ++ show in_lt) $
+                            in_lt `isRelLockTimeAtLeast` expect_lt
+
+                        -- assertMT "comparing relative lock-times with different types" $
+                        --     rlockTimeType expect_lt == rlockTimeType in_lt
+
+                        -- assertMT "relative lock time requirement not met" $
+                        --     rlockTimeValue expect_lt <= rlockTimeValue in_lt
+
+                    Nothing ->
+                        throwMT "relative lock time not used in tx"
+
+            Nothing -> return ()
     else
         return ()
 
