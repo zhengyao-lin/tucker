@@ -54,7 +54,8 @@ fallbackToHeight bc@(BlockChain {
 
             removeHeightInDb chain height
 
-        syncUTXO tx_state
+            syncUTXO tx_state
+
         tLnM "reverting finished"
     else
         error "can only fallback to a height stored in the database"

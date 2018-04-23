@@ -315,7 +315,7 @@ instance Decodable SoftFork where
 getSoftForkIds :: Block -> [SoftForkId]
 getSoftForkIds (Block { vers = vers }) =
     if vers .&. 0xE0000000 == 0x20000000 then
-        filter (\n -> (vers `shift` fi n) .&. 1 == 1) [ 0 .. 28 ]
+        filter (\n -> (vers `shiftR` fi n) .&. 1 == 1) [ 0 .. 28 ]
     else []
 
 merkleParents :: [Hash256] -> [Hash256]

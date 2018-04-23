@@ -299,10 +299,11 @@ updateForkDeploy bc@(BlockChain {
                         -- pull out number of blocks supporting the fork
                         number <- getRecord fork_state fork
                         
-                        if number > fi (tckr_soft_fork_lock_threshold conf) then
+                        if number >= fi (tckr_soft_fork_lock_threshold conf) then
                             changeForkStatus fork_state fork FORK_STATUS_LOCKED_IN
                         else
-                            return ()
+                            tLnM ("supporting blocks: " ++ show number ++ "/" ++
+                                  show (tckr_retarget_span conf))
 
                 FORK_STATUS_LOCKED_IN ->
                     changeForkStatus fork_state fork FORK_STATUS_ACTIVE
@@ -515,6 +516,17 @@ verifyInput bc@(BlockChain {
     uvalue <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
         lookupUTXO tx_state outp
 
+    -- muvalue <- lookupUTXO tx_state outp
+
+    -- uvalue <-
+    --     case muvalue of
+    --         Just uvalue -> return uvalue
+    --         Nothing -> do
+    --             tLnM "remember to remove me!!!!"
+    --             addOutPoint bc outp
+    --             expectMaybeIO ("outpoint not in utxo " ++ show outp) $
+    --                 lookupUTXO tx_state outp
+
     -- prev_bnode <- parentBranchOfTx bc tx_state branch prev_txid
 
     if verify_enable_csv ver_conf &&
@@ -708,13 +720,17 @@ revertBlockOnUTXO bc tx_state branch block = do
     mapM_ (removeTx tx_state block) [ 0 .. length all_txns - 1 ]
 
     -- coinbase doesn't have any input
-    forM_ (tail all_txns) $ \tx -> do
+    forM_ ([0..] `zip` tail all_txns) $ \(i, tx) -> do
         -- re-add all outputs cancelled
+        -- tM ("reverting tx " ++ show i)
+
         forM_ (tx_in tx) $ \input@(TxInput {
             prev_out = OutPoint prev_txid out_idx
         }) -> do
             (prev_bnode, tx_idx) <-
                 parentBranchOfTx bc tx_state branch prev_txid
+
+            prev_bnode <- toFullBlockNodeFail (bc_chain bc) prev_bnode
 
             addOutput tx_state (cur_height prev_bnode)
                       (block_data prev_bnode) (fi tx_idx) (fi out_idx)

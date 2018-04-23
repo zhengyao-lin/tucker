@@ -441,8 +441,13 @@ evalOpS OP_CHECKMULTISIG = do
     -- tLnM (show matched)
 
     -- for compatibility with a historical bug
-    popS :: EvalState ByteString
+    dummy <- popS :: EvalState ByteString
     
+    -- dummy == null
+    segwit <- confS script_enable_segwit
+    assertMT "nulldummy rule not satisfied" $
+        not segwit || BSR.null dummy
+
     pushS (matched == length sigs)
 
 evalOpS OP_CHECKMULTISIGVERIFY =
