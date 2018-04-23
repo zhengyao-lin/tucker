@@ -35,7 +35,7 @@ inv_type_map_r = map (\(a, b) -> (b, a)) inv_type_map
 
 instance Encodable InvType where
     encode end t =
-        case lookup INV_TYPE_CMPCT_BLOCK inv_type_map of
+        case lookup t inv_type_map of
             Just i -> encode end (i :: Word32)
             Nothing -> error "impossible"
 

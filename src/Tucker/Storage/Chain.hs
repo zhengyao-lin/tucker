@@ -535,6 +535,8 @@ verifyInput bc@(BlockChain {
 
     -- prev_bnode <- parentBranchOfTx bc tx_state branch prev_txid
 
+    -- segwit tx 7a37e24659e0313b9e59aabbcc447c290fe34a4f80f8e0117cbfd1c6d1dfa804
+
     if verify_enable_csv ver_conf &&
        version tx >= 2 then do
         -- error "CSV!!!"
@@ -542,16 +544,23 @@ verifyInput bc@(BlockChain {
         case inputRelLockTime inp of
             Just rlock_time ->
                 case rlock_time of
-                    RelLockTimeHeight v ->
-                        expectTrue "relative lock-time(block height) not met" $
-                            cur_height (verify_cur_bnode ver_conf) >=
-                            fi v + parent_height uvalue
+                    RelLockTimeHeight v -> do
+                        let cur = cur_height (verify_cur_bnode ver_conf)
+                            exp = parent_height uvalue + fi v
+                        
+                        expectTrue ("relative lock-time(block height) not met(expecting " ++
+                                    show exp ++ ", current " ++ show cur) $
+                            cur >= exp
 
                     RelLockTime512S v -> do
                         prev_time <- medianTimePast bc branch (parent_height uvalue)
+
+                        let cur = verify_cur_mtp ver_conf
+                            exp = fi v * 512 + prev_time
                         
-                        expectTrue "relative lock-time(512s) not met" $
-                            verify_cur_mtp ver_conf >= fi v * 512 + prev_time
+                        expectTrue ("relative lock-time(512s) not met(expecting " ++
+                                    show exp ++ ", current " ++ show cur) $
+                            cur >= exp
 
             Nothing -> return () -- no requirement for lock time
     else
@@ -573,6 +582,13 @@ verifyInput bc@(BlockChain {
         sig_sc = decodeFailLE (sig_script inp)
         state = initState script_conf prev_tx_out tx (fi in_idx)
         check_res = runEval state [ sig_sc, pk_sc ]
+
+    -- if BSR.null (sig_script inp) then do
+    --     tLnM "definitely a segwit tx"
+    --     tLnM (show tx)
+    --     error "die!!!"
+    -- else
+    --     return ()
 
     expectTrue ("invalid script/signature for outpoint tx " ++
                 show prev_txid ++ ": " ++ show check_res ++

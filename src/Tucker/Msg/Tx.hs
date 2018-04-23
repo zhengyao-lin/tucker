@@ -53,7 +53,7 @@ data RelLockTime
 
 sequenceToRelLockTime :: Word32 -> Maybe RelLockTime
 sequenceToRelLockTime s =
-    if s .&. 0x800000 == 0 then
+    if s .&. 0x80000000 == 0 then
         -- disable flag not set
         if s .&. 0x00400000 == 0 then
             Just (RelLockTimeHeight (fi v))
@@ -312,7 +312,8 @@ instance Decodable TxPayload where
         -- tx_witness is NOT a vlist because the size of it
         -- is implied by the size of tx_in
         tx_witness <-
-            if flag /= 0 then listD (length tx_in) decoder
+            if flag /= 0 then
+                listD (length tx_in) decoder
             else return []
 
         lock_time <- decoder
@@ -398,7 +399,7 @@ getOutputValue tx =
 
 getWitness :: TxPayload -> Int -> Maybe TxWitness
 getWitness tx in_idx =
-    if length (tx_witness tx) > in_idx then
+    if in_idx < length (tx_witness tx) then
         Just (tx_witness tx !! in_idx)
     else
         Nothing

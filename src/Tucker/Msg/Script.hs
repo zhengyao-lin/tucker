@@ -130,6 +130,7 @@ popM s = toTCKRErrorM (runStateT popS s)
 pushM :: StackItemValue v => ScriptState -> v -> TCKRErrorM ScriptState
 pushM s v = toTCKRErrorM (execStateT (pushS v) s)
 
+-- NOTE: the order of push is from right to left
 pushNM :: StackItemValue v => ScriptState -> [v] -> TCKRErrorM ScriptState
 pushNM s vs = toTCKRErrorM (execStateT (pushNS vs) s)
 
@@ -443,9 +444,11 @@ evalOpS OP_CHECKMULTISIG = do
     -- for compatibility with a historical bug
     dummy <- popS :: EvalState ByteString
     
+    -- tLnM ("n: " ++ show n ++ ", m: " ++ show m)
+
     -- dummy == null
     segwit <- confS script_enable_segwit
-    assertMT "nulldummy rule not satisfied" $
+    assertMT ("nulldummy rule not satisfied(" ++ show dummy ++ " is on the stack)") $
         not segwit || BSR.null dummy
 
     pushS (matched == length sigs)
@@ -761,8 +764,6 @@ verifyWitness :: ScriptState -> ByteString -> Either TCKRError ScriptState
 
 -- P2WPKH
 verifyWitness s wit@(BSR.length -> 20) = do
-    error "p2wpkh!!!"
-
     let Just (TxWitness items) = getWitness (cur_tx s) (fi (tx_in_idx s))
         sig' = items !! 0
         pub' = items !! 1
@@ -788,8 +789,6 @@ verifyWitness s wit@(BSR.length -> 20) = do
 
 -- P2WSH
 verifyWitness s wit@(BSR.length -> 32) = do
-    error "p2wsh!!!"
-    
     let Just (TxWitness items) = getWitness (cur_tx s) (fi (tx_in_idx s))
         wit_script_raw = last items
         args = init items
@@ -803,8 +802,11 @@ verifyWitness s wit@(BSR.length -> 32) = do
     wit_script <- decodeAllLE wit_script_raw
 
     let ns = enableV0Wit s
+
+    -- tLnM ("P2WSH arguments: " ++ show args)
+    -- tLnM ("P2WSH wit script: " ++ show wit_script)
     
-    ns <- pushNM ns args
+    ns <- pushNM ns (reverse args)
     execEval ns wit_script
 
 verifyWitness _ _ = fail "illegal witness program length"
