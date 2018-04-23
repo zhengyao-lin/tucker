@@ -179,7 +179,7 @@ sync env n = do
         action sched = NormalAction (syncChain (taskDone sched))
          
         reassign sched tasks blacklist =
-            envSpreadActionExcept blacklist env (const [action sched]) tasks
+            envSpreadActionExcept [] blacklist env (const [action sched]) tasks
 
     newScheduler env
         (tckr_sync_inv_timeout (global_conf env))
@@ -250,14 +250,27 @@ scheduleFetch env init_hashes callback = do
     added_var <- newA 0 :: IO (Atom (Int))
     let total = length tarray
 
-    let reassign sched task blacklist = do
+    use_segwit <- envForkEnabled env "segwit"
+
+    if use_segwit then
+        tLnM "enabling segwit"
+    else
+        return ()
+
+    let node_flag =
+            -- only use segwit-supporting nodes
+            if use_segwit then [ TCKR_NODE_WITNESS ]
+            else []
+
+        reassign sched task blacklist = do
             clearBlacklist sched
             doFetch sched (fetchTaskToHashes (mconcat task)) blacklist
 
         doFetch sched hashes blacklist =
             envSpreadActionExcept
+                node_flag
                 blacklist env
-                (\task -> [NormalAction (fetchBlock task)]) $
+                (\task -> [NormalAction (fetchBlock use_segwit task)]) $
                 buildFetchTasks (tckr_max_block_task conf) hashes (taskDone sched)
 
         taskDone sched node task results = do
@@ -360,13 +373,15 @@ scheduleFetch env init_hashes callback = do
 
 -- 00000000a967199a2fad0877433c93df785a8d8ce062e5f9b451cd1397bdbf62
 
-fetchBlock :: BlockFetchTask -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
-fetchBlock task env node _ = do
+fetchBlock :: Bool -> BlockFetchTask -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+fetchBlock use_segwit task env node _ = do
     let conf = global_conf env
         trans = conn_trans node
 
         hashes = fetchTaskToHashes task
-        invs = map (InvVector INV_TYPE_BLOCK) hashes
+        -- use segwit if it's active
+        flag = if use_segwit then INV_TYPE_WITNESS_BLOCK else INV_TYPE_BLOCK
+        invs = map (InvVector flag) hashes
 
     getdata <- encodeMsg conf BTC_CMD_GETDATA $ encodeGetdataPayload invs
     -- timeoutRetryS (timeout_s env) $ 

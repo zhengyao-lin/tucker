@@ -379,20 +379,28 @@ envNodeFull :: MainLoopEnv -> IO Bool
 envNodeFull env =
     (envConf env tckr_seek_max <=) <$> length <$> envAliveNodes env
 
+nodeService :: Node -> NodeServiceType
+nodeService = vers_serv . vers_payload
+
 -- spread actions to nodes except the ones in the black list
 -- return [] if no available node is found
 envSpreadActionExcept :: NodeTask t
-                      => [Node] -> MainLoopEnv -> (t -> [NodeAction]) -> [t] -> IO [(Node, t)]
-envSpreadActionExcept blacklist env gen_action tasks = do
+                      => [NodeServiceTypeSingle] -> [Node]
+                      -> MainLoopEnv -> (t -> [NodeAction]) -> [t] -> IO [(Node, t)]
+envSpreadActionExcept node_flag blacklist env gen_action tasks = do
     nodes <- getA (node_list env)
 
     alive_nodes <- flip filterM nodes $ \node -> do
         alive <- getA (alive node)
         tcount <- length <$> getA (action_list node)
 
+        let support_flag = nodeService node `serviceInclude` NodeServiceType node_flag
+
         -- limit the maximum task load on one node
         return $
-            alive && tcount <= envConf env tckr_node_max_task + 1 -- base handler
+            alive &&
+            support_flag &&
+            tcount <= envConf env tckr_node_max_task + 1 -- base handler
 
     -- filter out dead nodes
 
@@ -434,7 +442,7 @@ envSpreadActionExcept blacklist env gen_action tasks = do
             
         return assignment
 
-envSpreadAction = envSpreadActionExcept []
+envSpreadAction = envSpreadActionExcept [] []
 
 envSpreadSimpleAction :: MainLoopEnv -> NodeAction -> Int -> IO [(Node, NullTask)]
 envSpreadSimpleAction env action n =
@@ -468,3 +476,8 @@ envAddBlocks env node =
                     nodeMsg env node $
                         "added " ++ show block ++
                         "[" ++ show (mainBranchHeight bc) ++ "]"
+
+-- check if a specific soft fork is enabled
+envForkEnabled :: MainLoopEnv -> String -> IO Bool
+envForkEnabled env name =
+    getA (block_chain env) >>= (`shouldEnableFork` name)

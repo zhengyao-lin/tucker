@@ -18,8 +18,6 @@ import Tucker.Auth
 
 type Height = Int64
 
-serv_type = [ TCKR_NODE_NETWORK, TCKR_NODE_GETUTXO, TCKR_NODE_BLOOM ]
-
 cmd_map = [
         (BTC_CMD_VERSION,       "version"),
         (BTC_CMD_VERACK,        "verack"),
@@ -173,20 +171,32 @@ instance Sizeable VStr where
     sizeOf (VBStr bs) =
         sizeOf (VInt (fi (BSR.length bs))) + BSR.length bs
 
+serv_type_map :: [(NodeServiceTypeSingle, Word64)]
+serv_type_map = [
+        (TCKR_NODE_NETWORK, 1),
+        (TCKR_NODE_GETUTXO, 2),
+        (TCKR_NODE_BLOOM,   4),
+        (TCKR_NODE_WITNESS, 8)
+    ]
+
+serviceInclude :: NodeServiceType -> NodeServiceType -> Bool
+serviceInclude (NodeServiceType a) (NodeServiceType b) = all (`elem` a) b
+
 instance Encodable NodeServiceType where
     encode end (NodeServiceType serv) =
         encode end $
-        ((foldl (.|.) 0) $
-        map (\s -> case findIndex (== s) serv_type of
-            Just i -> 1 `shift` i
-            _ -> error "impossible") serv :: Word64)
+        foldl (.|.) 0 $
+        flip map serv $ \s ->
+            case lookup s serv_type_map of
+                Just i -> i
+                Nothing -> error "service type not supported"
 
 instance Decodable NodeServiceType where
     decoder = do
         serv <- decoder :: Decoder Word64
-        return $ NodeServiceType
-               $ map snd
-               $ filter (\(i, _) -> serv .&. shift 1 i /= 0) (zip [0..] serv_type)
+        return $ NodeServiceType $
+                 map fst $
+                 filter (\(s, i) -> serv .&. i /= 0) serv_type_map
 
 instance Encodable NetAddr where
     encode end (NetAddr {

@@ -302,7 +302,8 @@ instance Decodable TxPayload where
         mark <- peekByteD
         
         flag <-
-            if mark == 0 then byteD >> byteD
+            if mark == 0 then
+                byteD >> byteD
             else return 0
 
         tx_in <- vlistD decoder

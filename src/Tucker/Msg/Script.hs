@@ -761,6 +761,8 @@ verifyWitness :: ScriptState -> ByteString -> Either TCKRError ScriptState
 
 -- P2WPKH
 verifyWitness s wit@(BSR.length -> 20) = do
+    error "p2wpkh!!!"
+
     let Just (TxWitness items) = getWitness (cur_tx s) (fi (tx_in_idx s))
         sig' = items !! 0
         pub' = items !! 1
@@ -786,6 +788,8 @@ verifyWitness s wit@(BSR.length -> 20) = do
 
 -- P2WSH
 verifyWitness s wit@(BSR.length -> 32) = do
+    error "p2wsh!!!"
+    
     let Just (TxWitness items) = getWitness (cur_tx s) (fi (tx_in_idx s))
         wit_script_raw = last items
         args = init items

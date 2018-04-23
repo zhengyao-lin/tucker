@@ -42,10 +42,7 @@ data SoftForkStatus
     deriving (Eq, Show)
 
 isActiveStatus :: SoftForkStatus -> Bool
-isActiveStatus status =
-    status == FORK_STATUS_STARTED ||
-    status == FORK_STATUS_LOCKED_IN ||
-    status == FORK_STATUS_ACTIVE
+isActiveStatus = (== FORK_STATUS_ACTIVE)
 
 data SoftFork =
     SoftFork {

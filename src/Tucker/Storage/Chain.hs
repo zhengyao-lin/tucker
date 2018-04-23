@@ -466,19 +466,25 @@ genScriptConf bc ver_conf utxo_value =
             -- NOTE: using the block timestamp here(not mtp)
     }
 
+shouldEnableFork :: BlockChain -> String -> IO Bool
+shouldEnableFork (BlockChain {
+    bc_fork_state = fork_state
+}) name =
+    isActiveStatus <$> getForkStatus fork_state name
+
 genVerifyConf :: BlockChain -> Branch -> Branch -> IO VerifyConf
 genVerifyConf bc@(BlockChain {
     bc_conf = conf,
     bc_chain = bc_chain,
     bc_fork_state = fork_state
 }) branch bnode = do
-    csv_status <- getForkStatus fork_state "csv"
-    segwit_status <- getForkStatus fork_state "segwit"
+    csv <- shouldEnableFork bc "csv"
+    segwit <- shouldEnableFork bc "segwit"
     mtp <- medianTimePast bc branch (cur_height bnode)
 
     return $ VerifyConf {
-        verify_enable_csv = isActiveStatus csv_status,
-        verify_enable_segwit = isActiveStatus segwit_status,
+        verify_enable_csv = csv,
+        verify_enable_segwit = segwit,
         verify_cur_mtp = mtp,
         verify_cur_bnode = bnode,
         verify_check_dup_tx = mtp >= tckr_dup_tx_disable_time conf
