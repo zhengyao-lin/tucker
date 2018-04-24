@@ -909,3 +909,32 @@ else
 the tx must not be a coinbase
 
 -}
+
+{-
+
+NOTES for lightening network
+
+1) Unidirectional channel(Alice to Bob)
+    1. Alice creates a funding tx(multisig 2-2) and a refund tx(with a timelock in the future)
+    2. Alice gives the two txns to Bob and asks him to sign the refund tx
+    3. And from this point, the channel is open
+    4. Alice can repeatedly create commitment txns(with no locktime) indicating
+       the final allocation of tx and send them to Bob for his signature.
+    5. And if anyone wants to close the channel, he/she just broadcast the final commitment
+    6. Bob has no incentive to cheat because the worst case for Alice is to get her money back in
+       time indicated by the timelock in the refund tx
+
+    * the point of this channel is that there could only be Alice sending funds to Bob but not the
+      other way around. So Bob has no incentive to use an older commitment tx to close the channel
+
+2) Bidirectional channel(Alice to Bob or the reversed way)
+    1. Similar to an unidirectional channel, except that the commitment txns has decreasing timelocks
+       (older commitment txns have smaller timelocks, so that if any party cheats, the other can send
+        the newest tx and it can acts faster)
+
+3) RSMC(Revocable Sequence Maturity Contract) works in a similar way to Bidirectional channel
+
+4) Above these bi-party channels, we can have a route across indefinitely many middle parties
+   And HTLC can ensure no party across this route cheats
+
+-}

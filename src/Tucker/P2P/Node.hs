@@ -51,6 +51,8 @@ data MainLoopEnv =
 
         cur_socket    :: Atom Int,
 
+        sync_ready    :: Atom Bool,
+
         chain_lock    :: LK.Lock,
         block_chain   :: Atom BlockChain
     }
@@ -197,6 +199,12 @@ envWarn :: MainLoopEnv -> String -> IO ()
 envWarn env msg =
     tLnM (wss (Color Yellow False) ("env: " ++ msg))
 
+envSetSyncReady :: MainLoopEnv -> Bool -> IO ()
+envSetSyncReady env = setA (sync_ready env)
+
+envIsSyncReady :: MainLoopEnv -> IO Bool
+envIsSyncReady = getA . sync_ready
+
 initEnv :: TCKRConf -> ResIO MainLoopEnv
 initEnv conf = do
     tid <- lift myThreadId
@@ -206,6 +214,8 @@ initEnv conf = do
     io_buf <- lift $ newA []
 
     cur_socket <- lift $ newA 0
+
+    sync_ready <- lift $ newA False
 
     -- db_block <- openDB def (tckr_db_path conf) (tckr_ks_block conf)
     -- db_tx <- openDB def (tckr_db_path conf) (tckr_ks_tx conf)
@@ -225,6 +235,8 @@ initEnv conf = do
         -- io_lock = io_lock,
         io_buf = io_buf,
         cur_socket = cur_socket,
+
+        sync_ready = sync_ready,
 
         chain_lock = chain_lock,
         block_chain = block_chain
@@ -285,7 +297,7 @@ envCloseTrans env trans = do
     cur_s <- appA (+(-1)) (cur_socket env)
     tClose trans
 
-    envMsg env ("transport closed, " ++ show cur_s ++ " left")
+    -- envMsg env ("transport closed, " ++ show cur_s ++ " left")
 
 -- need timeout
 envConnect :: MainLoopEnv -> AddrInfo -> IO Transport
@@ -310,7 +322,7 @@ envConnect env addr = do
 
         -- fail "number of sockets has reached the limit"
     else do
-        envMsg env ("connecting to " ++ show sock_addr ++ "(" ++ show cur_s ++ " sockets)")
+        -- envMsg env ("connecting to " ++ show sock_addr ++ "(" ++ show cur_s ++ " sockets)")
 
         sock <- buildSocketTo addr
         

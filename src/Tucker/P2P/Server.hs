@@ -101,8 +101,28 @@ defaultHandler env node msg@(MsgHead {
 
             h BTC_CMD_BLOCK = do
                 d $ \(BlockPayload block) -> do
+                    error "new block?"
                     envAddBlock env node block
                     return []
+
+            h BTC_CMD_INV = do
+                d $ \(InvPayload inv_vect) ->
+                    let first@(InvVector itype _) = head inv_vect
+                    in case itype of
+                        INV_TYPE_BLOCK -> do -- new block received
+                            ready <- envIsSyncReady env
+
+                            if ready then do
+                                tLnM ("new block(s) received: " ++ show first ++ ", ...")
+                                error "not yet implemented"
+                            else
+                                tLnM "ignoring new block(s) due to unfinished sync process"
+
+                            return []
+
+                        _ -> do
+                            tLnM ("unknown inventory received: " ++ show first ++ ", ...")
+                            return []
 
             h _ = do
                 nodeMsg env node $ "unhandled message: " ++ (show command)
@@ -160,7 +180,7 @@ nodeProcMsg env node msg = do
 
 nodeExec :: MainLoopEnv -> Node -> IO ()
 nodeExec env unready_node = do
-    nodeMsg env unready_node "spawn"
+    -- nodeMsg env unready_node "spawn"
 
     -- update thread id
     tid <- myThreadId

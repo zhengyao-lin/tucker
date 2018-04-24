@@ -161,9 +161,17 @@ sync env n = do
 
                 sync_inv <- getA sync_inv_var
 
+                if length sync_inv < envConf env tckr_max_block_batch then do
+                    -- not given a full batch -- we are reaching the tip
+                    -- set the sync-ready flag
+                    tLnM "last batch received, setting sync ready flag"
+                    envSetSyncReady env True
+                else
+                    return ()
+
                 if null sync_inv then
                     -- no sync inv
-                    envMsg env "!!! all blocks syncronized"
+                    envMsg env "!!! all blocks syncronized, exiting sync"
                 else do
                     let final_hashes = FD.toList sync_inv
 
@@ -253,7 +261,7 @@ scheduleFetch env init_hashes callback = do
     use_segwit <- envForkEnabled env "segwit"
 
     if use_segwit then
-        tLnM "enabling segwit"
+        envMsg env "enabling segwit"
     else
         return ()
 
