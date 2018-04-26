@@ -27,6 +27,8 @@ import qualified Control.Monad.Trans.Maybe as MT
 import Tucker.Error
 import Tucker.DeepSeq
 
+type Id a = a
+
 class Default a where
     def :: a
 

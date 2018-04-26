@@ -177,7 +177,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                                 -- try again with an empty blacklist
                                 -- nodeMsg env node "failed to reassign tasks"
 
-                                tLnM "!!! failed to reassign, elongate timeout"
+                                envWarn env "failed to reassign, elongate timeout"
                                 -- elongate timeout
                                 appA (*2) timeout_us_var
 
@@ -194,7 +194,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                     else do
                         -- empty cur_assign
                         -- kill the thread
-                        tLnM "self cancelling on empty assignment"
+                        envMsg env "self cancelling on empty assignment"
                         cancel sched
 
         -- watchExit mres =

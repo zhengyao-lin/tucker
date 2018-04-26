@@ -69,7 +69,6 @@ instance Eq RouterAction where
 
 data NodeAction
     = NormalAction { handler :: ActionHandle }
-    | NoAction
 
 type ActionHandle = MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 
@@ -198,6 +197,10 @@ envMsg env msg = do
 envWarn :: MainLoopEnv -> String -> IO ()
 envWarn env msg =
     tLnM (wss (Color Yellow False) ("env: " ++ msg))
+
+envInfo :: MainLoopEnv -> String -> IO ()
+envInfo env msg =
+    tLnM (wss (Color Green False) ("env: " ++ msg))
 
 envSetSyncReady :: MainLoopEnv -> Bool -> IO ()
 envSetSyncReady env = setA (sync_ready env)

@@ -2,6 +2,7 @@
 #define _SHA256_H_
 
 #include "common.h"
+#include "hash256.h"
 
 typedef struct {
     word_t h0, h1, h2, h3, h4, h5, h6, h7;

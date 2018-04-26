@@ -1,5 +1,3 @@
-{-# LANGUAGE DuplicateRecordFields #-}
-
 module Tucker.P2P.Action where
 
 import Data.List
@@ -161,17 +159,17 @@ sync env n = do
 
                 sync_inv <- getA sync_inv_var
 
-                if length sync_inv < envConf env tckr_max_block_batch then do
+                if length sync_inv < envConf env tckr_max_getdata_batch then do
                     -- not given a full batch -- we are reaching the tip
                     -- set the sync-ready flag
-                    tLnM "last batch received, setting sync ready flag"
+                    envInfo env "last batch received, setting sync ready flag"
                     envSetSyncReady env True
                 else
                     return ()
 
                 if null sync_inv then
                     -- no sync inv
-                    envMsg env "!!! all blocks syncronized, exiting sync"
+                    envInfo env "all blocks syncronized, exiting sync"
                 else do
                     let final_hashes = FD.toList sync_inv
 
@@ -181,8 +179,7 @@ sync env n = do
 
                     scheduleFetch env final_hashes callback
             else
-                envMsg env "excess inv received"
-                -- return ()
+                return ()
 
         action sched = NormalAction (syncChain (taskDone sched))
          
@@ -225,7 +222,7 @@ syncChain callback env node msg = do
         nodeMsg env node $ "inv received with " ++ show (length inv_vect) ++ " item(s)" -- ++ show inv_vect
 
         let hashes = map invToHash256 $
-                     take (tckr_max_block_batch conf) inv_vect
+                     take (tckr_max_getdata_batch conf) inv_vect
 
         callback node hashes
         
@@ -342,7 +339,7 @@ scheduleFetch env init_hashes callback = do
                     new_added <- appA (+ new_succ_count) added_var
 
                     if new_succ_count /= 0 then do
-                        tLnM (show new_succ_count ++ " block(s) to add")
+                        envMsg env (show new_succ_count ++ " block(s) to add")
 
                         -- NOTE: the downloaded part is cleared first
                         -- so that there won't be a double increase in memory usage

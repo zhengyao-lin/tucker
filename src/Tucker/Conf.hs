@@ -135,7 +135,7 @@ data TCKRConf =
         tckr_block_fetch_timeout :: Int, -- in sec
         tckr_node_max_blacklist_count :: Int,
 
-        tckr_max_block_batch :: Int,
+        tckr_max_getdata_batch :: Int,
 
         tckr_sync_inv_timeout :: Int, -- in sec
 
@@ -238,8 +238,8 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_max_tree_insert_depth = 32,
 
-        tckr_max_block_batch = 500,
-        -- receive 200 blocks a time(if inv is greater than that, trim the tail)
+        tckr_max_getdata_batch = 500,
+        -- receive 500 blocks a time(if inv is greater than that, trim the tail)
 
         tckr_node_max_task = 3, -- excluding the base handler
 
@@ -342,9 +342,10 @@ tucker_default_conf_testnet3 mpath = do
             }
         ],
 
-        tckr_block_assumed_valid = -- Nothing
+        tckr_block_assumed_valid = Nothing
             -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")
             -- Just (600000, "000000000000624f06c69d3a9fe8d25e0a9030569128d63ad1b704bbb3059a16")
             -- Just (700000, "000000000000406178b12a4dea3b27e13b3c4fe4510994fd667d7c1e6a3f4dc1 ")
-            Just (750000, "000000000031067835478634e669cc6dd4cc32945542c3f6b32856999a43e37c")
+            -- Just (750000, "000000000031067835478634e669cc6dd4cc32945542c3f6b32856999a43e37c")
+            -- Just (900000, "0000000000356f8d8924556e765b7a94aaebc6b5c8685dcfa2b1ee8b41acd89b")
     }

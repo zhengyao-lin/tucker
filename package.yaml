@@ -62,6 +62,7 @@ executables:
     c-sources:
     - chash/mine.c
     - chash/sha256.c
+    - chash/hash256.c
 
     main:                Main.hs
     source-dirs:         app

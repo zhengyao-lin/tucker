@@ -6,23 +6,13 @@
 
 #include "mine.h"
 #include "sha256.h"
+#include "hash256.h"
 
 // hash comparison in little-endian(a <= b)
 static inline bool
 less_or_equal_to_hash_le(const hash256_t a, const hash256_t b)
 {
-    int i, cmp;
-
-    for (i = sizeof(hash256_t) - 1; i >= 0; i--) {
-        cmp = ((byte_t *)a)[i] - ((byte_t *)b)[i];
-
-        if (cmp > 0) return false; // a > b
-        else if (cmp < 0) return true; // a < b
-        // cmp == 0, continue
-    }
-    
-    // a == b
-    return true;
+    return hash256_compare(a, b) <= 0;
 }
 
 typedef struct {

@@ -2,6 +2,7 @@
 #define _MINE_H_
 
 #include "common.h"
+#include "hash256.h"
 
 // append a 4-byte nonce to dat such that the hash of the appended string is
 // lower than the target in little-endian

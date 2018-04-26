@@ -1,56 +1,103 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
+
 module Tucker.Msg.Hash256 where
 
 import Data.Hex
+import Data.Int
 import Data.Bits
 import Data.Word
 import Data.Char
 import Data.LargeWord
+import qualified Data.ByteArray as BA
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
+
+import System.IO.Unsafe
+
+import Foreign.Ptr
 
 import Tucker.Enc
 import Tucker.Auth
 import Tucker.Util
 import Tucker.DeepSeq
 
+foreign import ccall "hash256_compare" c_hash256_compare :: Ptr Word8 -> Ptr Word8 -> IO Int8
+foreign import ccall "hash256_add" c_hash256_add :: Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> IO ()
+foreign import ccall "hash256_mul" c_hash256_mul :: Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> IO ()
+foreign import ccall "hash256_neg" c_hash256_neg :: Ptr Word8 -> Ptr Word8 -> IO ()
+
+-- when used as an integer, the string is interpreted as an little-endian number
+data Hash256 = Hash256 ByteString deriving (Eq)
+
 -- stored in little endian
-data Hash256 = Hash256 Word256 deriving (Eq)
+-- data Hash256 = Hash256 Word256 deriving (Eq)
 
 instance NFData Hash256 where
-    rnf (Hash256 hash) = hash `seq` ()
+    rnf (Hash256 raw) = raw `seq` ()
 
 instance Ord Hash256 where
-    compare (Hash256 n1) (Hash256 n2) = compare n1 n2
+    compare (Hash256 a) (Hash256 b) =
+        unsafePerformIO $
+        BA.withByteArray a $ \a ->
+            BA.withByteArray b $ \b -> do
+                res <- c_hash256_compare a b
+                return $ case res of
+                    -1 -> LT
+                    0  -> EQ
+                    1  -> GT
+                    e  -> error ("unexpected result " ++ show e)
 
 instance Num Hash256 where
-    (Hash256 n1) + (Hash256 n2) = Hash256 (n1 + n2)
-    (Hash256 n1) * (Hash256 n2) = Hash256 (n1 * n2)
+    (Hash256 a) + (Hash256 b) =
+        bsToHash256 $
+        snd $ unsafePerformIO $
+        BA.withByteArray a $ \a ->
+            BA.withByteArray b $ \b ->
+                BA.allocRet 32 $ \result ->
+                    c_hash256_add a b result
+        
+    (Hash256 a) * (Hash256 b) =
+        bsToHash256 $
+        snd $ unsafePerformIO $
+        BA.withByteArray a $ \a ->
+            BA.withByteArray b $ \b ->
+                BA.allocRet 32 $ \result ->
+                    c_hash256_mul a b result
     
-    abs (Hash256 n) = Hash256 (abs n)
+    abs = id
     -- negate (Hash256 n) = Hash256 (-n)
-    negate (Hash256 n) = Hash256 (complement n + 1)
+    -- negate _ = error "hash256 method not implemented" -- Hash256 (complement n + 1)
     -- TODO: using two's complment here, a bug in the large-word library
-    signum (Hash256 n) = Hash256 (signum n)
+
+    negate (Hash256 a) =
+        bsToHash256 $
+        snd $ unsafePerformIO $
+        BA.withByteArray a $ \a ->
+            -- :: IO ((), ByteString)
+            BA.allocRet 32 $ \result ->
+                c_hash256_neg a result
+
+    signum = const 1
 
     -- TODO: using the negate of Hash256 because the same problem of large-word
-    fromInteger i =
-        if i < 0 then
-            -Hash256 (fromInteger (abs i))
-        else
-            Hash256 (fromInteger i)
+    fromInteger = intToHash256
 
 instance Real Hash256 where
-    toRational (Hash256 n) = toRational n
+    toRational h = toRational (hash256ToInt h :: Integer)
 
 instance Enum Hash256 where
-    toEnum i = Hash256 (toEnum i)
-    fromEnum (Hash256 n) = fromEnum n
+    toEnum = intToHash256
+    fromEnum = hash256ToInt
 
 instance Integral Hash256 where
-    quotRem (Hash256 n1) (Hash256 n2) =
-        let (a, b) = quotRem n1 n2 in (Hash256 a, Hash256 b)
+    quotRem a b =
+        let c = hash256ToInt a :: Integer
+            d = hash256ToInt b :: Integer
+            (q, r) = quotRem c d
+        in 
+            (intToHash256 q, intToHash256 r)
 
-    toInteger (Hash256 n) = toInteger n
+    toInteger = hash256ToInt
 
 instance Show Hash256 where
     -- display order is the reversed order of the internal format
@@ -66,24 +113,34 @@ instance Read Hash256 where
         map toUpper $ str, "")]
 
 instance Encodable Hash256 where
-    encode end (Hash256 n) = encode end n
+    encode end (Hash256 bs) = bs
 
 instance Decodable Hash256 where
-    decoder = intD 32
+    decoder = -- intD 32
+        Hash256 <$> bsD 32
 
 instance Sizeable Hash256 where
     sizeOf _ = 32
 
-nullHash256 = 0 :: Hash256
-nullHash256BS = encodeLE nullHash256
+nullHash256 = Hash256 nullHash256BS
+nullHash256BS = BSR.replicate 32 0
 
-hash256ToBS (Hash256 n) = encodeLE n
+intToHash256 :: (Bits t, Integral t) => t -> Hash256
+intToHash256 n =
+    bsToHash256 $
+    encodeInt 32 LittleEndian n
+
+hash256ToInt :: (Bits t, Integral t) => Hash256 -> t
+hash256ToInt (Hash256 bs) =
+    decodeVWord LittleEndian bs
+
+hash256ToBS (Hash256 bs) = bs
 
 bsToHash256 :: ByteString -> Hash256
 bsToHash256 bs =
     case decodeLE bs of
         (Right v, _) -> v
-        _ -> error "failed to decode hash256"
+        (Left e, _) -> error ("failed to decode hash256: " ++ show e)
 
 stdHash256 :: ByteString -> Hash256
 stdHash256 = bsToHash256 . doubleSHA256

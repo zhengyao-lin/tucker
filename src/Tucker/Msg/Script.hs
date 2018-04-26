@@ -267,10 +267,10 @@ txSigHashV0WitS sig_raw = do
 -- require the raw signature with the htype byte appended
 txSigHashLegacyS :: [ByteString] -> ByteString -> EvalState ByteString
 txSigHashLegacyS all_sigs sig_raw = do
-    cur_tx   <- curTxS
-    in_idx   <- tx_in_idx <$> get
-    cs_op    <- last_cs_op <$> get
-    code     <- prog_code <$> get
+    cur_tx <- curTxS
+    in_idx <- tx_in_idx <$> get
+    cs_op  <- last_cs_op <$> get
+    code   <- prog_code <$> get
 
     -- tLnM ("wulala " ++ show (intToHashType (BSR.last sig_raw)))
 

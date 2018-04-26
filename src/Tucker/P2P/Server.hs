@@ -1,5 +1,3 @@
-{-# LANGUAGE DuplicateRecordFields #-}
-
 module Tucker.P2P.Server where
 
 import qualified Data.ByteString as BSR
@@ -39,94 +37,85 @@ defaultHandler env node (LackData _) = do
 defaultHandler env node msg@(MsgHead {
         command = command,
         payload = payload
-    }) = do
-        h command where
-            trans = conn_trans node
-            conf = global_conf env
+    }) = h command
+    where
+        trans = conn_trans node
+        conf = global_conf env
 
-            d :: MsgPayload t => (t -> IO [RouterAction]) -> IO [RouterAction]
-            d = decodePayload env node payload (pure [])
+        d :: MsgPayload t => (t -> IO [RouterAction]) -> IO [RouterAction]
+        d = decodePayload env node payload (pure [])
 
-            h BTC_CMD_PING = do
-                d $ \ping@(PingPongPayload {}) -> do
-                    pong <- encodeMsg conf BTC_CMD_PONG $ pure $ encodeLE ping
-                    -- nodeMsg env node $ "pinging back: " ++ (show pong)
-                    timeoutS (timeout_s env) $ tSend trans pong
-                    return []
+        h BTC_CMD_PING = do
+            d $ \ping@(PingPongPayload {}) -> do
+                pong <- encodeMsg conf BTC_CMD_PONG $ pure $ encodeLE ping
+                -- nodeMsg env node $ "pinging back: " ++ (show pong)
+                timeoutS (timeout_s env) $ tSend trans pong
+                return []
 
-            h BTC_CMD_GETADDR = do
-                nodes       <- getA (node_list env)
-                net_addrs   <- forM nodes nodeNetAddr
-                addr        <- encodeMsg conf BTC_CMD_ADDR $ encodeAddrPayload net_addrs
+        h BTC_CMD_GETADDR = do
+            nodes       <- getA (node_list env)
+            net_addrs   <- forM nodes nodeNetAddr
+            addr        <- encodeMsg conf BTC_CMD_ADDR $ encodeAddrPayload net_addrs
 
-                -- nodeMsg env node $ "return addresses"
+            -- nodeMsg env node $ "return addresses"
 
-                timeoutS (timeout_s env) $ tSend trans addr
+            timeoutS (timeout_s env) $ tSend trans addr
+
+            return []
+
+        h BTC_CMD_GETHEADERS = do
+            return []
+        
+        h BTC_CMD_ALERT = do
+            return []
+
+        h BTC_CMD_ADDR = do
+            d $ \addrmsg@(AddrPayload {
+                addrs = net_addrs
+            }) -> do
+                nodes <- getA $ node_list env
+                full  <- envNodeFull env
+
+                new_list <- forM net_addrs netAddrToAddrInfo
+                filted   <- filterProbingList env new_list
+
+                if full || null filted then
+                    return ()
+                else do
+                    -- try to probe new nodes
+                    forkIO $ probe env filted
+                    return ()
 
                 return []
 
-            h BTC_CMD_GETHEADERS = do
+        h BTC_CMD_BLOCK = do
+            d $ \(BlockPayload block) -> do
+                error "new block?"
+                envAddBlock env node block
                 return []
-            
-            h BTC_CMD_ALERT = do
-                return []
 
-            h BTC_CMD_ADDR = do
-                d $ \addrmsg@(AddrPayload {
-                    addrs = net_addrs
-                }) -> do
-                    nodes <- getA $ node_list env
+        h BTC_CMD_INV = do
+            d $ \(InvPayload inv_vect) ->
+                let first@(InvVector itype _) = head inv_vect
+                in case itype of
+                    INV_TYPE_BLOCK -> do -- new block received
+                        ready <- envIsSyncReady env
 
-                    full <- envNodeFull env
-
-                    -- nodeMsg env node (show addrmsg)
-
-                    if not full then do
-                        new_list <- forM net_addrs netAddrToAddrInfo
-                        filted   <- filterProbingList env new_list
-
-                        -- nodeMsg env node $ "filted: " ++ (show $ map addrAddress filted)
-
-                        if not $ null filted then do
-                            -- nodeMsg env node $ "probing " ++ (show $ length filted) ++ " new node(s)"
-                            forkIO $ probe env filted
-                            return ()
+                        if ready then do
+                            envInfo env ("new block(s) received: " ++ show first ++ ", ...")
+                            error "not yet implemented"
                         else
-                            return ()
-                    else
-                        -- nodeMsg env node "max number of nodes reached, no more probing"
-                        return ()
+                            envMsg env "ignoring new block(s) due to unfinished sync process"
 
-                    return []
+                        return []
 
-            h BTC_CMD_BLOCK = do
-                d $ \(BlockPayload block) -> do
-                    error "new block?"
-                    envAddBlock env node block
-                    return []
+                    _ -> do
+                        envWarn env ("unknown inventory received: " ++ show first ++ ", ...")
+                        return []
 
-            h BTC_CMD_INV = do
-                d $ \(InvPayload inv_vect) ->
-                    let first@(InvVector itype _) = head inv_vect
-                    in case itype of
-                        INV_TYPE_BLOCK -> do -- new block received
-                            ready <- envIsSyncReady env
-
-                            if ready then do
-                                tLnM ("new block(s) received: " ++ show first ++ ", ...")
-                                error "not yet implemented"
-                            else
-                                tLnM "ignoring new block(s) due to unfinished sync process"
-
-                            return []
-
-                        _ -> do
-                            tLnM ("unknown inventory received: " ++ show first ++ ", ...")
-                            return []
-
-            h _ = do
-                nodeMsg env node $ "unhandled message: " ++ (show command)
-                return []
+        h _ = do
+            nodeMsg env node $ "unhandled message: " ++ (show command)
+            return []
 
 nodeDefaultActionList = [
         -- NormalAction fetchBlock, -- for test
@@ -165,7 +154,6 @@ nodeProcMsg env node msg = do
 
                         return (exec_res ++ [new_action], continue)
 
-                    _ -> error "unsupported action"
             else return orig
 
     (exec_res, _) <- foldM proc ([], True) current_alist

@@ -28,8 +28,8 @@ doMineBlock block = do
     cap <- getNumCapabilities
 
     nonce <-
-        BA.withByteArray fixed $ \dat -> do
-            BA.withByteArray target $ \target -> do
+        BA.withByteArray fixed $ \dat ->
+            BA.withByteArray target $ \target ->
                 return (c_do_mine dat (fi (BSR.length fixed)) target cap)
 
     return (updateBlockHashes $ block { nonce = nonce })

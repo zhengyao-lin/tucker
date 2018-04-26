@@ -360,7 +360,7 @@ instance Sizeable TxPayload where
 isCoinbase :: TxPayload -> Bool
 isCoinbase (TxPayload {
     tx_in = [TxInput {
-        prev_out = OutPoint 0 (-1)
+        prev_out = OutPoint nullHash256 (-1)
     }]
 }) = True
 
@@ -602,7 +602,7 @@ txSigHashLegacy tx in_idx subscript htype =
         if invalid_sighash_single then
             -- when ninput > noutput and sighash_single is declared
             -- the hash value 1 is signed
-            encodeLE (1 :: Hash256)
+            encodeLE (intToHash256 (1 :: Int))
         else
             -- tLn (show htype) $
             -- tLn (show final_tx) $
@@ -622,7 +622,7 @@ stdCoinbase conf msg addr value =
         flag = 0,
         tx_in = [
             TxInput {
-                prev_out = OutPoint 0 (-1),
+                prev_out = OutPoint nullHash256 (-1),
                 sig_script = encodeLE ([ OP_RETURN, OP_PUSHDATA msg Nothing ]),
                 seqn = -1
             }
