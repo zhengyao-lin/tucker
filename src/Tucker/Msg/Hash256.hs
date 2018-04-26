@@ -27,7 +27,7 @@ foreign import ccall "hash256_mul" c_hash256_mul :: Ptr Word8 -> Ptr Word8 -> Pt
 foreign import ccall "hash256_neg" c_hash256_neg :: Ptr Word8 -> Ptr Word8 -> IO ()
 
 -- when used as an integer, the string is interpreted as an little-endian number
-data Hash256 = Hash256 ByteString deriving (Eq)
+newtype Hash256 = Hash256 ByteString deriving (Eq)
 
 -- stored in little endian
 -- data Hash256 = Hash256 Word256 deriving (Eq)

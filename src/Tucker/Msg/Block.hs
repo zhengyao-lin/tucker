@@ -75,10 +75,10 @@ instance Ord Block where
 instance Show Block where
     show (Block { block_hash = hash }) = "Block " ++ show hash
 
-data BlockPayload = BlockPayload Block deriving (Eq, Show)
-data BlockHeader = BlockHeader Block deriving (Eq, Show)
+newtype BlockPayload = BlockPayload Block deriving (Eq, Show)
+newtype BlockHeader = BlockHeader Block deriving (Eq, Show)
 
-data HeadersPayload = HeadersPayload [BlockHeader] deriving (Show, Eq)
+newtype HeadersPayload = HeadersPayload [BlockHeader] deriving (Show, Eq)
 
 -- instance MsgPayload Block
 -- instance MsgPayload BlockHeader
@@ -286,7 +286,7 @@ instance Decodable SoftForkStatus where
 instance Encodable SoftFork where
     encode end d =
         mconcat [
-            encode end (VStr (fork_name d)),
+            encode end (vstr (fork_name d)),
             encode end (fork_bit d),
             encode end (fork_start d),
             encode end (fork_timeout d),
@@ -295,14 +295,14 @@ instance Encodable SoftFork where
 
 instance Decodable SoftFork where
     decoder = do
-        VStr name <- decoder
+        name <- decoder
         bit <- decoder
         start <- decoder
         timeout <- decoder
         status <- decoder
 
         return $ SoftFork {
-            fork_name = name,
+            fork_name = vstrToString name,
             fork_bit = bit,
             fork_start = start,
             fork_timeout = timeout,

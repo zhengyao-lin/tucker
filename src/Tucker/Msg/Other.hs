@@ -6,7 +6,7 @@ import qualified Data.ByteString as BSR
 import Tucker.Enc
 import Tucker.Msg.Common
 
-data PingPongPayload = PingPongPayload Word64 deriving (Show, Eq)
+newtype PingPongPayload = PingPongPayload Word64 deriving (Show, Eq)
 
 instance MsgPayload PingPongPayload
 
@@ -91,7 +91,7 @@ instance Decodable RejectPayload where
             rdata = rdata
         }
 
-data AlertPayload = AlertPayload ByteString deriving (Show, Eq)
+newtype AlertPayload = AlertPayload ByteString deriving (Show, Eq)
 
 -- instance Encodable AlertPayload where
 

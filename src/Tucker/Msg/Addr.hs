@@ -8,7 +8,7 @@ import qualified Data.ByteString.Char8 as BS
 import Tucker.Enc
 import Tucker.Msg.Common
 
-data AddrPayload =
+newtype AddrPayload =
     AddrPayload {
         addrs :: [NetAddr]
     } deriving (Show)

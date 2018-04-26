@@ -9,7 +9,7 @@ import Control.Applicative
 import Tucker.Enc
 import Tucker.Util
 
-data ASN1Length = ASN1Length Integer deriving (Eq, Show)
+newtype ASN1Length = ASN1Length Integer deriving (Eq, Show)
 
 data ASN1Object
     = ASN1Integer Integer

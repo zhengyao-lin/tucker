@@ -79,7 +79,7 @@ instance Decodable VersionPayload where
         addr_from <- ifD (cli_vers < 106) addr_recv decoderAddr
 
         vers_nonce <- ifD (cli_vers < 106) 0 decoder
-        user_agent <- ifD (cli_vers < 106) (VStr "") decoder
+        user_agent <- ifD (cli_vers < 106) (vstr "") decoder
 
         start_height <- ifD (cli_vers < 106) 0 decoder
 
@@ -115,7 +115,7 @@ buildVersionPayload conf addr = do
 
         vers_nonce = vers_nonce,
 
-        user_agent = VStr $ tckr_user_agent conf,
+        user_agent = vstr (tckr_user_agent conf),
         start_height = 0,
         relay = False
     }

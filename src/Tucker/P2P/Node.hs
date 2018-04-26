@@ -67,7 +67,7 @@ instance Eq RouterAction where
     DumpMe   == DumpMe   = True
     _        == _        = False
 
-data NodeAction
+newtype NodeAction
     = NormalAction { handler :: ActionHandle }
 
 type ActionHandle = MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]

@@ -141,7 +141,7 @@ base58decCheck enc = do
     else
         Left $ TCKRError "base58dec check failed"
 
-data ECCPrivateKey = ECCPrivateKey Integer deriving (Eq, Show)
+newtype ECCPrivateKey = ECCPrivateKey Integer deriving (Eq, Show)
 data ECCPublicKey = ECCPublicKey {
         compressed :: Bool,
         x_coord    :: Integer,

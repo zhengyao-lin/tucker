@@ -245,10 +245,10 @@ handshake env node = do
 
         (Right vp@(VersionPayload {
             cli_vers = vers,
-            user_agent = VStr user_agent,
+            user_agent = user_agent,
             vers_serv = vers_serv
         }), _) -> do
-            nodeMsg env node $ "version received: " ++ (show vers) ++ user_agent
+            nodeMsg env node $ "version received: " ++ show vers ++ vstrToString user_agent
 
             net_addr <- sockAddrToNetAddr (sock_addr node) vers_serv
 

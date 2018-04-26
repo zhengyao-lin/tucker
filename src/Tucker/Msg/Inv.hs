@@ -62,7 +62,7 @@ instance Decodable InvVector where
         hash <- decoder
         return $ InvVector htype hash
 
-data InvPayload =
+newtype InvPayload =
     InvPayload {
         inv_vect :: [InvVector]
     }

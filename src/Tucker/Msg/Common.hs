@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module Tucker.Msg.Common where
 
 import Data.Hex
@@ -43,12 +45,17 @@ cmd_map_r = map (\(a, b) -> (b, a)) cmd_map
 
 class (Encodable p, Decodable p) => MsgPayload p where
 
-newtype VInt = VInt Integer deriving (Show, Eq)
-data VStr = VStr String | VBStr ByteString deriving (Show, Eq)
+newtype VInt = VInt Word64 deriving (Show, Eq, Ord, Num, Real, Enum, Integral)
+newtype VStr = VStr ByteString deriving (Show, Eq)
 
 vstrToBS :: VStr -> ByteString
-vstrToBS (VStr str) = BS.pack str
-vstrToBS (VBStr bs) = bs
+vstrToBS (VStr bs) = bs
+
+vstrToString :: VStr -> String
+vstrToString (VStr bs) = BS.unpack bs
+
+vstr = VStr . BS.pack
+vbstr = VStr
 
 type RawScript = ByteString
 
@@ -56,7 +63,7 @@ data HashTypeSingle =
     SIGHASH_ALL | SIGHASH_NONE | SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
     deriving (Eq, Show)
 
-data HashType = HashType [HashTypeSingle] deriving (Show)
+newtype HashType = HashType [HashTypeSingle] deriving (Show)
 
 hashTypeToInt :: (Integral t, Bits t) => HashType -> t
 hashTypeToInt (HashType []) = 0
@@ -125,24 +132,24 @@ data MsgHead
     } deriving (Show, Eq)
 
 instance Encodable VInt where
-    encode end (VInt num)
+    encode end num
         | num < 0xfd        = bchar num
-        | num <= 0xffff     = bchar 0xfd <> encode end (fromInteger num :: Word16)
-        | num <= 0xffffffff = bchar 0xfe <> encode end (fromInteger num :: Word32)
-        | otherwise         = bchar 0xff <> encode end (fromInteger num :: Word64)
+        | num <= 0xffff     = bchar 0xfd <> encode end (fi num :: Word16)
+        | num <= 0xffffffff = bchar 0xfe <> encode end (fi num :: Word32)
+        | otherwise         = bchar 0xff <> encode end (fi num :: Word64)
 
 instance Decodable VInt where
     decoder = do
         fst <- byteD
         let
             wrap :: Integral t => t -> Decoder VInt
-            wrap = pure . VInt . fi
+            wrap = pure . fi
 
         case fst of
             0xfd -> (decoder :: Decoder Word16) >>= wrap
             0xfe -> (decoder :: Decoder Word32) >>= wrap
             0xff -> (decoder :: Decoder Word64) >>= wrap
-            b    -> return $ VInt $ fi b
+            b    -> return (fi b)
 
 instance Sizeable VInt where
     sizeOf (VInt num)
@@ -152,24 +159,19 @@ instance Sizeable VInt where
         | otherwise         = 9
 
 instance Encodable VStr where
-    encode end (VStr str) =
-        encode end (VInt $ fi $ length str) <> BS.pack str
-
-    encode end (VBStr bs) =
-        encode end (VInt $ fi $ BSR.length bs) <> bs
+    encode end (VStr bs) =
+        encode end (fi (BSR.length bs) :: VInt) <> bs
 
 instance Decodable VStr where
     decoder = do
-        VInt len <- decoder :: Decoder VInt
-        bs <- bsD $ fromInteger len
-        return $ VStr $ BS.unpack bs
+        len <- decoder :: Decoder VInt
+        bs <- bsD (fi len)
+        return $ vbstr bs
 
 instance Sizeable VStr where
     sizeOf (VStr str) =
-        sizeOf (VInt (fi (length str))) + length str
-
-    sizeOf (VBStr bs) =
-        sizeOf (VInt (fi (BSR.length bs))) + BSR.length bs
+        sizeOf (fi len :: VInt) + len
+        where len = BSR.length str
 
 serv_type_map :: [(NodeServiceTypeSingle, Word64)]
 serv_type_map = [
@@ -304,12 +306,12 @@ instance Decodable MsgHead where
 -- vint + list
 vlistD :: Decoder t -> Decoder [t]
 vlistD elemD = do
-    VInt len <- decoder
+    len <- decoder :: Decoder VInt
     listD (fi len) elemD
 
 encodeVList :: Encodable t => Endian -> [t] -> ByteString
 encodeVList end list =
-    encode end (VInt $ fi $ length list) <> encode end list
+    encode end (fi (length list) :: VInt) <> encode end list
 
 payloadCheck :: ByteString -> ByteString
 payloadCheck = BS.take 4 . sha256 . sha256

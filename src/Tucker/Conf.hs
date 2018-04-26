@@ -22,7 +22,7 @@ data NodeServiceTypeSingle
     | TCKR_NODE_BLOOM
     | TCKR_NODE_WITNESS deriving (Show, Eq)
 
-data NodeServiceType = NodeServiceType [NodeServiceTypeSingle] deriving (Show, Eq)
+newtype NodeServiceType = NodeServiceType [NodeServiceTypeSingle] deriving (Show, Eq)
 
 type Timestamp = Word32
 

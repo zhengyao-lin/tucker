@@ -16,7 +16,7 @@ import Tucker.Enc
 -- tRecvNonBlocking
 -- tClose
 
-data Transport =
+newtype Transport =
     Transport {
         handle :: Handle
     }

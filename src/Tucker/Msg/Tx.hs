@@ -116,7 +116,7 @@ instance NFData TxOutput where
 nullTxOutput = TxOutput { value = -1, pk_script = BSR.empty }
 
 -- TxWitness is a list of stack items
-data TxWitness =
+newtype TxWitness =
     TxWitness [ByteString] deriving (Eq, Show)
 
 instance NFData TxWitness where
@@ -182,7 +182,7 @@ instance Encodable TxInput where
     }) =
         mconcat [
             e prev_out,
-            e (VBStr sig_script),
+            e (vbstr sig_script),
             e seqn
         ]
         where
@@ -209,7 +209,7 @@ instance Sizeable TxInput where
         seqn = seqn
     }) =
         sizeOf prev_out +
-        sizeOf (VBStr sig_script) +
+        sizeOf (vbstr sig_script) +
         sizeOf seqn
 
 instance Encodable TxOutput where
@@ -219,7 +219,7 @@ instance Encodable TxOutput where
     }) =
         mconcat [
             e value,
-            e (VBStr pk_script)
+            e (vbstr pk_script)
         ]
         where
             e :: Encodable t => t -> ByteString
@@ -240,11 +240,11 @@ instance Sizeable TxOutput where
         value = value,
         pk_script = pk_script
     }) =
-        sizeOf value + sizeOf (VBStr pk_script)
+        sizeOf value + sizeOf (vbstr pk_script)
 
 instance Encodable TxWitness where
     encode end (TxWitness items) =
-        encodeVList end $ map VBStr items
+        encodeVList end $ map vbstr items
 
 instance Decodable TxWitness where
     decoder =
@@ -254,7 +254,7 @@ instance Decodable TxWitness where
 instance Sizeable TxWitness where
     sizeOf (TxWitness items) =
         sizeOf (VInt (fi (length items))) +
-        sum (map (sizeOf . VBStr) items)
+        sum (map (sizeOf . vbstr) items)
 
 instance MsgPayload TxPayload
 
