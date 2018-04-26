@@ -124,8 +124,8 @@ nodeDefaultActionList = [
         NormalAction defaultHandler
     ]
 
--- upon receiving a new message
--- nodeProcMsg route the message through the action_list
+-- passes the new message along the action handler list
+-- and adjust the new action list by need(e.g. delete certain action)
 nodeProcMsg :: MainLoopEnv -> Node -> MsgHead -> IO ()
 nodeProcMsg env node msg = do
     -- prepend new actions
@@ -137,7 +137,7 @@ nodeProcMsg env node msg = do
     -- processed action result is appended to exec_res
     -- continue indicates whether the execution is to be continued
     let proc = \orig@(exec_res, continue) action -> do
-            if continue then do
+            if continue then
                 case action of
                     NormalAction handler -> do
                         res <- handler env node msg
@@ -159,7 +159,7 @@ nodeProcMsg env node msg = do
     (exec_res, _) <- foldM proc ([], True) current_alist
 
     let exec_count = length exec_res
-        exec_alist = [ v | Just v <- exec_res ]
+        exec_alist = maybeCat exec_res
         new_alist = exec_alist ++ drop exec_count current_alist
 
     setA (action_list node) new_alist

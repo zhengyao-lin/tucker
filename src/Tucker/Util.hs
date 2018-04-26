@@ -22,6 +22,7 @@ import Control.Exception
 import Control.Concurrent
 import Control.Monad.Loops
 import Control.Monad.Trans
+import Control.Concurrent.Thread.Delay
 import qualified Control.Monad.Trans.Maybe as MT
 
 import Tucker.Error
@@ -387,3 +388,7 @@ isNothing _ = False
 
 waitUntilIO :: IO Bool -> IO ()
 waitUntilIO = (yield `untilM_`)
+
+yieldWait :: IO ()
+yieldWait =
+    delay 100000 -- 100ms

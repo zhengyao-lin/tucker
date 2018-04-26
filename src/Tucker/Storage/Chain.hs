@@ -24,6 +24,7 @@ import Tucker.Util
 import Tucker.Auth
 import Tucker.Conf
 import Tucker.Error
+import Tucker.Signal
 import Tucker.DeepSeq
 
 import Tucker.Storage.Tx
@@ -81,9 +82,6 @@ initBlockChain conf@(TCKRConf {
         bc_tx_state = bc_tx_state,
         bc_fork_state = bc_fork_state
     }
-
-    -- lift $ tmpFix tmp
-    -- lift $ forever yield
 
     return tmp
 
@@ -437,13 +435,13 @@ addBlocks proc bc (block:blocks) = do
 
     new_bc `seq` addBlocks proc new_bc blocks
 
--- test & save chain to the disk
-trySyncChain :: BlockChain -> IO BlockChain
-trySyncChain bc@(BlockChain {
+-- push & fix a certain part of chain back to the database(from which no branching is possible)
+tryFlushChain :: BlockChain -> IO BlockChain
+tryFlushChain bc@(BlockChain {
     bc_chain = chain,
     bc_tx_state = tx_state,
     bc_fork_state = fork_state
-}) = do
+}) = noStop $ do
     mres <- tryFixBranch chain
 
     case mres of
@@ -900,7 +898,7 @@ addBlockFail bc@(BlockChain {
             else do
                 -- tLnM "collect orphans"
                 -- not orphan, collect other orphan
-                collectOrphan bc >>= trySyncChain
+                collectOrphan bc >>= tryFlushChain
 
 reject :: String -> a
 reject msg = throw $ TCKRError msg

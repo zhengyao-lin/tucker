@@ -184,19 +184,15 @@ instance NodeTask NullTask where
 
 envMsg :: MainLoopEnv -> String -> IO ()
 envMsg env msg = do
-    -- force eval
-    -- let msg' = BS.pack ("env: " ++ msg)
-
     tLnM ("env: " ++ msg)
-
-    -- LK.with (io_lock env) $ BS.putStrLn msg'
-
-    -- appA (++ [ "env: " ++ msg ]) (io_buf env)
-    -- putStrLn' $ "env: " ++ msg
 
 envWarn :: MainLoopEnv -> String -> IO ()
 envWarn env msg =
     tLnM (wss (Color Yellow False) ("env: " ++ msg))
+
+envErr :: MainLoopEnv -> String -> IO ()
+envErr env msg =
+    tLnM (wss (Color Red True) ("env: " ++ msg))
 
 envInfo :: MainLoopEnv -> String -> IO ()
 envInfo env msg =

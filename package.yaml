@@ -53,6 +53,7 @@ dependencies:
 - ansi-terminal
 - binary
 - cpu
+- unix
 
 library:
   source-dirs: src

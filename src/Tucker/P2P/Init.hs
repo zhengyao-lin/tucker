@@ -141,7 +141,7 @@ mainLoop conf = runResourceT $ do
     -- setA (node_list env) init_nodes
 
     -- wait until enough nodes are connected
-    lift $ yield `untilM_` ((>= envConf env tckr_min_node) <$> length <$> envAliveNodes env)
+    lift $ yieldWait `untilM_` ((>= envConf env tckr_min_node) <$> length <$> envAliveNodes env)
 
     lift $ envMsg env "boostrap done"
 

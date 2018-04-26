@@ -11,6 +11,7 @@ import System.Environment
 import Tucker.Conf
 import Tucker.Util
 import Tucker.Auth
+import Tucker.Signal
 import Tucker.P2P.Init
 import Tucker.Storage.Util
 
@@ -31,6 +32,6 @@ main = do
     conf <- tucker_default_conf_testnet3 path
 
     mainLoop conf
-    forever yield
+    forever yieldWait
 
     -- runTestTT chainTest3
