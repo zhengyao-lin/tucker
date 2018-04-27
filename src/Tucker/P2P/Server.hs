@@ -223,9 +223,6 @@ handshake env node = do
     } <- nodeExpectOneMsg env node
     
     -- decode peer's version and check
-
-    let decode = doDecode (decoder :: Decoder VersionPayload) LittleEndian
-
     {-
     
     7D110100 version
@@ -239,7 +236,7 @@ handshake env node = do
 
     -}
 
-    case decode payload of
+    case decodeLE payload of
         (Left err, _) ->
             throw $ TCKRError $ "version decode failed: " ++ show err ++ ", " ++ show payload
 

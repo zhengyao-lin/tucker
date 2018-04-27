@@ -315,7 +315,7 @@ vword2bsBE :: Integer -> ByteString
 vword2bsBE = encodeVWord BigEndian
 
 -- decoding
-newtype Decoder r = Decoder { doDecode :: Endian -> ByteString -> (Either TCKRError r, ByteString) }
+newtype Decoder r = Decoder { decode_proc :: Endian -> ByteString -> (Either TCKRError r, ByteString) }
 
 instance Functor Decoder where
     -- fmap f (Parser ps) = Parser $ \p -> [ (f a, b) | (a, b) <- ps p ]
@@ -346,7 +346,7 @@ instance Monad Decoder where
     Decoder d >>= f =
         Decoder $ \end bs ->
             case d end bs of
-                (Right r, rest) -> doDecode (f r) end rest
+                (Right r, rest) -> decode_proc (f r) end rest
                 (Left err, rest) -> (Left err, rest)
 
 instance Alternative Decoder where
@@ -367,12 +367,12 @@ instance MonadThrow Decoder where
 instance MonadCatch Decoder where
     catch d proc =
         Decoder $ \end bs ->
-            case doDecode d end bs of
+            case decode_proc d end bs of
                 r@(Right _, _) -> r
                 r@(Left exc, _) ->
                     case fromException $ toException exc of
                         Nothing -> r
-                        Just e -> doDecode (proc e) end bs
+                        Just e -> decode_proc (proc e) end bs
 
 class Decodable t where
     decoder :: Decoder t
@@ -384,7 +384,7 @@ class Decodable t where
     decoderBE = Decoder $ \_ -> decodeBE
 
     decode :: Endian -> ByteString -> (Either TCKRError t, ByteString)
-    decode = doDecode decoder
+    decode = decode_proc decoder
 
     decodeLE :: ByteString -> (Either TCKRError t, ByteString)
     decodeLE = decode LittleEndian
@@ -493,7 +493,7 @@ quota :: Int -> Decoder t -> Decoder t
 quota len d =
     Decoder $ \end bs ->
         let part = BSR.take len bs
-            (res, rest) = doDecode d end part
+            (res, rest) = decode_proc d end part
         in (res, rest <> BSR.drop len bs)
 
 instance Decodable Placeholder where

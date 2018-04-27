@@ -120,6 +120,10 @@ maybeToBool :: Maybe a -> Bool
 maybeToBool (Just _) = True
 maybeToBool Nothing = False
 
+listToMaybe :: [a] -> Maybe a
+listToMaybe (a:_) = Just a
+listToMaybe [] = Nothing
+
 fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral
 
