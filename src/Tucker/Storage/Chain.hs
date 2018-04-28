@@ -516,6 +516,8 @@ verifyInput bc@(BlockChain {
             prev_out = outp@(OutPoint prev_txid out_idx)
         }) = tx_in tx !! in_idx
 
+    -- tLnM (show outp)
+
     -- :: UTXOValue
     uvalue <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
         lookupUTXO tx_state outp

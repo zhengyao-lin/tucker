@@ -118,7 +118,7 @@ nodeRecvOneMsgNonBlocking env node = do
 nodeExpectOneMsg :: MainLoopEnv -> Node -> IO MsgHead
 nodeExpectOneMsg env node =
     nodeRecvOneMsg env node (`tRecvOneMsg` timeout_s env)
-        (throw (TCKRError "recv timeout"))
+        (throwMT "recv timeout")
 
 -- receive one full message from buffer
 -- timeout in sec

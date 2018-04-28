@@ -449,11 +449,12 @@ parseVersionByte _ = Nothing
 parseWitnessProgram :: [ScriptOp] -> Maybe (ByteString)
 parseWitnessProgram [ parseVersionByte -> Just 0, OP_PUSHDATA wit _ ] =
     if BSR.length wit == 20 ||
-       BSR.length wit == 32 then Just wit
+       BSR.length wit == 32 then
+        Just wit
     else
         Nothing
 
-parsetWitnessProgram _ = Nothing
+parseWitnessProgram _ = Nothing
 
 -- (sig script, pub key script)
 getScriptType :: [[ScriptOp]] -> ScriptType

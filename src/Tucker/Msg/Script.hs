@@ -818,8 +818,6 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     if script_enable_p2sh (script_conf s) then do
         redeem_script <- decodeAllLE redeem
 
-        -- tLnM (show redeem)
-
         (use_wit, wit) <-
             if shouldEnableWitness s then
                 case parseWitnessProgram redeem_script of

@@ -1,3 +1,5 @@
+{- only a partial implementation of ASN1 -}
+
 module Tucker.ASN1 where
 
 import Data.Word

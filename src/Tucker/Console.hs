@@ -40,38 +40,6 @@ three types of options:
 
 -}
 
--- newtype ListDecoder a r = ListDecoder { list_decode :: [a] -> (Either TCKRError r, [a]) }
-
--- instance Functor (ListDecoder a) where
---     fmap f d =
---         ListDecoder $ \lst ->
---             case list_decode d lst of
---                 (Right res, rest) -> (Right (f res), rest)
---                 (Left err, rest) -> (Left err, rest)
-
--- instance Applicative (ListDecoder a) where
---     pure res = ListDecoder $ \lst -> (Right res, lst)
-
---     d1 <*> d2 =
---         ListDecoder $ \lst ->
---             case list_decode d1 lst of
---                 (Right f, rest) ->
---                     case list_decode d2 rest of
---                         (Right r, rest) -> (Right (f r), rest)
---                         (Left err, rest) -> (Left err, rest)
-
---                 (Left err, rest) -> (Left err, rest)
-
--- instance Monad (ListDecoder a) where
---     return = pure
---     fail err = ListDecoder $ \lst -> (Left $ TCKRError err, lst)
-
---     d >>= f =
---         ListDecoder $ \lst ->
---             case list_decode d lst of
---                 (Right r, rest) -> list_decode (f r) rest
---                 (Left err, rest) -> (Left err, rest)
-
 -- if the option name is single-char, we are expecting a single hyphen before it
 data Option f
     = NoArg [String] f String

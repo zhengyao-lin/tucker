@@ -16,10 +16,9 @@ import Tucker.Enc
 -- tRecvNonBlocking
 -- tClose
 
-newtype Transport =
-    Transport {
-        handle :: Handle
-    }
+newtype Transport = Transport Handle
+
+getHandle (Transport handle) = handle
 
 tFromSocket :: Socket -> IO Transport
 tFromSocket sock = socketToHandle sock ReadWriteMode >>= pure . Transport
@@ -28,20 +27,20 @@ tFromHandle :: Handle -> IO Transport
 tFromHandle = return . Transport
 
 tSend :: Transport -> ByteString -> IO ()
-tSend = BSR.hPut . handle
+tSend = BSR.hPut . getHandle
 
 -- block until enough byte is received
 tRecv :: Transport -> Int -> IO ByteString
-tRecv = BSR.hGet . handle
+tRecv = BSR.hGet . getHandle
 
 tRecvSome :: Transport -> Int -> IO ByteString
-tRecvSome = BSR.hGetSome . handle
+tRecvSome = BSR.hGetSome . getHandle
 
 tRecvNonBlocking :: Transport -> Int -> IO ByteString
-tRecvNonBlocking = BSR.hGetNonBlocking . handle
+tRecvNonBlocking = BSR.hGetNonBlocking . getHandle
 
 tIsEnd :: Transport -> IO Bool
-tIsEnd = hIsEOF . handle
+tIsEnd = hIsEOF . getHandle
 
 tClose :: Transport -> IO ()
-tClose = hClose . handle
+tClose = hClose . getHandle
