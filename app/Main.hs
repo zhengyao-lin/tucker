@@ -4,6 +4,7 @@ import Data.Word
 
 import Control.Monad
 import Control.Concurrent
+import Control.Concurrent.Thread.Delay
 
 import System.Mem
 import System.Environment
@@ -89,6 +90,8 @@ main = do
             else do
                 conf <- flagsToConf flags
                 mainLoop conf
+
+                -- delay (600 * 1000 * 1000)
                 forever yieldWait
 
         Left err -> do

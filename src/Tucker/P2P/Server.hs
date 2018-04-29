@@ -245,8 +245,6 @@ handshake env node = do
             user_agent = user_agent,
             vers_serv = vers_serv
         }), _) -> do
-            nodeMsg env node $ "version received: " ++ show vers ++ vstrToString user_agent
-
             net_addr <- sockAddrToNetAddr (sock_addr node) vers_serv
 
             -- update vp
@@ -266,6 +264,8 @@ handshake env node = do
 
             -- handshake finished
             -- nodeMsg env node "handshaking succeeded"
+
+            nodeMsg env node $ "handshaked: " ++ nodeClientInfo new_node
 
             return new_node
 

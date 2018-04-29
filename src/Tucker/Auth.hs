@@ -41,6 +41,7 @@ import System.IO.Unsafe
 import Control.Monad.Loops
 
 import Tucker.Enc
+import Tucker.ECC
 import Tucker.Conf
 import Tucker.Util
 import Tucker.ASN1
@@ -141,15 +142,6 @@ base58decCheck enc = do
     else
         Left $ TCKRError "base58dec check failed"
 
-newtype ECCPrivateKey = ECCPrivateKey Integer deriving (Eq, Show)
-data ECCPublicKey = ECCPublicKey {
-        compressed :: Bool,
-        x_coord    :: Integer,
-        y_coord    :: Integer
-    } deriving (Eq, Show)
-
-data ECCSignature = ECCSignature Integer Integer deriving (Eq, Show)
-
 type WIF = String
 type Address = String
 
@@ -158,100 +150,6 @@ type Address = String
 -- priv -> wif
 -- wif -> priv
 -- pub -> addr
-
-instance Encodable ECCPublicKey where
-    -- q = 2^256
-    -- m = 256
-    -- finite field 𝔽p
-    encode _ (ECCPublicKey comp x y) =
-        if comp then
-            case tucker_curve of
-                CurveFP (CurvePrime p curve) ->
-                    BSR.cons
-                        (if y `mod` 2 == 0 then 0x02 else 0x03)
-                        (encodeInt 32 BigEndian x)
-
-                _ -> error "unsupported curve type"
-        else
-            BSR.cons 0x04
-                (encodeInt 32 BigEndian x <>
-                 encodeInt 32 BigEndian y)
-
-    -- encode _ ECCPrivatePointO = bchar 0x00
-
-instance Decodable ECCPublicKey where
-    decoder = do
-        i <- byteD
-
-        if i `elem` [ 0x04, 0x06, 0x07 ] then do
-            x <- bs2vwordBE <$> bsD 32
-            y <- bs2vwordBE <$> bsD 32
-
-            -- extra check for evenness
-            assertMT "hybrid public key unmatched evenness" $
-                (i /= 0x06 || even y) &&
-                (i /= 0x07 || odd y)
-
-            return $ ECCPublicKey False x y
-        else do
-            y_bit <- case i of
-                0x02 -> return 0
-                0x03 -> return 1
-                _    -> fail ("illegal initial byte " ++ show i)
-            
-            x <- bs2vwordBE <$> bsD 32
-
-            y <- case tucker_curve of
-                CurveFP (CurvePrime p curve) -> do
-                    let a = ecc_a curve
-                        b = ecc_b curve
-                        alpha = mod (x ^ 3 + a * x + b) p
-                    
-                    case modSqrt alpha p of
-                        Just beta ->
-                            if beta `mod` 2 == y_bit then
-                                return beta
-                            else
-                                return (p - beta)
-
-                        Nothing -> fail "failed to find a solution"
-
-                _ -> fail "unsupported curve type"
-
-            return $ ECCPublicKey True x y
-
-instance Encodable ECCSignature where
-    -- encode a signature using ASN1 by the following structure
-    -- SEQUENCE { r INTEGER, s INTEGER }
-    encode end (ECCSignature r s) =
-        encode end $ ASN1Sequence [
-            ASN1Integer r,
-            ASN1Integer s            
-        ]
-
-instance Decodable ECCSignature where
-    decoder = do
-        -- a DER encoding here
-        -- a sequence starting with 0x30 <size>
-        bs <- getD
-        res <- decoder
-
-        case res of
-            ASN1Sequence [ ASN1Integer r, ASN1Integer s ]
-                -> return (ECCSignature (toUnsigned r) (toUnsigned s))
-
-            _ -> fail ("wrong DER encoding result: " ++ show res ++
-                       ", raw: " ++ show bs)
-
-        -- beginWithByteD 0x30
-
-        -- all <- allD
-        -- case decodeASN1' DER all of
-        --     Right [ Start Sequence, IntVal r, IntVal s, End Sequence ]
-        --         -> return $ ECCSignature r s
-        --     Right res
-        --         -> fail ("wrong DER encoding result: " ++ show res)
-        --     Left err -> fail ("illegal DER encoding: " ++ show err)
 
 {-
 
@@ -265,93 +163,53 @@ instance Decodable ECCSignature where
 
 -}
 
-priv2pub :: ECCPrivateKey -> ECCPublicKey
-priv2pub (ECCPrivateKey num) =
-    let Point x y = generateQ tucker_curve num in
-    ECCPublicKey True x y
+-- exportPriv Priv -> ByteString
+-- importPriv ByteString -> Maybe Priv
 
-priv2wif :: TCKRConf -> ECCPrivateKey -> WIF
-priv2wif conf (ECCPrivateKey num) =
-    let priv_raw = vword2bsBE num
+-- exportPub Pub -> ByteString
+-- importPub ByteString -> Maybe Pub
+
+privToWIF :: TCKRConf -> ECCPrivateKey -> WIF
+privToWIF conf priv =
+    let priv_raw = encodeBE priv
         priv_proc = BSR.cons (tckr_wif_pref conf) priv_raw
     in BS.unpack $ base58encCheck priv_proc
 
-wif2priv :: TCKRConf -> WIF -> Either TCKRError ECCPrivateKey
-wif2priv conf wif = do
+wifToPriv :: TCKRConf -> WIF -> Either TCKRError ECCPrivateKey
+wifToPriv conf wif = do
     priv_proc <- base58decCheck $ BS.pack wif
     
     if BSR.head priv_proc /= (tckr_wif_pref conf) then
         Left $ TCKRError "illegal WIF"
-    else do
-        let priv_raw = BSR.drop 1 priv_proc
-        return $ ECCPrivateKey $ bs2vwordBE priv_raw
+    else
+        -- let priv_raw = BSR.drop 1 priv_proc in
+        decodeAllBE (BSR.drop 1 priv_proc)
+        -- case importPriv priv_raw of
+        --     Just priv -> Right priv
+        --     Nothing -> Left "illegal private key format"
 
--- using default compressing encoding
-pub2addr :: TCKRConf -> ECCPublicKey -> Address
-pub2addr conf pub =
+pubToAddr :: TCKRConf -> ECCPublicKey -> Address
+pubToAddr conf pub =
     BS.unpack $ base58encCheck pub_hash
     where
         pub_raw = encodeBE pub
                             -- main TCKRConf byte
-        pub_hash = BSR.cons (tckr_pub_pref conf) $ ripemd160 $ sha256 pub_raw
+        pub_hash = BSR.cons (tckr_addr_pref conf) $ ripemd160 $ sha256 pub_raw
 
-addr2hash :: TCKRConf -> Address -> Either TCKRError ByteString
-addr2hash conf addr = do
+addrToPubHash :: TCKRConf -> Address -> Either TCKRError ByteString
+addrToPubHash conf addr = do
     pub_hash_raw <- base58decCheck $ BS.pack addr
 
-    if BSR.head pub_hash_raw /= tckr_pub_pref conf then
+    if BSR.head pub_hash_raw /= tckr_addr_pref conf then
         Left $ TCKRError "illegal address"
     else
         return (BSR.drop 1 pub_hash_raw)
 
--- encode public key to ASN.1 encoding
--- specification at https://www.secg.org/SEC1-Ver-1.0.pdf
-pub2der :: ECCPublicKey -> ByteString
-pub2der pub =
-    let raw = encodeBE pub
-        id = OID [ 1, 2, 840, 10045, 2, 1 ] -- TODO: specific for secp256k1
-        param = OID [ 1, 3, 132, 0, 10 ] in
+-- gen :: TCKRConf -> IO (WIF, Address)
+-- gen conf = do
+--     (pub, priv) <- genRaw
 
-    encodeASN1' DER [
-            Start Sequence,
-                Start Sequence, id, param, End Sequence,
-                BitString (BitArray (fi $ BSR.length raw * 8) raw),
-            End Sequence
-        ]
+--     let addr = pubToAddr conf pub
+--         wif = privToWIF conf priv
 
-genRaw :: IO (ECCPublicKey, ECCPrivateKey)
-genRaw = do
-    (PublicKey _ pt, PrivateKey _ num) <- generate tucker_curve
-    let Point x y = pt
-    return (ECCPublicKey True x y, ECCPrivateKey num)
-
-gen :: TCKRConf -> IO (WIF, Address)
-gen conf = do
-    (pub, priv) <- genRaw
-
-    let addr = pub2addr conf pub
-        wif = priv2wif conf priv
-
-    return (wif, addr)
-
--- hash & sign
-sign :: ECCPrivateKey -> ByteString -> IO ECCSignature
-sign (ECCPrivateKey num) msg = do
-    let privk = PrivateKey tucker_curve num
-    Signature r s <- ECDSA.sign privk NoHash256 msg
-    return $ ECCSignature r s
-
-verify :: ECCPublicKey -> ByteString -> ECCSignature -> Bool
-verify (ECCPublicKey _ x y) msg (ECCSignature r s) =
-    ECDSA.verify NoHash256 pubk (Signature r s) msg
-    where pubk = PublicKey tucker_curve (Point x y)
-
-signDER :: ECCPrivateKey -> ByteString -> IO ByteString
-signDER priv msg = do
-    sig <- sign priv msg
-    return $ encodeBE sig
-
-verifyDER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Bool
-verifyDER pub msg sig_enc = do
-    sig <- decodeAllBE sig_enc
-    return $ verify pub msg sig
+--     return (wif, addr)

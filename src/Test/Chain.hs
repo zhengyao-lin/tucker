@@ -120,6 +120,21 @@ chainTest3 = TestCase $ do
 
         return ()
 
+-- profiling
+chainTest4 = TestCase $ do
+    conf <- tucker_default_conf_testnet3 (Just "/media/rodlin/2A9967F720ACE685/tucker-data")
+    conf <- return $ conf {
+            tckr_max_tree_insert_depth = 1000
+        }
+
+    blocks_raw <- BS.readFile "./test_blocks"
+
+    let blocks = runDecoderFailLE (listD 500 (decoder :: Decoder Block)) blocks_raw
+
+    withBlockChain conf $ \bc -> do
+        addBlocks add_block_common_proc bc blocks
+        return ()
+
 chainTests = TestList [
         TestLabel "block chain test 1" chainTest1,
         TestLabel "block chain test 2" chainTest2

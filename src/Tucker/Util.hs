@@ -391,7 +391,7 @@ isNothing Nothing = True
 isNothing _ = False
 
 waitUntilIO :: IO Bool -> IO ()
-waitUntilIO = (yield `untilM_`)
+waitUntilIO = (yieldWait `untilM_`)
 
 yieldWait :: IO ()
 yieldWait =

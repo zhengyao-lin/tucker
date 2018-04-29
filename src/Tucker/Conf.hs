@@ -4,6 +4,7 @@ import Data.Hex
 import Data.Int
 import Data.Word
 import Data.Char
+import Data.List
 
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
@@ -20,9 +21,19 @@ data NodeServiceTypeSingle
     = TCKR_NODE_NETWORK
     | TCKR_NODE_GETUTXO
     | TCKR_NODE_BLOOM
-    | TCKR_NODE_WITNESS deriving (Show, Eq)
+    | TCKR_NODE_WITNESS deriving (Eq)
 
-newtype NodeServiceType = NodeServiceType [NodeServiceTypeSingle] deriving (Show, Eq)
+newtype NodeServiceType = NodeServiceType [NodeServiceTypeSingle] deriving (Eq)
+
+instance Show NodeServiceTypeSingle where
+    show TCKR_NODE_NETWORK = "network"
+    show TCKR_NODE_GETUTXO = "getutxo"
+    show TCKR_NODE_BLOOM = "bloom"
+    show TCKR_NODE_WITNESS = "witness"
+
+instance Show NodeServiceType where
+    show (NodeServiceType servs) =
+        intercalate ", " (map show servs)
 
 type Timestamp = Word32
 
@@ -78,7 +89,7 @@ data TCKRConf =
         tckr_user_agent      :: String,
 
         tckr_wif_pref        :: Word8,
-        tckr_pub_pref        :: Word8,
+        tckr_addr_pref        :: Word8,
         tckr_magic_no        :: BSR.ByteString,
         tckr_listen_port     :: Word16,
 
@@ -203,13 +214,13 @@ tucker_default_conf_mainnet mpath = do
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 
         tckr_wif_pref = 0x80,
-        tckr_pub_pref = 0x00,
+        tckr_addr_pref = 0x00,
         tckr_magic_no = BSR.pack [ 0xf9, 0xbe, 0xb4, 0xd9 ],
         tckr_listen_port = 8333,
 
         tckr_genesis_raw = hex2bs "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4A29AB5F49FFFF001D1DAC2B7C0101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000",
 
-        tckr_trans_timeout = 7, -- sec
+        tckr_trans_timeout = 4, -- sec
         tckr_bootstrap_host = [ "seed.btc.petertodd.org" ],
 
         tckr_min_node = 8, -- minimum number of nodes to function
@@ -306,7 +317,7 @@ tucker_default_conf_testnet3 mpath = do
     conf <- tucker_default_conf_mainnet mpath
     return $ conf {
         tckr_wif_pref = 0xef,
-        tckr_pub_pref = 0x6f,
+        tckr_addr_pref = 0x6f,
         tckr_magic_no = BSR.pack [ 0x0b, 0x11, 0x09, 0x07 ],
         tckr_listen_port = 18333,
 

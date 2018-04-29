@@ -348,8 +348,8 @@ scheduleFetch env init_hashes callback = do
                         let clear_fields = drop old_added $ take new_added tarray
 
                         -- clear corresponding fields to free some memory
-                        -- and pass alone the blocks to add to the chain
-                        -- hopefully the block list is stored in stack so it can be free'd soon
+                        -- and add the blocks to the chain
+                        -- hopefully the block list is stored in the stack so it can be free'd soon
                         let readNClear =
                                 forM clear_fields $ \(_, blockv) -> do
                                     (Just block) <- getA blockv

@@ -54,6 +54,7 @@ dependencies:
 - binary
 - cpu
 - unix
+- secp256k1
 
 library:
   source-dirs: src

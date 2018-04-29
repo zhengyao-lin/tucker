@@ -145,7 +145,7 @@ mainLoop conf = runResourceT $ do
 
     lift $ envMsg env "boostrap done"
 
-    -- keep the resource, never exit
+    -- gc thread keeps the resource key and never exits
     gc_tid <- resourceForkIO $ lift $ gcLoop env
 
     -- bootstrap finished, start sync with 3 nodes

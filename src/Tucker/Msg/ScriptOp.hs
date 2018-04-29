@@ -502,6 +502,6 @@ stdPkScriptP2PKH :: TCKRConf -> Address -> [ScriptOp]
 stdPkScriptP2PKH conf addr =
     [
         OP_DUP, OP_HASH160,
-        OP_PUSHDATA (either (error . show) id (addr2hash conf addr)) Nothing,
+        OP_PUSHDATA (either (error . show) id (addrToPubHash conf addr)) Nothing,
         OP_EQUALVERIFY, OP_CHECKSIG
     ]

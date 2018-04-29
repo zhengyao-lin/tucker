@@ -492,3 +492,16 @@ envAddBlocks env node =
 envForkEnabled :: MainLoopEnv -> String -> IO Bool
 envForkEnabled env name =
     getA (block_chain env) >>= (`shouldEnableFork` name)
+
+-- get node client info in string
+nodeClientInfo :: Node -> String
+nodeClientInfo node =
+    let VersionPayload {
+            cli_vers = vers,
+            user_agent = user_agent,
+            vers_serv = vers_serv
+        } = vers_payload node
+
+    in
+        -- /<user-agent>/<vers>/<service>
+        vstrToString user_agent ++ show vers ++ "/" ++ show vers_serv

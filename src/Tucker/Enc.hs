@@ -399,10 +399,16 @@ class Decodable t where
     decodeAllBE = fst . decodeBE
 
     decodeFailLE :: ByteString -> t
-    decodeFailLE = (either throw id) . decodeAllLE
+    decodeFailLE = either throw id . decodeAllLE
 
     decodeFailBE :: ByteString -> t
-    decodeFailBE = (either throw id) . decodeAllBE
+    decodeFailBE = either throw id . decodeAllBE
+
+runDecoderFailLE :: Decoder t -> ByteString -> t
+runDecoderFailLE d = either throw id . fst . decode_proc d LittleEndian
+
+runDecoderFailBE :: Decoder t -> ByteString -> t
+runDecoderFailBE d = either throw id . fst . decode_proc d BigEndian
 
 intD :: Integral t => Int -> Decoder t
 intD nbyte = Decoder $ \end bs ->
