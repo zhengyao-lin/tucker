@@ -324,6 +324,7 @@ tucker_default_conf_testnet3 mpath = do
             "testnet-seed.bluematt.me",
             "testnet-seed.bitcoin.jonasschnelli.ch",
             "seed.tbtc.petertodd.org",
+            "seed.testnet.bitcoin.sprovoost.nl",
             "testnet-seed.bitcoin.schildbach.de"    
         ],
 

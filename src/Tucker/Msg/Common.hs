@@ -264,7 +264,7 @@ instance Encodable MsgHead where
             e :: Encodable t => t -> Builder
             e = encodeB end
 
-    encode _ (LackData _) = error "encoding LackData flag"
+    encodeB _ (LackData _) = error "encoding LackData flag"
 
 instance Decodable MsgHead where
     decoder = do
