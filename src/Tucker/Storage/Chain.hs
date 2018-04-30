@@ -438,21 +438,24 @@ addBlocks proc bc (block:blocks) = do
 -- push & fix a certain part of chain back to the database(from which no branching is possible)
 tryFlushChain :: BlockChain -> IO BlockChain
 tryFlushChain bc@(BlockChain {
+    bc_conf = conf,
     bc_chain = chain,
     bc_tx_state = tx_state,
     bc_fork_state = fork_state
-}) = noStop $ do
-    mres <- tryFixBranch chain
+}) =
+    if tckr_mem_only conf then return bc -- no flushing back
+    else noStop $ do
+        mres <- tryFixBranch chain
 
-    case mres of
-        Nothing -> return bc -- no change
-        Just chain -> do
-            -- blockchain flushed back to disk
-            -- sync utxo
-            syncUTXO tx_state
-            syncForkState fork_state
-            
-            return $ bc { bc_chain = chain }
+        case mres of
+            Nothing -> return bc -- no change
+            Just chain -> do
+                -- blockchain flushed back to disk
+                -- sync utxo
+                syncTxState tx_state
+                syncForkState fork_state
+                
+                return $ bc { bc_chain = chain }
 
 genScriptConf :: BlockChain -> VerifyConf -> UTXOValue -> IO ScriptConf
 genScriptConf bc ver_conf utxo_value =
@@ -671,9 +674,9 @@ verifyBlockTx bc branch block = do
 
                 verify in_parallel in_idx = do
                     tM $ wss (Color Blue False) $
-                         printf "[verifying input %d of tx %d %s%s]"
-                                in_idx idx (show (txid tx))
-                                (if in_parallel then "(in parallel)" else "")
+                         "[verifying input " ++ show in_idx ++ " of tx " ++
+                         show idx ++ " " ++ show (txid tx) ++
+                         (if in_parallel then "(in parallel)" else "") ++ "]"
 
                     verifyInput bc tx_state ver_conf branch tx in_idx
 

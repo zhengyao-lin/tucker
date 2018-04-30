@@ -37,7 +37,7 @@ class IOMap a k v | a -> k, a -> v where
     countIO :: Integral t => a -> IO t
     countIO a = foldKeyIO a 0 (\n _ -> return (n + 1))
 
-data CacheMap a k v = CacheMap (Atom (MP.Map ByteString (Maybe v))) a
+data CacheMap a k v = CacheMap (Atom (MP.Map k (Maybe v))) a
 type CacheMapWrap a k v = CacheMap (a k v) k v
 
 wrapCacheMap :: a -> IO (CacheMap a k v)
@@ -45,31 +45,31 @@ wrapCacheMap parent = do
     mmap <- newA MP.empty
     return (CacheMap mmap parent)
 
-syncCacheMap :: (Decodable k, IOMap a k v) => CacheMap a k v -> IO ()
+syncCacheMap :: IOMap a k v => CacheMap a k v -> IO ()
 syncCacheMap (CacheMap mmap parent) = do
     map <- appA_ (const MP.empty) mmap
 
     forM_ (MP.toList map) $ \(k, mv) ->
         case mv of
-            Nothing -> deleteIO parent (decodeFailLE k)
-            Just v -> insertIO parent (decodeFailLE k) v
+            Nothing -> deleteIO parent k
+            Just v -> insertIO parent k v
 
-unwrapCacheMap :: (Decodable k, IOMap a k v) => CacheMap a k v -> IO a
+unwrapCacheMap :: IOMap a k v => CacheMap a k v -> IO a
 unwrapCacheMap bmap@(CacheMap _ parent) =
     syncCacheMap bmap >> return parent
 
-instance (Encodable k, Decodable k, IOMap a k v) => IOMap (CacheMap a k v) k v where
+instance (Ord k, IOMap a k v) => IOMap (CacheMap a k v) k v where
     lookupIO (CacheMap mmap parent) k = do
         map <- getA mmap
-        case MP.lookup (encodeLE k) map of
+        case MP.lookup k map of
             Nothing -> lookupIO parent k
             Just res -> return res
 
     insertIO (CacheMap mmap _) k v =
-        appA (MP.insert (encodeLE k) (Just v)) mmap >> return ()
+        appA (MP.insert k (Just v)) mmap >> return ()
 
     deleteIO (CacheMap mmap _) k =
-        appA (MP.insert (encodeLE k) Nothing) mmap >> return ()
+        appA (MP.insert k Nothing) mmap >> return ()
 
     foldKeyIO (CacheMap mmap parent) init proc = do
         map_var <- getA mmap >>= newA
@@ -77,7 +77,7 @@ instance (Encodable k, Decodable k, IOMap a k v) => IOMap (CacheMap a k v) k v w
         foldKeyIO parent init $ \init k -> do
             map <- getA map_var
 
-            case MP.lookup (encodeLE k) map of
+            case MP.lookup k map of
                 Nothing -> proc init k
                 Just Nothing -> return init -- deleted already
                 Just (Just _) -> proc init k

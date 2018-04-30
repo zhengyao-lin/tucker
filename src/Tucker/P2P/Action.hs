@@ -353,6 +353,8 @@ scheduleFetch env init_hashes callback = do
                         let readNClear =
                                 forM clear_fields $ \(_, blockv) -> do
                                     (Just block) <- getA blockv
+                                    -- EDIT ME
+                                    -- BSR.appendFile "test_blocks" (encodeLE block)
                                     setA blockv Nothing
                                     return block
                             

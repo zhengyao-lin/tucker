@@ -33,7 +33,7 @@ data VersionPayload =
 instance MsgPayload VersionPayload
 
 instance Encodable VersionPayload where
-    encode end (VersionPayload {
+    encodeB end (VersionPayload {
         cli_vers = cli_vers,
         vers_serv = vers_serv,
         timestamp = timestamp,
@@ -51,8 +51,8 @@ instance Encodable VersionPayload where
             e vers_serv,
             e timestamp,
             
-            BSR.drop 4 $ e addr_recv, -- drop 4 bytes from the head(timestamp field)
-            BSR.drop 4 $ e addr_from,
+            encodeB end $ BSR.drop 4 $ encode end addr_recv, -- drop 4 bytes from the head(timestamp field)
+            encodeB end $ BSR.drop 4 $ encode end addr_from,
 
             e vers_nonce,
             e user_agent,
@@ -60,8 +60,8 @@ instance Encodable VersionPayload where
             e relay
         ]
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
 instance Decodable VersionPayload where
     decoder = do

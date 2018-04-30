@@ -3,6 +3,8 @@ module Test.Chain where
 import Data.Word
 import qualified Data.ByteString.Char8 as BS
 
+import Control.Applicative
+
 import Test.Util
 import Test.HUnit
 import Test.Common
@@ -120,18 +122,19 @@ chainTest3 = TestCase $ do
 
         return ()
 
--- profiling
+-- for profiling
 chainTest4 = TestCase $ do
-    conf <- tucker_default_conf_testnet3 (Just "/media/rodlin/2A9967F720ACE685/tucker-data")
+    conf <- tucker_default_conf_testnet3 (Just "/media/rodlin/2A9967F720ACE685/tucker-data-1110184")
     conf <- return $ conf {
-            tckr_max_tree_insert_depth = 1000
+            tckr_mem_only = True
         }
 
     blocks_raw <- BS.readFile "./test_blocks"
 
-    let blocks = runDecoderFailLE (listD 500 (decoder :: Decoder Block)) blocks_raw
+    let blocks = runDecoderFailLE (many decoder :: Decoder [Block]) blocks_raw
 
     withBlockChain conf $ \bc -> do
+        tLnM "start adding blocks"
         addBlocks add_block_common_proc bc blocks
         return ()
 

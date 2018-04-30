@@ -125,6 +125,7 @@ data TCKRConf =
         tckr_fee_half_rate :: Integer,
 
         tckr_max_tree_insert_depth :: Int, -- max search depth when inserting a block
+        tckr_mem_only :: Bool, -- no write operation to the db
 
         tckr_fetch_dup_node  :: Int,
         -- number of duplicated nodes to fetch the same bunch of block
@@ -245,6 +246,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_known_inv_count = 8,
 
         tckr_max_tree_insert_depth = 32,
+        tckr_mem_only = False,
 
         tckr_max_getdata_batch = 500,
         -- receive 500 blocks a time(if inv is greater than that, trim the tail)

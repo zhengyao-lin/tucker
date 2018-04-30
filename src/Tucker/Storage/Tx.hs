@@ -92,7 +92,7 @@ data TxState u =
 
         -- from txid to (block hash, tx index)
         -- tx that are valid and accepted in blocks
-        bucket_tx      :: DBBucket Hash256 TxLocator,
+        bucket_tx      :: CacheMapWrap DBBucket Hash256 TxLocator,
 
         -- a set of unspent tx output
         -- tx in this set must be included in blocks
@@ -114,14 +114,12 @@ initTxState conf@(TCKRConf {
     tckr_bucket_tx_name = tx_name,
     tckr_bucket_utxo_name = utxo_name
 }) db = do
-    bucket_tx <- openBucket db tx_name
-    bucket_utxo <- openBucket db utxo_name
-
+    bucket_tx <- openBucket db tx_name >>= wrapCacheMap
+    utxo_map <- openBucket db utxo_name >>= wrapCacheMap
     -- utxo is cached because it needs to be
     -- sync'd it at the same time when chain is flushed back,
     -- otherwise some outpoints in utxo may be
     -- lost due to sudden exit(blockchain may be younger than utxo)
-    utxo_map <- wrapCacheMap bucket_utxo
 
     return $ TxState {
         tx_set_conf = conf,
@@ -237,6 +235,11 @@ lookupUTXO state outpoint = do
 -- lookup for a accepted txid
 findTxId :: TxState a -> Hash256 -> IO (Maybe TxLocator)
 findTxId = lookupIO . bucket_tx
+
+syncTxState :: UTXOMap a => TxState (UTXOArg (CacheMap a)) -> IO ()
+syncTxState state = do
+    syncUTXO state
+    syncCacheMap (bucket_tx state)
 
 syncUTXO :: UTXOMap a => TxState (UTXOArg (CacheMap a)) -> IO ()
 syncUTXO = syncCacheMap . utxo_map

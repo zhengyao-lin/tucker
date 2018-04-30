@@ -30,6 +30,7 @@ import Tucker.Util
 import Tucker.Error
 
 type ByteString = BSR.ByteString
+type Builder = BSB.Builder
 
 (<>) :: Monoid a => a -> a -> a
 (<>) = MND.mappend
@@ -45,7 +46,13 @@ data Placeholder = Placeholder
 data Endian = LittleEndian | BigEndian deriving (Show, Read, Eq)
 
 class Encodable t where
+    -- one of encodeB and encode must be defined
+
+    encodeB :: Endian -> t -> Builder
+    encodeB end a = BSB.byteString (encode end a)
+
     encode :: Endian -> t -> ByteString
+    encode end a = builderToBS (encodeB end a)
     
     encodeLE :: t -> ByteString
     encodeLE = encode LittleEndian
@@ -53,40 +60,79 @@ class Encodable t where
     encodeBE :: t -> ByteString
     encodeBE = encode BigEndian
 
+    encodeLEB :: t -> Builder
+    encodeLEB = encodeB LittleEndian
+
+    encodeBEB :: t -> Builder
+    encodeBEB = encodeB BigEndian
+
 instance Encodable Placeholder where
-    encode _ _ = BSR.empty
+    encodeB _ _ = mempty
+    encode _ _ = mempty
 
 instance Encodable ByteString where
+    encodeB _ = BSB.byteString
     encode _ = id
 
 instance Encodable Bool where
+    encodeB _ v = if v then bcharB 1 else bcharB 0
     encode _ v = if v then bchar 1 else bchar 0
 
 instance Encodable Char where
-    encode _ = bchar . ord
+    encodeB _ = bcharB . ord
 
 instance Encodable Int8 where
-    encode _ = bchar
+    encodeB _ = bcharB
 
 instance Encodable Word8 where
-    encode _ = bchar
+    encodeB _ = bcharB
 
 instance Encodable Int16 where
+    encodeB end i =
+        case end of
+            LittleEndian -> BSB.int16LE i
+            BigEndian -> BSB.int16BE i
+
     encode = encodeInt 2
 
 instance Encodable Int32 where
+    encodeB end i =
+        case end of
+            LittleEndian -> BSB.int32LE i
+            BigEndian -> BSB.int32BE i
+
     encode = encodeInt 4
 
 instance Encodable Int64 where
+    encodeB end i =
+        case end of
+            LittleEndian -> BSB.int64LE i
+            BigEndian -> BSB.int64BE i
+
     encode = encodeInt 8
 
 instance Encodable Word16 where
+    encodeB end i =
+        case end of
+            LittleEndian -> BSB.word16LE i
+            BigEndian -> BSB.word16BE i
+
     encode = encodeInt 2
 
 instance Encodable Word32 where
+    encodeB end i =
+        case end of
+            LittleEndian -> BSB.word32LE i
+            BigEndian -> BSB.word32BE i
+
     encode = encodeInt 4
 
 instance Encodable Word64 where
+    encodeB end i =
+        case end of
+            LittleEndian -> BSB.word64LE i
+            BigEndian -> BSB.word64BE i
+
     encode = encodeInt 8
 
 -- encode an integer with variable length
@@ -95,19 +141,24 @@ instance Encodable Integer where
     encode = encodeVInt
 
 instance Encodable a => Encodable [a] where
-    encode end = BSR.concat . (map (encode end))
+    encodeB end = mconcat . (map (encodeB end))
+    encode end = mconcat . (map (encode end))
 
 instance Encodable a => Encodable (PartialList a) where
+    encodeB end = encodeB end . FD.toList
     encode end = encode end . FD.toList
 
 instance (Encodable t1, Encodable t2) => Encodable (t1, t2) where
-    encode end (a, b) = encode end a <> encode end b
+    encodeB end (a, b) = encodeB end a <> encodeB end b
 
 instance (Encodable t1, Encodable t2, Encodable t3) => Encodable (t1, t2, t3) where
-    encode end (a, b, c) = encode end a <> encode end b <> encode end c
+    encodeB end (a, b, c) = encodeB end a <> encodeB end b <> encodeB end c
 
 bchar :: Integral t => t -> ByteString
 bchar = BSR.singleton . fromIntegral
+
+bcharB :: Integral t => t -> Builder
+bcharB = BSB.word8 . fromIntegral
 
 -- encode integer to the shortest possible encoding
 -- using 2's complement
@@ -148,8 +199,7 @@ encodeVWord end num =
         BigEndian -> BSR.dropWhile (== 0) res
     where res = encodeVInt' end (fi num)
 
-encodeFixed :: (Integral a, Integral b) => (b -> BSB.Builder) -> a -> ByteString
-encodeFixed t = LBSR.toStrict . BSB.toLazyByteString . t . fi
+builderToBS = LBSR.toStrict . BSB.toLazyByteString
 
 -- fast encode
 
@@ -186,17 +236,6 @@ fastEncodeWord64 end n =
 
 -- encode int to a fixed-size string(will truncate/fill the resultant string)
 encodeInt :: (Integral t, Bits t) => Int -> Endian -> t -> ByteString
-
--- encodeInt 1 end num = fastEncodeWord8 end num
-
--- encodeInt 2 LittleEndian num = encodeFixed BSB.int16LE num
--- encodeInt 2 BigEndian num    = encodeFixed BSB.int16BE num
-
--- encodeInt 4 LittleEndian num = encodeFixed BSB.int32LE num
--- encodeInt 4 BigEndian num    = encodeFixed BSB.int32BE num
-
--- encodeInt 8 LittleEndian num = encodeFixed BSB.int64LE num
--- encodeInt 8 BigEndian num    = encodeFixed BSB.int64BE num
 
 encodeInt 1 end num = fastEncodeWord8 end (fi num)
 encodeInt 2 end num = fastEncodeWord16 end (fi num)

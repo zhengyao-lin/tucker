@@ -257,57 +257,43 @@ disabled_ops = [
     ]
 
 instance Encodable ScriptOp where
-    encode _ (OP_PUSHDATA _ (Just cache)) = cache
+    encodeB _ (OP_PUSHDATA _ (Just cache)) = encodeB LittleEndian cache
 
-    encode _ (OP_PUSHDATA dat Nothing) =
+    encodeB _ (OP_PUSHDATA dat Nothing) =
         if len <= 0x4b then
-            BSR.concat [ encodeLE (fi len :: Word8), dat ]
+            encodeLEB (fi len :: Word8) <> encodeLEB dat
         else if len <= 0xff then
-            BSR.concat [ bchar 0x4c, encodeLE (fi len :: Word8), dat ]
+            bcharB 0x4c <> encodeLEB (fi len :: Word8) <> encodeLEB dat
         else if len <= 0xffff then
-            BSR.concat [ bchar 0x4d, encodeLE (fi len :: Word16), dat ]
+            bcharB 0x4d <> encodeLEB (fi len :: Word16) <> encodeLEB dat
         else -- if len <= 0xffffffff then
-            BSR.concat [ bchar 0x4e, encodeLE (fi len :: Word32), dat ]
+            bcharB 0x4e <> encodeLEB (fi len :: Word32) <> encodeLEB dat
         where
             len = BSR.length dat
 
-    encode _ (OP_CONST n)
-        | n == -1   = bchar 0x4f
+    encodeB _ (OP_CONST n)
+        | n == -1   = bcharB 0x4f
         | n >= 1 && n <= 16
-                    = bchar (0x50 + n)
+                    = bcharB (0x50 + n)
         | otherwise = throw $ TCKRError "op constant value not in range 0-16"
 
-    encode end (OP_IF exp _) =
-        bchar $ if exp then 0x63 else 0x64 -- OP_IF or OP_NOTIF
-        {-
-        mconcat [
-            -- OP_IF
-            bchar $ if exp then 0x63 else 0x64,
-
-            -- true branch
-            encode end b1,
-
-            -- optional else branch
-            if null b2 then BSR.empty
-            else bchar 0x67 <> encode end b2,
-
-            -- OP_ENDIF
-            bchar 0x68
-        ]
-        -}
+    encodeB end (OP_IF exp _) =
+        bcharB (if exp then 0x63 else 0x64) -- OP_IF or OP_NOTIF
     
     -- OP_ELSE and OP_ENDIF can
     -- be separately encoded from OP_IF
     -- but cannot be decoded separately
-    encode _ (OP_ELSE _)  = bchar 0x67
-    encode _ OP_ENDIF = bchar 0x68
+    encodeB _ (OP_ELSE _)  = bcharB 0x67
+    encodeB _ OP_ENDIF = bcharB 0x68
 
-    encode _ (OP_UNKNOWN b) = bchar b
+    encodeB _ (OP_UNKNOWN b) = bcharB b
 
     -- one-byte ops
-    encode _ op
+    encodeB _ op
         | op `elem` one_byte_op_index =
-            let Just i = lookup op one_byte_op_map in bchar i
+            let Just i = lookup op one_byte_op_map in bcharB i
+
+        | otherwise = error ("op " ++ show op ++ " is not encodable")
 
 opPushdataD :: Decoder ScriptOp
 opPushdataD = do

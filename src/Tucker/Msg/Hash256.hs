@@ -10,6 +10,7 @@ import Data.Char
 import qualified Data.ByteArray as BA
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Builder as BSB
 
 import System.IO.Unsafe
 

@@ -7,6 +7,7 @@ import Data.Word
 import Data.Bits
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
+import qualified Data.ByteString.Builder as BSB
 
 import Tucker.Enc
 import Tucker.Auth
@@ -86,14 +87,14 @@ instance MsgPayload BlockPayload
 instance MsgPayload HeadersPayload
 
 instance Encodable HeadersPayload where
-    encode end (HeadersPayload headers) =
-        encodeVList end headers
+    encodeB end (HeadersPayload headers) =
+        encodeVListB end headers
 
 instance Decodable HeadersPayload where
     decoder = vlistD decoder >>= (return . HeadersPayload)
 
 instance Encodable BlockHeader where
-    encode end (BlockHeader (Block {
+    encodeB end (BlockHeader (Block {
         vers = vers,
         prev_hash = prev_hash,
         merkle_root = merkle_root,
@@ -116,8 +117,8 @@ instance Encodable BlockHeader where
             e $ VInt $ fromIntegral $ length txns
         ]
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
 instance Decodable BlockHeader where
     decoder = do
@@ -171,15 +172,15 @@ instance Sizeable BlockHeader where
         sizeOf (VInt (fi (length txns)))
 
 instance Encodable Block where
-    encode end block@(Block {
+    encodeB end block@(Block {
         enc_cache = Just cache
-    }) = cache -- use cache if possible
+    }) = BSB.byteString cache -- use cache if possible
 
-    encode end block@(Block {
+    encodeB end block@(Block {
         txns = txns
     }) =
-        encode end (BlockHeader block) <>
-        encode end txns
+        encodeB end (BlockHeader block) <>
+        encodeB end txns
 
 instance Decodable Block where
     decoder = do
@@ -212,7 +213,7 @@ instance Sizeable Block where
         sizeOf txns
 
 instance Encodable BlockPayload where
-    encode end (BlockPayload block) = encode end block
+    encodeB end (BlockPayload block) = encodeB end block
 
 instance Decodable BlockPayload where
     decoder = BlockPayload <$> decoder
@@ -266,11 +267,11 @@ isFullBlock block = isFull (txns block)
 -- SoftFork defined in Conf.hs
 
 instance Encodable SoftForkStatus where
-    encode end FORK_STATUS_DEFINED = bchar 0
-    encode end FORK_STATUS_STARTED = bchar 1
-    encode end FORK_STATUS_LOCKED_IN = bchar 2
-    encode end FORK_STATUS_FAILED = bchar 3
-    encode end FORK_STATUS_ACTIVE = bchar 4
+    encodeB end FORK_STATUS_DEFINED = bcharB 0
+    encodeB end FORK_STATUS_STARTED = bcharB 1
+    encodeB end FORK_STATUS_LOCKED_IN = bcharB 2
+    encodeB end FORK_STATUS_FAILED = bcharB 3
+    encodeB end FORK_STATUS_ACTIVE = bcharB 4
 
 instance Decodable SoftForkStatus where
     decoder = do
@@ -284,13 +285,13 @@ instance Decodable SoftForkStatus where
             _ -> fail "illegal deployment status"
 
 instance Encodable SoftFork where
-    encode end d =
+    encodeB end d =
         mconcat [
-            encode end (vstr (fork_name d)),
-            encode end (fork_bit d),
-            encode end (fork_start d),
-            encode end (fork_timeout d),
-            encode end (fork_status d)
+            encodeB end (vstr (fork_name d)),
+            encodeB end (fork_bit d),
+            encodeB end (fork_start d),
+            encodeB end (fork_timeout d),
+            encodeB end (fork_status d)
         ]
 
 instance Decodable SoftFork where

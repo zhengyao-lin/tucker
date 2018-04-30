@@ -78,8 +78,7 @@ showHelp = do
     tLnM (genHelp opts)
 
 main = do
-    -- conf <- tucker_default_conf_testnet3 (Just "/media/rodlin/2A9967F720ACE685/tucker-data")
-    -- withBlockChain conf $ \bc -> fallbackToHeight bc 827380
+    -- runTestTT chainTest4
 
     args <- getArgs
 
@@ -91,23 +90,9 @@ main = do
                 conf <- flagsToConf flags
                 mainLoop conf
 
-                -- delay (600 * 1000 * 1000)
                 forever yieldWait
 
         Left err -> do
             tLnM (show err)
             tLnM ""
             showHelp
-
-    -- tLnM (show $ parseFlags args opts)
-
-    -- let path =
-    --         if null args then Nothing
-    --         else Just (head args)
-
-    -- conf <- tucker_default_conf_testnet3 path
-
-    -- mainLoop conf
-    -- forever yieldWait
-
-    -- runTestTT chainTest3

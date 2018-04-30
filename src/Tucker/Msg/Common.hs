@@ -132,11 +132,11 @@ data MsgHead
     } deriving (Show, Eq)
 
 instance Encodable VInt where
-    encode end num
-        | num < 0xfd        = bchar num
-        | num <= 0xffff     = bchar 0xfd <> encode end (fi num :: Word16)
-        | num <= 0xffffffff = bchar 0xfe <> encode end (fi num :: Word32)
-        | otherwise         = bchar 0xff <> encode end (fi num :: Word64)
+    encodeB end num
+        | num < 0xfd        = bcharB num
+        | num <= 0xffff     = bcharB 0xfd <> encodeB end (fi num :: Word16)
+        | num <= 0xffffffff = bcharB 0xfe <> encodeB end (fi num :: Word32)
+        | otherwise         = bcharB 0xff <> encodeB end (fi num :: Word64)
 
 instance Decodable VInt where
     decoder = do
@@ -159,8 +159,8 @@ instance Sizeable VInt where
         | otherwise         = 9
 
 instance Encodable VStr where
-    encode end (VStr bs) =
-        encode end (fi (BSR.length bs) :: VInt) <> bs
+    encodeB end (VStr bs) =
+        encodeB end (fi (BSR.length bs) :: VInt) <> encodeLEB bs
 
 instance Decodable VStr where
     decoder = do
@@ -185,8 +185,8 @@ serviceInclude :: NodeServiceType -> NodeServiceType -> Bool
 serviceInclude (NodeServiceType a) (NodeServiceType b) = all (`elem` a) b
 
 instance Encodable NodeServiceType where
-    encode end (NodeServiceType serv) =
-        encode end $
+    encodeB end (NodeServiceType serv) =
+        encodeB end $
         foldl (.|.) 0 $
         flip map serv $ \s ->
             case lookup s serv_type_map of
@@ -201,21 +201,17 @@ instance Decodable NodeServiceType where
                  filter (\(s, i) -> serv .&. i /= 0) serv_type_map
 
 instance Encodable NetAddr where
-    encode end (NetAddr {
+    encodeB end (NetAddr {
         time = time,
         net_serv = net_serv,
         ipv6o4 = ipv6o4,
         port = port
     }) =
-        mconcat [
-            e time,
-            e net_serv,
-            e ipv6o4,
-            encodeBE port -- port here is big-endian
-        ]
+        e time <> e net_serv <>
+        e ipv6o4 <> encodeBEB port -- port here is big-endian
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
 instance Decodable NetAddr where
     decoder = do
@@ -232,9 +228,9 @@ instance Decodable NetAddr where
         }
 
 instance Encodable Command where
-    encode _ cmd =
+    encodeB _ cmd =
         case lookup cmd cmd_map of
-            Just cmdstr -> padnull 12 cmdstr
+            Just cmdstr -> encodeLEB (padnull 12 cmdstr)
             _ -> error "cmd not in map"
 
 instance Decodable Command where
@@ -250,7 +246,7 @@ instance Sizeable MsgHead where
     sizeOf _ = 4 + 12 + 4
 
 instance Encodable MsgHead where
-    encode end (MsgHead {
+    encodeB end (MsgHead {
         magicno = magicno,
         command = command,
         payload = payload
@@ -259,14 +255,14 @@ instance Encodable MsgHead where
             e magicno,
             e command,
 
-            e (fi $ BSR.length payload :: Word32),
-            payloadCheck payload, -- checksum
+            e (fi (BSR.length payload) :: Word32),
+            e (payloadCheck payload), -- checksum
 
             e payload
         ]
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
     encode _ (LackData _) = error "encoding LackData flag"
 
@@ -312,6 +308,10 @@ vlistD elemD = do
 encodeVList :: Encodable t => Endian -> [t] -> ByteString
 encodeVList end list =
     encode end (fi (length list) :: VInt) <> encode end list
+
+encodeVListB :: Encodable t => Endian -> [t] -> Builder
+encodeVListB end list =
+    encodeB end (fi (length list) :: VInt) <> encodeB end list
 
 payloadCheck :: ByteString -> ByteString
 payloadCheck = BS.take 4 . sha256 . sha256

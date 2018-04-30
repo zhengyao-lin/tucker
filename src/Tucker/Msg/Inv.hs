@@ -34,9 +34,9 @@ inv_type_map = [
 inv_type_map_r = map (\(a, b) -> (b, a)) inv_type_map
 
 instance Encodable InvType where
-    encode end t =
+    encodeB end t =
         case lookup t inv_type_map of
-            Just i -> encode end (i :: Word32)
+            Just i -> encodeB end (i :: Word32)
             Nothing -> error "impossible"
 
 instance Decodable InvType where
@@ -53,8 +53,8 @@ data InvVector = InvVector InvType Hash256 deriving (Show, Eq)
 invToHash256 (InvVector _ hash) = hash
 
 instance Encodable InvVector where
-    encode end (InvVector htype hash) =
-        encode end htype <> encode end hash
+    encodeB end (InvVector htype hash) =
+        encodeB end htype <> encodeB end hash
 
 instance Decodable InvVector where
     decoder = do
@@ -70,7 +70,7 @@ newtype InvPayload =
 instance MsgPayload InvPayload
 
 instance Encodable InvPayload where
-    encode end (InvPayload inv_vect) = encodeVList end inv_vect
+    encodeB end (InvPayload inv_vect) = encodeVListB end inv_vect
 
 instance Decodable InvPayload where
     decoder = vlistD decoder >>= (return . InvPayload)
@@ -91,12 +91,10 @@ data GetblocksPayload =
 instance MsgPayload GetblocksPayload
 
 instance Encodable GetblocksPayload where
-    encode end (GetblocksPayload gb_vers locator stop_hash) =
-        mconcat [
-            encode end gb_vers,
-            encodeVList end locator,
-            encode end stop_hash
-        ]
+    encodeB end (GetblocksPayload gb_vers locator stop_hash) =
+        encodeB end gb_vers <>
+        encodeVListB end locator <>
+        encodeB end stop_hash
 
 instance Decodable GetblocksPayload where
     decoder = do

@@ -6,6 +6,7 @@ import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
 import Tucker.Enc
+import Tucker.Util
 import Tucker.Msg.Common
 
 newtype AddrPayload =
@@ -16,11 +17,9 @@ newtype AddrPayload =
 instance MsgPayload AddrPayload
 
 instance Encodable AddrPayload where
-    encode end (AddrPayload addrs) =
-        BSR.concat [
-            encode end $ VInt $ fromIntegral $ length addrs,
-            encode end addrs    
-        ]
+    encodeB end (AddrPayload addrs) =
+        encodeB end (fi (length addrs) :: VInt) <>
+        encodeB end addrs
 
 instance Decodable AddrPayload where
     decoder = do

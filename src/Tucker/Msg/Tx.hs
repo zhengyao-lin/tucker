@@ -27,6 +27,12 @@ data OutPoint = OutPoint {
         out_idx :: Word32
     } deriving (Eq, Show, Read)
 
+instance Ord OutPoint where
+    compare a b =
+        case compare (tx_hash a) (tx_hash b) of
+            EQ -> compare (out_idx a) (out_idx b)
+            r  -> r
+
 instance NFData OutPoint where
     rnf (OutPoint h w) = rnf (h, w)
 
@@ -162,8 +168,8 @@ instance NFData TxPayload where
 -- data OutPoint = OutPoint Hash Word32
 
 instance Encodable OutPoint where
-    encode end (OutPoint hash index) =
-        encode end hash <> encode end index
+    encodeB end (OutPoint hash index) =
+        encodeB end hash <> encodeB end index
 
 instance Decodable OutPoint where
     decoder = do
@@ -175,19 +181,17 @@ instance Sizeable OutPoint where
     sizeOf _ = sizeOf (undefined :: Hash256) + sizeOf (undefined :: Word32)
 
 instance Encodable TxInput where
-    encode end (TxInput {
+    encodeB end (TxInput {
         prev_out = prev_out,
         sig_script = sig_script,
         seqn = seqn
     }) =
-        mconcat [
-            e prev_out,
-            e (vbstr sig_script),
-            e seqn
-        ]
+        e prev_out <>
+        e (vbstr sig_script) <>
+        e seqn
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
 instance Decodable TxInput where
     decoder = do
@@ -213,17 +217,14 @@ instance Sizeable TxInput where
         sizeOf seqn
 
 instance Encodable TxOutput where
-    encode end (TxOutput {
+    encodeB end (TxOutput {
         value = value,
         pk_script = pk_script
     }) =
-        mconcat [
-            e value,
-            e (vbstr pk_script)
-        ]
+        e value <> e (vbstr pk_script)
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
 instance Decodable TxOutput where
     decoder = do
@@ -243,8 +244,8 @@ instance Sizeable TxOutput where
         sizeOf value + sizeOf (vbstr pk_script)
 
 instance Encodable TxWitness where
-    encode end (TxWitness items) =
-        encodeVList end $ map vbstr items
+    encodeB end (TxWitness items) =
+        encodeVListB end (map vbstr items)
 
 instance Decodable TxWitness where
     decoder =
@@ -263,7 +264,7 @@ instance Encodable TxPayload where
     --     tx_cache = Just cache
     -- }) = cache
 
-    encode end (TxPayload {
+    encodeB end (TxPayload {
         version = version,
         flag = flag, -- currently only 1 or 0
         
@@ -276,21 +277,21 @@ instance Encodable TxPayload where
         mconcat [
             e version,
             
-            if flag == 0 then BSR.empty else
+            if flag == 0 then mempty else
                 e (0x00 :: Word8) <>
                 e flag,
 
-            encodeVList end tx_in,
-            encodeVList end tx_out,
+            encodeVListB end tx_in,
+            encodeVListB end tx_out,
 
-            if flag == 0 then BSR.empty
-            else encode end tx_witness, -- just an ordinary list, not vlist
+            if flag == 0 then mempty
+            else encodeB end tx_witness, -- just an ordinary list, not vlist
             
             e lock_time
         ]
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
 instance Decodable TxPayload where
     decoder = do

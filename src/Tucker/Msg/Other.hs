@@ -11,8 +11,7 @@ newtype PingPongPayload = PingPongPayload Word64 deriving (Show, Eq)
 instance MsgPayload PingPongPayload
 
 instance Encodable PingPongPayload where
-    encode end (PingPongPayload nonce) =
-        encode end nonce
+    encodeB end (PingPongPayload nonce) = encodeB end nonce
 
 instance Decodable PingPongPayload where
     decoder = decoder >>= return . PingPongPayload
@@ -41,9 +40,9 @@ reject_type_map = [
 reject_type_map_r = map (\(a, b) -> (b, a)) reject_type_map
 
 instance Encodable RejectType where
-    encode end t =
+    encodeB end t =
         case lookup t reject_type_map of
-            Just i -> (encode end (i :: Word8))
+            Just i -> encodeB end (i :: Word8)
             Nothing -> error "reject type not exist"
 
 instance Decodable RejectType where
@@ -62,21 +61,17 @@ data RejectPayload =
     } deriving (Show, Eq)
 
 instance Encodable RejectPayload where
-    encode end (RejectPayload {
+    encodeB end (RejectPayload {
         message = message,
         ccode = ccode,
         reason = reason,
         rdata = rdata
     }) =
-        BSR.concat [
-            e message,
-            e ccode,
-            e reason,
-            e rdata
-        ]
+        e message <> e ccode <>
+        e reason <> e rdata
         where
-            e :: Encodable t => t -> ByteString
-            e = encode end
+            e :: Encodable t => t -> Builder
+            e = encodeB end
 
 instance Decodable RejectPayload where
     decoder = do
