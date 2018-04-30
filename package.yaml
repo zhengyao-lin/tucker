@@ -21,7 +21,6 @@ description:         Please see the README on Github at <https://github.com/rod-
 
 dependencies:
 - base >= 4.7 && < 5
-- largeword
 - bytestring
 - stm
 - strict-io
@@ -39,20 +38,14 @@ dependencies:
 - unbounded-delays
 - cryptonite
 - memory
-- asn1-encoding
-- asn1-types
 - containers
 - ordered-containers
 - concurrent-extra
-- regex-posix
 - mtl
 - split
-- arithmoi
 - transformers
 - exceptions
 - ansi-terminal
-- binary
-- cpu
 - unix
 - secp256k1
 
@@ -65,6 +58,7 @@ executables:
     - chash/mine.c
     - chash/sha256.c
     - chash/hash256.c
+    - chash/enc.c
 
     main:                Main.hs
     source-dirs:         app

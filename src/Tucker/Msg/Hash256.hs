@@ -7,7 +7,6 @@ import Data.Int
 import Data.Bits
 import Data.Word
 import Data.Char
-import Data.LargeWord
 import qualified Data.ByteArray as BA
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS

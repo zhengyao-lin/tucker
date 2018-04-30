@@ -7,6 +7,7 @@ import qualified Data.ByteString as BSR
 import Crypto.Secp256k1
 
 import Tucker.Enc
+import Tucker.Util
 import Tucker.Error
 
 type ECCPrivateKey = SecKey
@@ -29,7 +30,7 @@ instance Encodable ECCPublicKey where
 
 instance Decodable ECCPublicKey where
     decoder = do
-        compressed <- (`elem` [ 0x04, 0x06, 0x07 ]) <$> peekByteD
+        compressed <- (not . (`elem` [ 0x04, 0x06, 0x07 ])) <$> peekByteD
         res <- importPubKey <$> allD
 
         case res of
@@ -41,6 +42,7 @@ instance Encodable ECCSignature where
 
 instance Decodable ECCSignature where
     decoder = do
+        -- using 'relaxed' rules
         res <- laxImportSig <$> allD
 
         case res of
@@ -72,8 +74,9 @@ sign priv msg = return (signMsg priv (bsToMsg msg))
     -- return $ ECCSignature r s
 
 verify :: ECCPublicKey -> ByteString -> ECCSignature -> Bool
-verify (ECCPublicKey _ pub) msg sig =
+verify (ECCPublicKey _ pub) msg sig' =
     verifySig pub sig (bsToMsg msg)
+    where (sig, _) = normalizeSig sig'
 
     -- ECDSA.verify NoHash256 pubk (Signature r s) msg
     -- where pubk = PublicKey tucker_curve (Point x y)

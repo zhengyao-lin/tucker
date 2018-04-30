@@ -24,11 +24,6 @@ import Crypto.Hash (hash, Digest)
 import Crypto.Hash.NoHash
 import Crypto.Hash.Algorithms
 
-import Data.ASN1.Types
-import Data.ASN1.BitArray
-import Data.ASN1.Encoding
-import Data.ASN1.BinaryEncoding
-
 -- import Data.ByteString.Base58
 import Data.List
 import Data.Hex

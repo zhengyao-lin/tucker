@@ -605,7 +605,7 @@ txSigHashLegacy tx in_idx subscript htype =
             encodeLE (intToHash256 (1 :: Int))
         else
             -- tLn (show htype) $
-            -- tLn (show final_tx) $
+            -- tLn (show (hex $ encodeLE final_tx <> encodeLE raw_htype)) $
             -- tLn (show (hex $ sha256 $ sha256 $ encodeLE final_tx <> encodeLE raw_htype)) $
             doubleSHA256 $ encodeLE final_tx <> encodeLE raw_htype
         -- tLn (show (prev, final_tx, hex final_str)) $

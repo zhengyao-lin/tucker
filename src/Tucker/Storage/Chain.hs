@@ -809,8 +809,8 @@ addBlockFail bc@(BlockChain {
 
     case insertBlock chain block of
         Nothing -> do -- no previous hash found
-            -- tLnM "orphan block!"
             expectFalse "repeated orphan block" is_orphan_block
+            tLnM "block orphaned"
             updateChain bc (addOrphan chain block)
 
         Just (branch, chain) -> do

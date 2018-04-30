@@ -176,9 +176,6 @@ data TCKRConf =
 
 tucker_version = "0.0.1"
 
-tucker_btp_name_regex = "^btp.(0|[1-9][0-9]*)$"
-tucker_btp_name_gen num = "btp." ++ show num
-
 hex2bs = BS.pack . (!! 0) . unhex . map toUpper
 
 -- tucker_cache_tree_chunk = 1

@@ -3,11 +3,6 @@
 module Test.Common (
     module Data.Hex,
 
-    -- module Data.ASN1.Types,
-    -- module Data.ASN1.BitArray,
-    -- module Data.ASN1.Encoding,
-    -- module Data.ASN1.BinaryEncoding,
-
     module Debug.Trace,
 
     module System.IO,
@@ -50,11 +45,6 @@ module Test.Common (
 ) where
 
 import Data.Hex
-
--- import Data.ASN1.Types
--- import Data.ASN1.BitArray
--- import Data.ASN1.Encoding
--- import Data.ASN1.BinaryEncoding
 
 import Debug.Trace
 

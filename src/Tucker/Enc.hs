@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 
 module Tucker.Enc where
 
@@ -6,8 +7,6 @@ import Data.Int
 import Data.Bits
 import Data.Word
 import Data.Char
-import Data.LargeWord
-import qualified Data.Binary as BIN
 import qualified Data.Monoid as MND
 import qualified Data.Foldable as FD
 import qualified Data.ByteArray as BA
@@ -21,7 +20,6 @@ import Foreign.Ptr
 import Foreign.Storable hiding (sizeOf)
 
 import System.IO.Unsafe
-import qualified System.Endian as END
 
 import Control.Monad
 import Control.Exception
@@ -91,9 +89,6 @@ instance Encodable Word32 where
 instance Encodable Word64 where
     encode = encodeInt 8
 
-instance Encodable Word256 where
-    encode = encodeInt 32
-
 -- encode an integer with variable length
 -- to the shortest form
 instance Encodable Integer where
@@ -156,37 +151,34 @@ encodeVWord end num =
 encodeFixed :: (Integral a, Integral b) => (b -> BSB.Builder) -> a -> ByteString
 encodeFixed t = LBSR.toStrict . BSB.toLazyByteString . t . fi
 
--- allocBS n = BSR.pack (replicate n 0)
-
--- allocate a NEW bytestring with a new memory space
-allocBS n = BA.unsafeCreate n (const (return ()))
-
 -- fast encode
 
--- encoding fixed-size ints is same as encoding words
--- fastEncodeWord size le be end num =
---     unsafePerformIO $ do
---         let bs = allocBS size
---         BSU.unsafeUseAsCString bs $ \ptr ->
---             poke (castPtr ptr) ((if end == LittleEndian then le else be) num)
+type CEndian = Int8
 
---         return bs
+toCEndian LittleEndian = 1
+toCEndian BigEndian = 0
 
--- n counting from the lowest bit
-byteAt :: (Bits a, Integral a, Integral b) => a -> Int -> b
-byteAt num n = fi ((num `shiftR` (n * 8)) .&. 0xff)
-
-fastEncodeWord size end num =
-    BSR.pack $ map (byteAt num) $
-        if end == LittleEndian then [ 0 .. size - 1 ]
-        else [ size - 1, size - 2 .. 0 ]
+foreign import ccall "fast_encode_word16" c_fast_encode_word16 :: Ptr Word8 -> CEndian -> Word16 -> IO ()
+foreign import ccall "fast_encode_word32" c_fast_encode_word32 :: Ptr Word8 -> CEndian -> Word32 -> IO ()
+foreign import ccall "fast_encode_word64" c_fast_encode_word64 :: Ptr Word8 -> CEndian -> Word64 -> IO ()
 
 fastEncodeWord8 _ num = bchar (num :: Word8)
-fastEncodeWord16 = fastEncodeWord 2 :: Endian -> Word16 -> ByteString
-fastEncodeWord32 = fastEncodeWord 4 :: Endian -> Word32 -> ByteString
-fastEncodeWord64 = fastEncodeWord 8 :: Endian -> Word64 -> ByteString
 
-{-# INLINE fastEncodeWord #-}
+fastEncodeWord16 end n =
+    snd $ unsafePerformIO $
+    BA.allocRet 2 $ \p ->
+        c_fast_encode_word16 p (toCEndian end) n
+    
+fastEncodeWord32 end n =
+    snd $ unsafePerformIO $
+    BA.allocRet 4 $ \p ->
+        c_fast_encode_word32 p (toCEndian end) n
+
+fastEncodeWord64 end n =
+    snd $ unsafePerformIO $
+    BA.allocRet 8 $ \p ->
+        c_fast_encode_word64 p (toCEndian end) n
+
 {-# INLINE fastEncodeWord8 #-}
 {-# INLINE fastEncodeWord16 #-}
 {-# INLINE fastEncodeWord32 #-}
@@ -234,27 +226,31 @@ decodeInt' init BigEndian = BSR.foldl' (\a x -> shiftL a 8 + fi x) init
 
 -- fast decoder
 
--- in cpu endianness
-fastDecodeCPU :: (Storable t, Integral t) => ByteString -> t
-fastDecodeCPU bs =
-    unsafePerformIO $
-    BSU.unsafeUseAsCString bs (peek . castPtr)
-
-fastDecodeInt le be end = fi . (if end == LittleEndian then le else be) . fastDecodeCPU
-fastDecodeWord le be end = (if end == LittleEndian then le else be) . fastDecodeCPU
-
-fastDecodeInt8 _ bs = fi (BSR.head bs) :: Int8
-fastDecodeInt16 = fastDecodeInt END.toLE16 END.toBE16 :: Endian -> ByteString -> Int16
-fastDecodeInt32 = fastDecodeInt END.toLE32 END.toBE32 :: Endian -> ByteString -> Int32
-fastDecodeInt64 = fastDecodeInt END.toLE64 END.toBE64 :: Endian -> ByteString -> Int64
+foreign import ccall "fast_decode_word16" c_fast_decode_word16 :: Ptr Word8 -> CEndian -> IO Word16
+foreign import ccall "fast_decode_word32" c_fast_decode_word32 :: Ptr Word8 -> CEndian -> IO Word32
+foreign import ccall "fast_decode_word64" c_fast_decode_word64 :: Ptr Word8 -> CEndian -> IO Word64
 
 fastDecodeWord8 _ bs = BSR.head bs
-fastDecodeWord16 = fastDecodeWord END.toLE16 END.toBE16 :: Endian -> ByteString -> Word16
-fastDecodeWord32 = fastDecodeWord END.toLE32 END.toBE32 :: Endian -> ByteString -> Word32
-fastDecodeWord64 = fastDecodeWord END.toLE64 END.toBE64 :: Endian -> ByteString -> Word64
+fastDecodeWord16 end bs =
+    unsafePerformIO $
+    BA.withByteArray bs $ \p ->
+        c_fast_decode_word16 p (toCEndian end)
+    
+fastDecodeWord32 end bs =
+    unsafePerformIO $
+    BA.withByteArray bs $ \p ->
+        c_fast_decode_word32 p (toCEndian end)
 
-{-# INLINE fastDecodeInt #-}
-{-# INLINE fastDecodeWord #-}
+fastDecodeWord64 end bs =
+    unsafePerformIO $
+    BA.withByteArray bs $ \p ->
+        c_fast_decode_word64 p (toCEndian end)
+
+fastDecodeInt8 end bs = fi (fastDecodeWord8 end bs) :: Int8
+fastDecodeInt16 end bs = fi (fastDecodeWord16 end bs) :: Int16
+fastDecodeInt32 end bs = fi (fastDecodeWord32 end bs) :: Int32
+fastDecodeInt64 end bs = fi (fastDecodeWord64 end bs) :: Int64
+
 {-# INLINE fastDecodeInt8 #-}
 {-# INLINE fastDecodeInt16 #-}
 {-# INLINE fastDecodeInt32 #-}
@@ -540,9 +536,6 @@ instance Decodable Word32 where
 instance Decodable Word64 where
     decoder = wordD 8
 
-instance Decodable Word256 where
-    decoder = wordD 32
-
 instance (Decodable t1, Decodable t2) => Decodable (t1, t2) where
     decoder = (,) <$> decoder <*> decoder
 
@@ -597,9 +590,6 @@ instance Sizeable Word32 where
 
 instance Sizeable Word64 where
     sizeOf _ = 8
-
-instance Sizeable Word256 where
-    sizeOf _ = 32
 
 -- encode an integer with variable length
 -- to the shortest form

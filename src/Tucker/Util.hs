@@ -11,8 +11,6 @@ import qualified Data.Foldable as FD
 import qualified Data.Set.Ordered as OSET
 import qualified Data.ByteString.Char8 as BS
 
-import Math.NumberTheory.Moduli
-
 import System.CPUTime
 import System.IO.Unsafe
 import qualified System.Console.ANSI as CA
@@ -233,8 +231,8 @@ isqrt :: Integral t => t -> Maybe t
 isqrt num =
     isqrt' num (num + 1) 0
 
-modSqrt :: Integer -> Integer -> Maybe Integer
-modSqrt = sqrtModP
+-- modSqrt :: Integer -> Integer -> Maybe Integer
+-- modSqrt = sqrtModP
 
 -- by trevordixon at https://gist.github.com/trevordixon/6788535
 modExp :: (Integral t, Bits t) => t -> t -> t -> t
