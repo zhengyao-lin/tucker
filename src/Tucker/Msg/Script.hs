@@ -262,6 +262,8 @@ txSigHashV0WitS sig_raw = do
         -- its length prepended as a VInt
         hash = txSigHashV0Wit cur_tx (fi in_idx) prev_out htype script_code
 
+    -- tLnM ("hash type " ++ show htype)
+
     return hash
 
 -- ONE time SHA256 hash of the raw tx body for signature
@@ -439,7 +441,7 @@ evalOpS OP_CHECKMULTISIG = do
             -- flip map (zip msgs sigs) $ \(msg, sig) ->
             --     findIndex (\pub' -> checkSig pub' msg sig) pub's
 
-    -- tLnM (show (m, n, map hex pub's, map hex sigs))
+    -- tLnM (show (m, n, map hex pub's, map hex sig's))
     -- tLnM (show matched)
 
     -- for compatibility with a historical bug

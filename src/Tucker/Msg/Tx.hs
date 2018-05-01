@@ -517,7 +517,7 @@ txSigHashV0Wit tx in_idx outp htype script_code =
                 doubleSHA256 $ mconcat (map (encodeLE . seqn) (tx_in tx))
 
         sr_hash_outputs =
-            if not hash_single || not hash_none then
+            if not hash_single && not hash_none then
                 doubleSHA256 $ encodeLE (tx_out tx)
             else if hash_single && in_idx < length (tx_out tx) then
                 doubleSHA256 $ encodeLE (tx_out tx !! in_idx)
@@ -531,8 +531,8 @@ txSigHashV0Wit tx in_idx outp htype script_code =
         sr_sequence = encodeLE (seqn inp)
         sr_lock_time = encodeLE (lock_time tx)
         sr_hash_type = encodeLE (hashTypeToInt htype :: Word32)
-
     in
+        -- tLn (show [ hash_none, hash_single, hash_anyonecanpay ])
         doubleSHA256 $ mconcat [
             sr_version,
             sr_hash_prevouts,

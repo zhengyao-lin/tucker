@@ -18,8 +18,8 @@ generalTxCase' stype should_be prev_tx_out tx1 in_idx = do
 
     -- print ([ sig_sc, pk_sc ])
 
-    assertBool ("wrong script type for tx " ++ show (txid tx1) ++ "(found " ++ show obs_stype ++ ")")
-        (stype == obs_stype)
+    assertEqual ("wrong script type for tx " ++ show (txid tx1) ++ "(found " ++ show obs_stype ++ ")")
+        stype obs_stype
 
     assertEqual ("wrong checking result for tx " ++ show (txid tx1))
         should_be (runEval state [ sig_sc, pk_sc ])
@@ -357,6 +357,14 @@ txCase26 = TestCase $ do
 
     generalTxCase' (SCRIPT_P2SH undefined) ValidTx prev_out tx1 0
 
+-- tx0 8c53dfe9f681c8f2380f684f53b59baae781ddfd0585b66474b642bdc345a2ff
+-- tx1 517ddf3644571d2137a3fdbb528c869fb0bcc7c8c317eb4b8b113ec09d9b0570
+txCase27 = TestCase $ do
+    let tx0 = hex2tx "0200000002dd107f4f6969b0bfe981cc6316c319311dd4d896af5a7efb15b970aa6c7fddd9000000006a473044022049cdf5aa7a5ea867a8f54997696bcd82228f03541875d41cc16bfbde87da536d02203b1e6858a7df25e3b74b0bd9ee22b9c65bee9f6438a0d00dd03c184c4952356d012103b2ad8a4d2cf5281e61e7818ae6cb007601660574cf529d354001d26ed3dde423feffffffd0672681240c4a60e1ce0311ba6b9134beae36466d58be6f5edb7dd87ebd381c010000006b483045022100a96323675689cc573f8822aabfd67860856fd184715d3a1177c2e4cf53f252e202201f658d9c97ac24baa2c1538479f2150a7e784c105d5f9202f018ac19c308544d012103caad04acf51a098cf9b71f2ebbfe9f37defd1c0b8db198e6076a8050c410093dfeffffff0220a107000000000017a914d7233dcd22bce9cd29254a24b4573c3f863a7c8f87bda31300000000001976a91457b54b5aa7f3726e81da7d4ca17d840e2d64270588ac00000000"
+        tx1 = hex2tx "02000000000101ffa245c3bd42b67464b68505fddd81e7aa9bb5534f680f38f2c881f6e9df538c00000000232200207858ced1292da77bb5782fe86c918cfed8e670386acc162c07be0def9f0a74f0ffffffff02400d0300000000001976a9142ea1c0cbe7fce65454198519310a4e7c75a5ac4a88ac86910400000000001976a9142ea1c0cbe7fce65454198519310a4e7c75a5ac4a88ac0500473044022057ee42de8f9f320ddb220da570466fc8a4c8dfb89e3eb6d14f7f6130c35fe063022033654206ab3c33df591bf33039c4ce6096cb851294a1f1b728dffecc430af7a083483045022100e2a6cb1f7ac63145d1fea0823c9d0602be825a4d181da54e128dd15899ca2dd002200db8eaafed9df0ffe79399cff47be0f9edb4743ec528e7554c47f75dc0e958c381010166635221032dad80afdac2a2229ab2103dce8fa76c54a5e6abe58ecdcdf44aafa4c2df538b2103f6115d4e97e4fe3d4b98ca85a57fbf9c09d8a036d36a02156f003fd3ea689e3252ae6755b27576a914af5c9b73aa59cc5bfd6457cf11c6bc533fa53de288ac6800000000"
+
+    generalTxCase (SCRIPT_P2SH undefined) ValidTx tx0 0 tx1 0
+
 {-
 
 pub keys: 03F779C124BFB32F6015F4854C7FA8BCBF7369687C58B558040150AA8273B82232
@@ -436,5 +444,6 @@ validationTests = TestList [
         TestLabel "tx case 23" txCase23,
         TestLabel "tx case 24" txCase24,
         TestLabel "tx case 25" txCase25,
-        TestLabel "tx case 26" txCase26
+        TestLabel "tx case 26" txCase26,
+        TestLabel "tx case 27" txCase27
     ]
