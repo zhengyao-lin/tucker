@@ -24,6 +24,7 @@ import Tucker.Conf
 import Tucker.Util
 import Tucker.Atom
 import Tucker.Error
+import Tucker.Thread
 import Tucker.Transport
 import qualified Tucker.Lock as LK
 
@@ -144,7 +145,7 @@ sync env n = do
     finished_var <- newA 0 :: IO (Atom Int)
 
     let callback = do
-            forkIO $ sync env n
+            envFork env THREAD_OTHER (sync env n)
             return ()
 
         taskDone sched node hashes = do
@@ -282,7 +283,7 @@ scheduleFetch env init_hashes callback = do
             removeFromBlacklist sched node
             valid <- removeTask sched task
 
-            forkIO $ LK.with var_lock $ do
+            envFork env THREAD_OTHER $ LK.with var_lock $ do
                 added <- getA added_var
                 
                 -- is this still a valid task
@@ -312,21 +313,21 @@ scheduleFetch env init_hashes callback = do
 
             return ()
 
-        refreshFinal node res =
-            case res of
-                Right _ -> return ()
-                Left err -> do
-                    -- need to release the lock
-                    LK.release var_lock
-                    if shouldExitOn err then do
-                        nodeMsg env node "killing the main thread(bug)"
-                        envExit env err
-                    else
-                        nodeMsg env node ("refresh failed with: " ++ show err)
+        -- refreshFinal node res =
+        --     case res of
+        --         Right _ -> return ()
+        --         Left err -> do
+        --             -- need to release the lock
+        --             LK.release var_lock
+        --             if shouldExitOn err then do
+        --                 nodeMsg env node "killing the main thread(bug)"
+        --                 envExit env err
+        --             else
+        --                 nodeMsg env node ("refresh failed with: " ++ show err)
 
         -- refresh block inventory
         refreshBlock sched node = do
-            flip forkFinally (refreshFinal node) $ do
+            envFork env THREAD_VALIDATION $ do
                 LK.with var_lock $ do
                     old_added <- getA added_var
 

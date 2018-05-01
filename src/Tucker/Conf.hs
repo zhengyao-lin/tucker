@@ -172,7 +172,9 @@ data TCKRConf =
 
         tckr_bdiff_diff1_target :: Integer,
 
-        tckr_block_weight_limit :: Int
+        tckr_block_weight_limit :: Int,
+
+        tckr_job_number :: Int
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -234,10 +236,10 @@ tucker_default_conf_mainnet mpath = do
     
         tckr_speed_test_span = 5,
 
-        tckr_gc_interval = 20 * 1000 * 1000, -- 20 sec
+        tckr_gc_interval = 20 * 1000, -- 20 sec
         
         tckr_max_block_task = 20,
-        tckr_min_parallel_input_check = 100000, -- maxBound,
+        tckr_min_parallel_input_check = 128, -- maxBound,
 
         -- in sec
         tckr_node_alive_span = 90 * 60, -- 90 min
@@ -245,7 +247,7 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_known_inv_count = 8,
 
-        tckr_max_tree_insert_depth = 32,
+        tckr_max_tree_insert_depth = 64,
         tckr_mem_only = False,
 
         tckr_max_getdata_batch = 500,
@@ -306,7 +308,9 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_bdiff_diff1_target = 0x00000000ffff0000000000000000000000000000000000000000000000000000,
 
-        tckr_block_weight_limit = 4000000
+        tckr_block_weight_limit = 4000000,
+
+        tckr_job_number = 1
     }
 
     where

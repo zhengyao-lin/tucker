@@ -24,24 +24,25 @@ import Tucker.Util
 import Tucker.Auth
 import Tucker.Conf
 import Tucker.Error
+import Tucker.IOMap
 import Tucker.Signal
+import Tucker.Thread
 import Tucker.DeepSeq
 
 import Tucker.Storage.Tx
 import Tucker.Storage.Block
 import Tucker.Storage.SoftFork
 
-import Tucker.IOMap
-import Unsafe.Coerce
-
 data BlockChain =
     BlockChain {
-        bc_conf       :: TCKRConf,
-        bc_dbs        :: [Database],
+        bc_conf         :: TCKRConf,
+        bc_dbs          :: [Database],
 
-        bc_chain      :: Chain,
-        bc_tx_state   :: TxState UTXOCache1,
-        bc_fork_state :: SoftForkState
+        bc_thread_state :: Maybe ThreadState, -- thread-support is optional
+
+        bc_chain        :: Chain,
+        bc_tx_state     :: TxState UTXOCache1,
+        bc_fork_state   :: SoftForkState
         -- use 1 layer of cache in UTXO
     }
 
@@ -60,13 +61,13 @@ instance NFData BlockChain where
         bc_tx_state = bc_tx_state
     }) = rnf bc_chain `seq` rnf bc_tx_state
 
-initBlockChain :: TCKRConf -> ResIO BlockChain
+initBlockChain :: TCKRConf -> Maybe ThreadState -> ResIO BlockChain
 initBlockChain conf@(TCKRConf {
     tckr_block_db_path = block_db_path,
     tckr_tx_db_path = tx_db_path,
     tckr_block_db_max_file = block_db_max_file,
     tckr_tx_db_max_file = tx_db_max_file
-}) = do
+}) m_thread_state = do
     block_db <- openDB (optMaxFile def block_db_max_file) block_db_path
     tx_db <- openDB (optMaxFile def tx_db_max_file) tx_db_path
 
@@ -77,6 +78,8 @@ initBlockChain conf@(TCKRConf {
     let tmp = BlockChain {
         bc_conf = conf,
         bc_dbs = [ block_db, tx_db ],
+
+        bc_thread_state = m_thread_state,
 
         bc_chain = bc_chain,
         bc_tx_state = bc_tx_state,
@@ -680,17 +683,22 @@ verifyBlockTx bc branch block = do
 
                     verifyInput bc tx_state ver_conf branch tx in_idx
 
-                verifyP = mapM (verify True) -- parallel
-            -- in_values <- forM [ 0 .. len ] (verifyInput bc tx_state branch tx)
+                parVerify tstate = do
+                    tLnM "checking input in parallel"
+
+                    res <- forkMap tstate THREAD_VALIDATION (mapM (verify True)) sep_idxs
+            
+                    return (sum (concat res))
+
+                seqVerify = foldM (\val idx -> (val +) <$> verify False idx) 0 idxs
 
             in_value <-
-                if length idxs >= tckr_min_parallel_input_check conf then
-                    -- tLnM "checking input in parallel"
-                    (sum . concat) <$>
-                    map (either (reject . show) id) <$>
-                    forkMapM verifyP sep_idxs
+                if length idxs >= tckr_min_parallel_input_check conf then do
+                    case bc_thread_state bc of
+                        Just tstate -> parVerify tstate
+                        Nothing -> seqVerify -- thread not supported
                 else
-                    foldM (\val idx -> (val +) <$> verify False idx) 0 idxs
+                    seqVerify
 
             let total_out_value = getOutputValue tx
                 fee = in_value - total_out_value

@@ -20,7 +20,6 @@ import Control.Exception
 import Control.Concurrent
 import Control.Monad.Loops
 import Control.Monad.Trans
-import Control.Concurrent.Thread.Delay
 import qualified Control.Monad.Trans.Maybe as MT
 
 import Tucker.Error
@@ -368,10 +367,6 @@ first pred lst =
         x:_ -> Just x
         [] -> Nothing
 
-killAllThreads :: [ThreadId] -> IO ()
-killAllThreads ids =
-    mapM_ killThread ids
-
 timeit :: Integral t => IO a -> IO t
 timeit action = do
     begin <- msCPUTime
@@ -387,10 +382,3 @@ isJust _ = False
 isNothing :: Maybe a -> Bool
 isNothing Nothing = True
 isNothing _ = False
-
-waitUntilIO :: IO Bool -> IO ()
-waitUntilIO = (yieldWait `untilM_`)
-
-yieldWait :: IO ()
-yieldWait =
-    delay 100000 -- 100ms

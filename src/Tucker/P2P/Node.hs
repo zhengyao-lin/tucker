@@ -24,6 +24,7 @@ import Tucker.Conf
 import Tucker.Atom
 import Tucker.Util
 import Tucker.Error
+import Tucker.Thread
 import Tucker.Transport
 import qualified Tucker.Lock as LK
 
@@ -38,7 +39,6 @@ import Tucker.P2P.Util
 -- an environment shared among a main loop
 data MainLoopEnv =
     MainLoopEnv {
-        main_proc_tid :: ThreadId,
         global_conf   :: TCKRConf,
 
         timeout_s     :: Int, -- timeout in sec
@@ -54,7 +54,9 @@ data MainLoopEnv =
         sync_ready    :: Atom Bool,
 
         chain_lock    :: LK.Lock,
-        block_chain   :: Atom BlockChain
+        block_chain   :: Atom BlockChain,
+
+        thread_state  :: ThreadState
     }
 
 data RouterAction
@@ -206,7 +208,7 @@ envIsSyncReady = getA . sync_ready
 
 initEnv :: TCKRConf -> ResIO MainLoopEnv
 initEnv conf = do
-    tid <- lift myThreadId
+    -- tid <- lift myThreadId
 
     node_list <- lift $ newA []
     -- io_lock <- lift $ LK.new
@@ -220,11 +222,12 @@ initEnv conf = do
     -- db_tx <- openDB def (tckr_db_path conf) (tckr_ks_tx conf)
     -- db_chain <- openDB def (tckr_db_path conf) (tckr_ks_chain conf)
 
+    thread_state <- lift $ initThread conf
+
     chain_lock <- lift $ LK.new
-    block_chain <- initBlockChain conf >>= (lift . newA)
+    block_chain <- initBlockChain conf (Just thread_state) >>= (lift . newA)
 
     return $ MainLoopEnv {
-        main_proc_tid = tid,
         global_conf = conf,
 
         timeout_s = tckr_trans_timeout conf,
@@ -238,7 +241,9 @@ initEnv conf = do
         sync_ready = sync_ready,
 
         chain_lock = chain_lock,
-        block_chain = block_chain
+        block_chain = block_chain,
+
+        thread_state = thread_state
 
         -- db_block = db_block,
         -- db_tx = db_tx,
@@ -291,6 +296,13 @@ envConf env field = field $ global_conf env
 envAllNode :: MainLoopEnv -> IO [Node]
 envAllNode = getA . node_list
 
+envFork = forkCap . thread_state
+envForkFinally = forkCapFinally . thread_state
+envForkMap__ = forkMap__ . thread_state
+envForkMap = forkMap . thread_state
+
+envThreadState = thread_state
+
 envCloseTrans :: MainLoopEnv -> Transport -> IO ()
 envCloseTrans env trans = do
     cur_s <- appA (+(-1)) (cur_socket env)
@@ -333,9 +345,6 @@ envConnect env addr = do
             appA (+(-1)) (cur_socket env)
             close sock -- close the socket even if it's not connected
             throw e
-
-envExit :: Exception e => MainLoopEnv -> e -> IO ()
-envExit env e = throwTo (main_proc_tid env) e
 
 nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
 nodeMsg env node msg = envMsg env $ (show node) ++ ": " ++ msg

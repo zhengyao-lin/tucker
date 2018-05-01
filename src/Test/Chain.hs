@@ -44,7 +44,7 @@ chainTest1 = TestCase $ do
         -- "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d010bffffffff0100f2052a010000004341047211a824f55b505228e4c3d5194c1fcfaa15a456abdf37f9b9d97a4040afc073dee6c89064984f03385237d92167c13e236446b417ab79a0fcae412ae3316b77ac00000000"
 
     -- putStrLn ""
-    withBlockChain conf $ \bc -> do
+    withBlockChain conf Nothing $ \bc -> do
         addBlocks add_block_common_proc bc blocks
         return ()
 
@@ -85,7 +85,7 @@ chainTest2 = TestCase $ do
     let blocks = blocks' ++ fake_chain
 
     -- putStrLn ""
-    withBlockChain conf $ \bc -> do
+    withBlockChain conf Nothing $ \bc -> do
         bc <- addBlocks add_block_common_proc bc blocks
 
         -- tLnM (block_data (mainBranch (bc_chain bc)))
@@ -108,7 +108,7 @@ chainTest3 = TestCase $ do
             tckr_enable_mtp_check = False
         }
 
-    withBlockChain conf $ \bc -> do
+    withBlockChain conf Nothing $ \bc -> do
         block <- nextInitBlock bc (BS.pack "sonia") "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX"
 
         -- addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]
@@ -133,7 +133,7 @@ chainTest4 = TestCase $ do
 
     let blocks = runDecoderFailLE (many decoder :: Decoder [Block]) blocks_raw
 
-    withBlockChain conf $ \bc -> do
+    withBlockChain conf Nothing $ \bc -> do
         tLnM "start adding blocks"
         addBlocks add_block_common_proc bc blocks
         return ()

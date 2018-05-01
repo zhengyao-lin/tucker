@@ -5,10 +5,10 @@ import qualified Data.Set as SET
 
 import Control.Monad
 import Control.Concurrent
-import Control.Concurrent.Thread.Delay
 
 import Tucker.Atom
 import Tucker.Util
+import Tucker.Thread
 import qualified Tucker.Lock as LK
 
 import Tucker.P2P.Node
@@ -96,7 +96,7 @@ newScheduler :: NodeTask t
              -> (Scheduler t -> [t] -> IO [(Node, t)])
              -> IO (Scheduler t)
 newScheduler env timeout_s init_assign reassign failed_reassign = do
-    let timeout_us = fi $ timeout_s * 1000 * 1000
+    let timeout_ms = fi $ timeout_s * 1000
 
     var_lock <- LK.new
 
@@ -117,21 +117,21 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
             tid <- myThreadId
             let sched = tmp_sched { sched_tid = tid }
     
-            timeout_us_var <- newA timeout_us
+            timeout_ms_var <- newA timeout_ms
 
             forever $ do
                 start_time <- unixTimestamp
 
                 -- tLnM "start waiting"
 
-                timeout_us <- getA timeout_us_var
-                delay timeout_us
+                timeout_ms <- getA timeout_ms_var
+                msDelay timeout_ms
 
                 -- delays <- envAllNetDelay env
                 -- tLnM $ "median " ++ show (median delays) ++
                 --        "ms, average " ++ show (average delays) ++
                 --        "ms, last " ++ show (last (sort delays)) ++
-                --        "ms, timeout " ++ show timeout_us
+                --        "ms, timeout " ++ show timeout_ms
 
                 LK.with var_lock $ do
                     cur_assign <- getA assign_var
@@ -179,7 +179,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
 
                                 envWarn env "failed to reassign, elongate timeout"
                                 -- elongate timeout
-                                appA (*2) timeout_us_var
+                                appA (*2) timeout_ms_var
 
                                 assign <- failed_reassign sched retry_tasks
 
@@ -202,7 +202,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
         --         Right _ -> tLnM "scheduler exiting"
         --         Left err -> tLnM $ "scheduler exiting in error: " ++ show err
 
-    tid <- forkIO watch -- watchExit
+    tid <- envFork env THREAD_OTHER watch -- watchExit
 
     let sched = tmp_sched { sched_tid = tid }
 

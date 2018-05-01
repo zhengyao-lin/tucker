@@ -17,7 +17,6 @@ module Test.Common (
     module Control.Monad.Trans.Resource,
 
     module Control.Concurrent,
-    module Control.Concurrent.Thread.Delay,
 
     module Control.Exception,
 
@@ -33,6 +32,7 @@ module Test.Common (
     module Tucker.ASN1,
     module Tucker.Error,
     module Tucker.IOMap,
+    module Tucker.Thread,
 
     module Tucker.P2P.Init,
     module Tucker.P2P.Util,
@@ -60,7 +60,6 @@ import Control.Monad.Morph
 import Control.Monad.Trans.Resource
 
 import Control.Concurrent
-import Control.Concurrent.Thread.Delay
 
 import Control.Exception
 
@@ -76,6 +75,7 @@ import Tucker.Util
 import Tucker.ASN1
 import Tucker.Error
 import Tucker.IOMap
+import Tucker.Thread
 
 import Tucker.P2P.Init
 import Tucker.P2P.Util

@@ -64,7 +64,10 @@ flagsToConf flags = do
 
     forM_ flags $ \flag ->
         case flag of
-            SetJob job -> setNumCapabilities job
+            SetJob job -> do
+                appA (\conf -> conf { tckr_job_number = job }) conf_var
+                return ()
+
             _ -> return ()
 
     getA conf_var
@@ -89,8 +92,7 @@ main = do
             else do
                 conf <- flagsToConf flags
                 mainLoop conf
-
-                forever yieldWait
+                return ()
 
         Left err -> do
             tLnM (show err)

@@ -7,6 +7,7 @@ import Control.Monad.Trans.Resource
 import Tucker.Msg
 import Tucker.Util
 import Tucker.Conf
+import Tucker.Thread
 
 import Tucker.Storage.Tx
 import Tucker.Storage.Block
@@ -26,9 +27,9 @@ addOutPoint bc@(BlockChain {
 
     syncUTXO tx_state
 
-withBlockChain :: TCKRConf -> (BlockChain -> IO a) -> IO a
-withBlockChain conf proc = runResourceT $ do
-    bc <- initBlockChain conf
+withBlockChain :: TCKRConf -> Maybe ThreadState -> (BlockChain -> IO a) -> IO a
+withBlockChain conf mthread proc = runResourceT $ do
+    bc <- initBlockChain conf mthread
     lift $ proc bc
 
 -- fallback to height h

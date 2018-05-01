@@ -6,7 +6,6 @@ import Control.Monad
 import Control.Exception
 import Control.Concurrent
 import Control.Monad.Loops
-import Control.Concurrent.Thread.Delay
 
 import Network.Socket
 
@@ -16,6 +15,7 @@ import Tucker.Conf
 import Tucker.Util
 import Tucker.Atom
 import Tucker.Error
+import Tucker.Thread
 import Tucker.Transport
 
 import Tucker.P2P.Msg
@@ -31,7 +31,7 @@ import qualified Tucker.P2P.Action as A
 
 defaultHandler :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 defaultHandler env node (LackData _) = do
-    delay 100000 -- 100ms
+    msDelay 200
     return []
 
 defaultHandler env node msg@(MsgHead {
@@ -83,7 +83,7 @@ defaultHandler env node msg@(MsgHead {
                     return ()
                 else do
                     -- try to probe new nodes
-                    forkIO $ probe env filted
+                    envFork env THREAD_OTHER (probe env filted)
                     return ()
 
                 return []
@@ -273,10 +273,10 @@ handshake env node = do
 -- timeout in seconds
 probe :: MainLoopEnv -> [AddrInfo] -> IO ()
 probe env addrs =
-    flip forkMapM__ addrs $ \addr -> do
+    flip (envForkMap__ env THREAD_OTHER) addrs $ \addr -> do
         trans <- envConnect env addr
         node <- initNode (addrAddress addr) trans
 
-        forkFinally (nodeExec env node) (nodeFinal env node)
+        envForkFinally env THREAD_NODE (nodeExec env node) (nodeFinal env node)
 
         return ()

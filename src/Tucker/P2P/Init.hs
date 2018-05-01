@@ -9,12 +9,12 @@ import Control.Concurrent
 import Control.Monad.Loops
 import Control.Monad.Morph
 import Control.Monad.Trans.Resource
-import Control.Concurrent.Thread.Delay
 
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Util
 import Tucker.Atom
+import Tucker.Thread
 import qualified Tucker.Lock as LK
 
 import Tucker.P2P.Node
@@ -28,7 +28,7 @@ import System.Mem
 
 bootstrap :: MainLoopEnv -> [String] -> IO ()
 bootstrap env hostnames = do
-    flip forkMapM__ hostnames $ \hostname -> do
+    flip (envForkMap__ env THREAD_OTHER) hostnames $ \hostname -> do
         addrs <- seedLookup (global_conf env) hostname
         probe env addrs
     
@@ -56,7 +56,7 @@ pingLoop env =
     forever $ do
         let reping_time = envConf env tckr_reping_time
         
-        delay $ fi $ reping_time * 1000 * 1000
+        msDelay (reping_time * 1000)
 
         cur_list <- getA $ node_list env
         now <- unixTimestamp
@@ -80,7 +80,7 @@ gcLoop env@(MainLoopEnv {
     }
 }) =
     forever $ do
-        delay $ gc_interv env
+        msDelay (gc_interv env)
 
         timestamp <- unixTimestamp
 
@@ -116,6 +116,9 @@ gcLoop env@(MainLoopEnv {
         else
             return ()
 
+        tstatus <- threadStatus (thread_state env)
+        envMsg env ("thread status: " ++ show tstatus)
+
         -- check if there are too few nodes
         if length new_list < seek_min then
             -- seek for more nodes
@@ -137,18 +140,18 @@ mainLoop :: TCKRConf -> IO MainLoopEnv
 mainLoop conf = runResourceT $ do
     env <- initEnv conf
 
-    lift $ bootstrap env (tckr_bootstrap_host conf)
-    -- setA (node_list env) init_nodes
+    lift $ do
+        bootstrap env (tckr_bootstrap_host conf)
+        -- setA (node_list env) init_nodes
 
-    -- wait until enough nodes are connected
-    lift $ yieldWait `untilM_` ((>= envConf env tckr_min_node) <$> length <$> envAliveNodes env)
+        -- wait until enough nodes are connected
+        waitUntilIO ((>= envConf env tckr_min_node) <$> length <$> envAliveNodes env)
 
-    lift $ envMsg env "boostrap done"
+        envMsg env "boostrap done"
 
-    -- gc thread keeps the resource key and never exits
-    gc_tid <- resourceForkIO $ lift $ gcLoop env
+        gc_tid <- envFork env THREAD_BASE (gcLoop env)
 
-    -- bootstrap finished, start sync with 3 nodes
-    lift $ forkIO $ sync env 3
+        -- bootstrap finished, start sync with 3 nodes
+        envFork env THREAD_OTHER (sync env 3)
 
-    return env
+        forever yieldWait

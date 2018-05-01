@@ -52,14 +52,14 @@ dependencies:
 library:
   source-dirs: src
 
+c-sources:
+  - chash/mine.c
+  - chash/sha256.c
+  - chash/hash256.c
+  - chash/enc.c
+
 executables:
   tucker-exe:
-    c-sources:
-    - chash/mine.c
-    - chash/sha256.c
-    - chash/hash256.c
-    - chash/enc.c
-
     main:                Main.hs
     source-dirs:         app
     ghc-options:
@@ -70,13 +70,13 @@ executables:
     dependencies:
     - tucker
 
-# tests:
-#   tucker-test:
-#     main:                Spec.hs
-#     source-dirs:         test
-#     ghc-options:
-#     - -threaded
-#     - -rtsopts
-#     - -with-rtsopts=-N
-#     dependencies:
-#     - tucker
+tests:
+  tucker-test:
+    main:                Main.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - tucker
