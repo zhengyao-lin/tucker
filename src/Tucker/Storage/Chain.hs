@@ -289,9 +289,8 @@ updateForkDeploy bc@(BlockChain {
                         changeForkStatus fork_state fork FORK_STATUS_FAILED
                     else if mtp > fork_start fork then
                         changeForkStatus fork_state fork FORK_STATUS_STARTED
-                    else do
+                    else
                         tLnM "no status change"
-                        return ()
                 
                 FORK_STATUS_STARTED ->
                     if mtp > fork_timeout fork then
@@ -549,8 +548,8 @@ verifyInput bc@(BlockChain {
 
     -- segwit tx 7a37e24659e0313b9e59aabbcc447c290fe34a4f80f8e0117cbfd1c6d1dfa804
 
-    if verify_enable_csv ver_conf &&
-       version tx >= 2 then do
+    when (verify_enable_csv ver_conf &&
+          version tx >= 2) $ do
         -- error "CSV!!!"
         -- check BIP 68
         case inputRelLockTime inp of
@@ -575,8 +574,6 @@ verifyInput bc@(BlockChain {
                             cur >= exp
 
             Nothing -> return () -- no requirement for lock time
-    else
-        return ()
 
     let prev_tx_idx = tx_index uvalue
         prev_tx_out = u_tx_out uvalue -- tx_out prev_tx_body !! fi out_idx
@@ -642,7 +639,7 @@ verifyBlockTx bc branch block = do
 
         -- check lock-time
         forM_ all_txns $ \tx ->
-            if not (isFinalTx tx) then
+            unless (isFinalTx tx) $
                 case txLockTime tx of
                     LockTimeStamp min_stamp ->
                         expectTrue ("tx lock-time(timestamp) not met(expect " ++ show min_stamp ++
@@ -652,11 +649,9 @@ verifyBlockTx bc branch block = do
                     LockTimeHeight min_height ->
                         expectTrue "tx lock-time(height) not met" $
                             cur_height bnode >= min_height
-            else
-                -- lock-time is irrelevant
-                return ()
+            -- else lock-time is irrelevant
 
-        if verify_check_dup_tx ver_conf then
+        when (verify_check_dup_tx ver_conf) $
             forM_ (zip [0..] all_txns) $ \(idx, tx) -> do
                 -- check duplicated tx
                 mlocator <- findTxId tx_state (txid tx)
@@ -667,8 +662,6 @@ verifyBlockTx bc branch block = do
                         expectTrue ("duplicated transaction " ++ show (txid tx)) $
                             locatorToHash locator == block_hash block &&
                             locatorToIdx locator == idx
-        else
-            return ()
 
         all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
             expectTrue "more than one coinbase txns" $
@@ -849,17 +842,13 @@ addBlockFail bc@(BlockChain {
             -- in the chain as other normal blocks
             saveBlock chain (cur_height branch) block
 
-            if tckr_enable_mtp_check conf then
+            when (tckr_enable_mtp_check conf) $
                 expectTrueIO "MTP rule not met" $
                     (btimestamp block >=) <$> medianTimePastBranch bc branch
-            else
-                return ()
 
-            if tckr_enable_difficulty_check conf then
+            when (tckr_enable_difficulty_check conf) $
                 expectTrueIO "wrong difficulty" $
                     hashTargetValid bc branch
-            else
-                return ()
 
             let main_branch = mainBranch chain
 
@@ -931,10 +920,7 @@ reject msg = throw $ TCKRError msg
 expect :: Eq a => String -> a -> IO a -> IO ()
 expect msg exp mobs = do
     obs <- mobs
-    
-    if exp == obs then return ()
-    else
-        reject msg
+    unless (exp == obs) (reject msg)
 
 expectTrueIO msg cond = expect msg True cond
 expectFalseIO msg cond = expect msg False cond

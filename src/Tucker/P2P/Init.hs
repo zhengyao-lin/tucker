@@ -65,10 +65,8 @@ pingLoop env =
             alive <- getA $ alive node
             last_seen <- nodeLastSeen node
 
-            if alive && now - last_seen > reping_time then
+            when (alive && now - last_seen > reping_time) $
                 nodePrependActions node [ NormalAction pingDelay ]
-            else
-                return ()
 
 gcLoop :: MainLoopEnv -> IO ()
 gcLoop env@(MainLoopEnv {
@@ -97,11 +95,9 @@ gcLoop env@(MainLoopEnv {
             let kill = timestamp - last_seen > max_alive_span ||
                        bl_count > max_bl_count
 
-            if kill then do
+            when kill $ do
                 nodeWarn env node "killed because of timeout or too many blacklist count"
                 killThread $ thread_id node
-            else
-                return ()
 
             return (alive && not kill)
 
@@ -110,17 +106,15 @@ gcLoop env@(MainLoopEnv {
 
         let killed = length cur_list - length new_list
 
-        if killed /= 0 then do
+        when (killed /= 0) $ do
             envMsg env $ "gc: " ++ show killed ++ " dead node(s) collected"
             envMsg env $ "all " ++ show (length new_list) ++ " node(s)"
-        else
-            return ()
 
         tstatus <- threadStatus (thread_state env)
         envMsg env ("thread status: " ++ show tstatus)
 
         -- check if there are too few nodes
-        if length new_list < seek_min then
+        when (length new_list < seek_min) $
             -- seek for more nodes
             if null new_list then do
                 envWarn env "lost all connections, try to bootstrap again"
@@ -129,8 +123,6 @@ gcLoop env@(MainLoopEnv {
                 envWarn env "too few nodes, start seeking"
                 envSpreadSimpleAction env (NormalAction seekNode) (length new_list)
                 return ()
-        else
-            return ()
 
 -- syncOne env n = do
 --     envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n
@@ -149,9 +141,10 @@ mainLoop conf = runResourceT $ do
 
         envMsg env "boostrap done"
 
-        gc_tid <- envFork env THREAD_BASE (gcLoop env)
+        -- bootstrap finished, start sync, gc, and server
 
-        -- bootstrap finished, start sync with 3 nodes
+        envFork env THREAD_BASE (gcLoop env)
         envFork env THREAD_OTHER (sync env 3)
+        envFork env THREAD_BASE (server env)
 
         forever yieldWait

@@ -474,14 +474,12 @@ saveBranch (Chain {
     -- ascending order of height
     let pairs = branchToBlockList branch
 
-    if not (null pairs) then do
+    unless (null pairs) $ do
         -- save height
         let (height, _) = last pairs
 
         forM_ pairs $ \(height, (Block { block_hash = hash })) ->
             insertIO bucket_chain height hash
-    else
-        return ()
 
 -- save block into the block map
 saveBlock :: Chain -> Height -> Block -> IO ()

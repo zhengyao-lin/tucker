@@ -152,7 +152,7 @@ sync env n = do
             return ()
 
         all_finished = do
-            envInfo env "all blocks syncronized, exiting sync"
+            envInfo env "all blocks synchronized, exiting sync"
             envSyncChain env
 
         taskDone sched node hashes = do
@@ -161,7 +161,7 @@ sync env n = do
             appA (OSET.|<> OSET.fromList hashes) sync_inv_var
             finished <- appA (+1) finished_var
 
-            if finished == n then do
+            when (finished == n) $ do
                 -- no double execution when finished > n
                 cancel sched
 
@@ -170,13 +170,11 @@ sync env n = do
 
                 let last_batch = length sync_inv < envConf env tckr_max_getdata_batch
 
-                if last_batch then do
+                when last_batch $ do
                     -- not given a full batch -- we are reaching the tip
                     -- set the sync-ready flag
                     envInfo env "last batch received, setting sync ready flag"
                     envSetSyncReady env True
-                else
-                    return ()
 
                 if null sync_inv then
                     -- no sync inv
@@ -193,8 +191,6 @@ sync env n = do
                             all_finished
                         else
                             callback
-            else
-                return ()
 
         action sched = NormalAction (syncChain (taskDone sched))
         
@@ -286,10 +282,8 @@ scheduleFetch env init_hashes callback = do
 
     use_segwit <- envForkEnabled env "segwit"
 
-    if use_segwit then
+    when use_segwit $
         envMsg env "enabling segwit"
-    else
-        return ()
 
     let node_flag =
             -- only use segwit-supporting nodes
@@ -328,10 +322,9 @@ scheduleFetch env init_hashes callback = do
                         -- here if the hash already exists, no decoding will be needed
                         case midx of
                             Just idx ->
-                                if idx >= added then -- not added
+                                when (idx >= added) $ -- not added
                                     setA (snd (tarray !! idx)) (Just block)
-                                else
-                                    return ()
+
                             Nothing ->
                                 nodeMsg env node $ "irrelavent block " ++ show block
 
@@ -353,7 +346,7 @@ scheduleFetch env init_hashes callback = do
     
             new_added <- appA (+ new_succ_count) added_var
 
-            if new_succ_count /= 0 then do
+            when (new_succ_count /= 0) $ do
                 envMsg env (show new_succ_count ++ " block(s) to add")
 
                 -- NOTE: the downloaded part is cleared first
@@ -377,15 +370,11 @@ scheduleFetch env init_hashes callback = do
                     readNClear >>= envAddBlocks env node
                     nodeMsg env node (show new_added ++ " new block(s) added")
 
-                    if new_added == total then do
+                    when (new_added == total) $ do
                         nodeMsg env node "all fetching finished"
                         cancel sched
                         callback
-                    else
-                        return ()
 
-                return ()
-            else
                 return ()
 
     newScheduler env (tckr_block_fetch_timeout conf)
@@ -450,10 +439,8 @@ seekNode :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 seekNode env node msg = do
     full <- envNodeFull env
 
-    if not full then do
+    unless full $ do
         getaddr <- encodeMsg (global_conf env) BTC_CMD_GETADDR $ encodeGetaddrPayload
         tSend (conn_trans node) getaddr
-    else
-        return ()
 
     return [ DumpMe ]

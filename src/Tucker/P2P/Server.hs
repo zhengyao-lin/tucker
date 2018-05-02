@@ -79,9 +79,7 @@ defaultHandler env node msg@(MsgHead {
                 new_list <- forM net_addrs netAddrToAddrInfo
                 filted   <- filterProbingList env new_list
 
-                if full || null filted then
-                    return ()
-                else do
+                unless (full || null filted) $ do
                     -- try to probe new nodes
                     envFork env THREAD_OTHER (probe env filted)
                     return ()
@@ -92,18 +90,18 @@ defaultHandler env node msg@(MsgHead {
             d $ \(BlockPayload block) -> do
                 ready <- envIsSyncReady env
 
-                if ready then do                    
+                if ready then
                     -- envInfo env "adding new block"
                     envAddBlockIfNotExist env node block
                 else
-                    envInfo env "an unsolicited block received"
+                    nodeInfo env node "an unsolicited block received"
 
                 return []
 
         h BTC_CMD_INV = do
             d $ \(InvPayload inv_vect) -> do
                 if null inv_vect then
-                    envWarn env "peer sending empty inventory"
+                    nodeWarn env node "peer sending empty inventory"
                 else do
                     let hashes = map invToHash256 inv_vect
                         trans = conn_trans node
@@ -114,7 +112,7 @@ defaultHandler env node msg@(MsgHead {
                             ready <- envIsSyncReady env
 
                             if ready then do
-                                envInfo env ("new block(s) received: " ++ show first ++ ", ...")
+                                nodeInfo env node ("new block(s) received: " ++ show first ++ ", ...")
 
                                 -- filter out existing blocks
                                 hashes <- envFilterExistingBlock env hashes
@@ -122,10 +120,10 @@ defaultHandler env node msg@(MsgHead {
                                 -- ask for the block
                                 A.getFullBlocksMsg env hashes >>= tSend trans
                             else
-                                envMsg env "ignoring new block(s) due to unfinished sync process"
+                                nodeMsg env node "ignoring new block(s) due to unfinished sync process"
 
                         _ ->
-                            envWarn env ("unknown inventory received: " ++ show first ++ ", ...")
+                            nodeWarn env node ("unknown inventory received: " ++ show first ++ ", ...")
 
                 return []
 
@@ -198,7 +196,7 @@ nodeExec env unready_node = do
 
     full <- envNodeFull env
 
-    if not full then do
+    unless full $ do
         -- officially inserting the node
         envAppendNode env node
 
@@ -206,8 +204,6 @@ nodeExec env unready_node = do
         whileM_ (pure True) $ do
             -- nodeMsg env node "node loop"
             nodeRecvOneMsgNonBlocking env node >>= nodeProcMsg env node
-    else
-        return ()
 
 nodeFinal :: MainLoopEnv -> Node -> Either SomeException () -> IO ()
 nodeFinal env node res = do
@@ -287,6 +283,37 @@ handshake env node = do
             nodeMsg env node $ "handshaked: " ++ nodeClientInfo new_node
 
             return new_node
+
+-- start a server to accept incoming nodes
+server :: MainLoopEnv -> IO ()
+server env = do
+    let conf = global_conf env
+        port = tckr_listen_port conf
+
+    addr <- ipToAddr (tckr_listen_addr conf) (fi port)
+    sock <- buildSocketTo addr
+
+    bind sock (addrAddress addr)
+    listen sock (fi port)
+
+    let -- main server loop
+        loop sock = do
+            -- wait until there are spare places for incoming nodes
+            waitUntilIO $
+                (< tckr_max_incoming_conn conf) <$> envCountIncomingNodes env
+
+            (conn, addr) <- accept sock
+            trans <- tFromSocket conn True
+            node <- initNode addr trans
+
+            envInfo env ("incoming node: " ++ show addr)
+
+            envForkFinally env THREAD_NODE (nodeExec env node) (nodeFinal env node)
+
+            loop sock
+
+    envInfo env "server started"
+    loop sock
 
 -- return alive address
 -- timeout in seconds

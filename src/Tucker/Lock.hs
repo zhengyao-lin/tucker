@@ -1,21 +1,23 @@
 module Tucker.Lock where
 
+import Control.Monad
 import Control.Concurrent
 import qualified Control.Concurrent.Lock as LK
 
 import Tucker.Atom
 import Tucker.Util
 
+-- a wrap for the normal lock with an extra support of recursive locking
 data Lock =
     Lock {
-        current_tid :: Atom (Maybe ThreadId),
-        raw_lock    :: LK.Lock
+        current_tid :: Atom (Maybe ThreadId, Int),
+        raw_lock    :: MVar () -- when this mvar has value, the lock is in the locked state
     }
 
 new :: IO Lock
 new = do
-    current_tid <- newA Nothing
-    raw_lock <- LK.new
+    current_tid <- newA (Nothing, 0)
+    raw_lock <- newEmptyMVar
 
     return $ Lock {
         current_tid = current_tid,
@@ -28,28 +30,34 @@ acquire :: Lock -> IO ()
 acquire lock = do
     my_tid <- myThreadId
 
-    do_lock <- peekA (current_tid lock) (/= Just my_tid)
+    do_lock <- peekA (current_tid lock) ((/= Just my_tid) . fst)
     -- do lock if it's not locked by the current thread
-    
-    -- tid <- getA (current_tid lock)
-    -- tLnM (do_lock, tid, my_tid)
 
-    if do_lock then do
-        LK.acquire (raw_lock lock)
-        setA (current_tid lock) (Just my_tid)
-    else
-        return ()
+    -- d <- getA (current_tid lock)
+    -- tLnM (show (d, do_lock, my_tid))
+
+    when do_lock (putMVar (raw_lock lock) ()) -- held by different thread
+     
+    appA (\(_, cnt) -> (Just my_tid, cnt + 1)) (current_tid lock)
+    return ()
 
 release :: Lock -> IO ()
 release lock = do
     my_tid <- myThreadId
-    do_release <- peekA (current_tid lock) (== Just my_tid)
+    do_release <- peekA (current_tid lock) ((== Just my_tid) . fst)
 
-    if do_release then do
-        setA (current_tid lock) Nothing
-        LK.release (raw_lock lock)
-    else
-        return () -- not locked/locked by the current thread
+    -- d <- getA (current_tid lock)
+    -- tLnM (show (d, do_release, my_tid))
+
+    when do_release $ do
+        (_, cnt) <-
+            flip appA (current_tid lock) $ \(t, cnt) ->
+                if cnt == 1 then (Nothing, 0)
+                else (t, cnt - 1) -- more layers
+
+        when (cnt == 0) $ do
+            res <- tryTakeMVar (raw_lock lock)
+            when (isNothing res) (error "releasing unlocked lock")
 
 with :: Lock -> IO a -> IO a
 with lock action = do

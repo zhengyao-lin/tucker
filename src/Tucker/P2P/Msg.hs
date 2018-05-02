@@ -1,12 +1,13 @@
 module Tucker.P2P.Msg where
 
-import Control.Monad.Loops
 import qualified Data.ByteString as BSR
 
 import Network.Socket
 import System.Timeout
 
+import Control.Monad
 import Control.Exception
+import Control.Monad.Loops
 import Control.Monad.Loops
 
 import Tucker.Msg
@@ -61,11 +62,10 @@ nodeRecvOneMsg env node recv_proc timeout_proc = do
 
     now <- unixTimestamp
 
-    if len /= 0 then do
+    when (len /= 0) $ do
         -- at least received some data
         nodeChangeTransState node (\ts -> ts { last_seen = now })
         -- setA (cur_progress node) (Progress (fi $ BSR.length buf) (-1))
-    else return ()
 
     let test_span = fi (envConf env tckr_speed_test_span)
         time_elapsed = now - speed_test_begin trans_state

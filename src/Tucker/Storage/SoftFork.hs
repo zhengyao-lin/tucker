@@ -53,8 +53,7 @@ initForkState conf@(TCKRConf {
     tLnM ("adding new soft forks deployment " ++ show new_forks)
 
     forM_ ([0..] `zip` sortForkById new_forks) $ \(i, forks) ->
-        if null forks then return ()
-        else do
+        unless (null forks) $ do
             cur_forks <- maybe [] id <$> lookupIO bucket_fork i
 
             -- append new forks

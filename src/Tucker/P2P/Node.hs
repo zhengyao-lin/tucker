@@ -200,6 +200,18 @@ envInfo :: MainLoopEnv -> String -> IO ()
 envInfo env msg =
     tLnM (wss (Color Green False) ("env: " ++ msg))
 
+nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
+nodeMsg env node msg = envMsg env $ (show node) ++ ": " ++ msg
+
+nodeWarn :: MainLoopEnv -> Node -> String -> IO ()
+nodeWarn env node msg = envWarn env $ (show node) ++ ": " ++ msg
+
+nodeErr :: MainLoopEnv -> Node -> String -> IO ()
+nodeErr env node msg = envErr env $ (show node) ++ ": " ++ msg
+
+nodeInfo :: MainLoopEnv -> Node -> String -> IO ()
+nodeInfo env node msg = envInfo env $ (show node) ++ ": " ++ msg
+
 envSetSyncReady :: MainLoopEnv -> Bool -> IO ()
 envSetSyncReady env = setA (sync_ready env)
 
@@ -267,7 +279,7 @@ initNode sock_addr trans = do
 
     return $ Node {
         conn_trans      = trans,
-        incoming        = False,
+        incoming        = isIncoming trans,
 
         thread_id       = undefined,
         sock_addr       = sock_addr,
@@ -289,6 +301,11 @@ initNode sock_addr trans = do
 
         alive           = alive
     }
+
+envCountIncomingNodes :: MainLoopEnv -> IO Int
+envCountIncomingNodes env = do
+    nodes <- getA (node_list env)
+    return (length (filter incoming nodes))
 
 envConf :: MainLoopEnv -> (TCKRConf -> t) -> t
 envConf env field = field $ global_conf env
@@ -339,18 +356,12 @@ envConnect env addr = do
         
         let conn = do
                 timeoutFailS (timeout_s env) (connect sock sock_addr)
-                tFromSocket sock
+                tFromSocket sock False
 
         catchT conn $ \e -> do
             appA (+(-1)) (cur_socket env)
             close sock -- close the socket even if it's not connected
             throw e
-
-nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
-nodeMsg env node msg = envMsg env $ (show node) ++ ": " ++ msg
-
-nodeWarn :: MainLoopEnv -> Node -> String -> IO ()
-nodeWarn env node msg = envWarn env $ (show node) ++ ": " ++ msg
 
 nodeLastSeen :: Node -> IO Timestamp
 nodeLastSeen node = last_seen <$> getA (cur_trans_state node)
@@ -498,10 +509,7 @@ envAddBlockIfNotExist :: MainLoopEnv -> Node -> Block -> IO ()
 envAddBlockIfNotExist env node block =
     LK.with (chain_lock env) $ do
         has <- envHasBlock env (block_hash block)
-        if not has then
-            envAddBlock env node block
-        else
-            return ()
+        unless has (envAddBlock env node block)
 
 -- removing explicit reference to the block list
 -- NOTE: may help reduce space leaks?

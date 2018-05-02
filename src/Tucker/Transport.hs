@@ -16,15 +16,13 @@ import Tucker.Enc
 -- tRecvNonBlocking
 -- tClose
 
-newtype Transport = Transport Handle
+data Transport = Transport Bool Handle
 
-getHandle (Transport handle) = handle
+getHandle (Transport _ handle) = handle
+isIncoming (Transport incoming _) = incoming
 
-tFromSocket :: Socket -> IO Transport
-tFromSocket sock = socketToHandle sock ReadWriteMode >>= pure . Transport
-
-tFromHandle :: Handle -> IO Transport
-tFromHandle = return . Transport
+tFromSocket :: Socket -> Bool -> IO Transport
+tFromSocket sock incoming = Transport incoming <$> socketToHandle sock ReadWriteMode
 
 tSend :: Transport -> ByteString -> IO ()
 tSend = BSR.hPut . getHandle

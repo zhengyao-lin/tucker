@@ -89,9 +89,12 @@ data TCKRConf =
         tckr_user_agent      :: String,
 
         tckr_wif_pref        :: Word8,
-        tckr_addr_pref        :: Word8,
+        tckr_addr_pref       :: Word8,
         tckr_magic_no        :: BSR.ByteString,
+        tckr_listen_addr     :: String, 
         tckr_listen_port     :: Word16,
+
+        tckr_max_incoming_conn :: Int,
 
         tckr_genesis_raw     :: BSR.ByteString, -- genesis hash
 
@@ -216,7 +219,10 @@ tucker_default_conf_mainnet mpath = do
         tckr_wif_pref = 0x80,
         tckr_addr_pref = 0x00,
         tckr_magic_no = BSR.pack [ 0xf9, 0xbe, 0xb4, 0xd9 ],
+
+        tckr_listen_addr = "127.0.0.1",
         tckr_listen_port = 8333,
+        tckr_max_incoming_conn = 32,
 
         tckr_genesis_raw = hex2bs "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4A29AB5F49FFFF001D1DAC2B7C0101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000",
 

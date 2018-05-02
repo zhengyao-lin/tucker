@@ -68,9 +68,7 @@ cancel (Scheduler {
     sched_alive = alive
 }) = do
     orig_alive <- appA_ (const False) alive
-
-    if orig_alive then killThread tid
-    else return ()
+    when orig_alive (killThread tid)
 
 clearBlacklist :: Scheduler t -> IO ()
 clearBlacklist (Scheduler {
@@ -158,7 +156,7 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
                         mapM_ nodeBlacklistDec ok_nodes
                         mapM_ nodeBlacklistInc slow_nodes
 
-                        if not $ null slow then do
+                        unless (null slow) $ do
                             -- we have slow nodes!
                             -- add them to the blacklist
                             new_blacklist <- appA (`SET.union` SET.fromList slow_nodes) blacklist_var
@@ -183,14 +181,11 @@ newScheduler env timeout_s init_assign reassign failed_reassign = do
 
                                 assign <- failed_reassign sched retry_tasks
 
-                                if not $ null assign then
-                                    setA assign_var (ok ++ assign)
-                                else
-                                    return ()
-                                    -- keep the original assignment
+                                unless (null assign) $
+                                    setA assign_var (ok ++ assign)    
+                                -- else keep the original assignment
                             else
                                 setA assign_var (ok ++ new_assign)
-                        else return ()
                     else do
                         -- empty cur_assign
                         -- kill the thread
