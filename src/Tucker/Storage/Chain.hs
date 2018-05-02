@@ -438,6 +438,12 @@ addBlocks proc bc (block:blocks) = do
 
     new_bc `seq` addBlocks proc new_bc blocks
 
+syncBlockChain :: BlockChain -> IO ()
+syncBlockChain bc = noStop $ do
+    saveMainBranch (bc_chain bc)
+    syncTxState (bc_tx_state bc)
+    syncForkState (bc_fork_state bc)
+
 -- push & fix a certain part of chain back to the database(from which no branching is possible)
 tryFlushChain :: BlockChain -> IO BlockChain
 tryFlushChain bc@(BlockChain {
@@ -596,10 +602,10 @@ verifyInput bc@(BlockChain {
     -- else
     --     return ()
 
-    expectTrue ("invalid script/signature for outpoint tx " ++
-                show prev_txid ++ ": " ++ show check_res ++
-                ": " ++ show [ sig_sc, pk_sc ]) $
-        check_res == ValidTx
+    expectTrue (printf
+        "script validation failed: tx %s, %s to tx %s, %s: %s, scripts: %s"
+        (show prev_txid) (show out_idx) (show (txid tx)) (show in_idx) (show check_res)
+        (show (sig_sc, pk_sc))) (check_res == ValidTx)
 
     -- all test passed, return value
     return (value (u_tx_out uvalue))
@@ -619,7 +625,7 @@ verifyBlockTx bc branch block = do
     bnode <- expectMaybeIO "the block being verified is not in the given branch" $
         branchWithHash (bc_chain bc) branch (block_hash block)
 
-    begin_time <- msCPUTime
+    begin_time <- msMonoTime
     ver_conf <- genVerifyConf bc branch bnode
 
     let mtp = verify_cur_mtp ver_conf
@@ -632,6 +638,7 @@ verifyBlockTx bc branch block = do
     withCacheUTXO (bc_tx_state bc) $ \tx_state -> do
         let coinbase = head all_txns
             normal_tx = tail all_txns
+            ntxns = length all_txns
 
         -- check lock-time
         forM_ all_txns $ \tx ->
@@ -669,28 +676,26 @@ verifyBlockTx bc branch block = do
 
             -- tLnM $ "checking tx " ++ show idx
 
-            cap <- getNumCapabilities
-
             let len = fi (length (tx_in tx))
                 idxs = [ 0 .. len - 1 ]
-                sep_idxs = foldList cap idxs
+                job = tckr_job_number (bc_conf bc)
+                sep_idxs = foldList job idxs
 
-                verify in_parallel in_idx = do
-                    tM $ wss (Color Blue False) $
-                         "[verifying input " ++ show in_idx ++ " of tx " ++
-                         show idx ++ " " ++ show (txid tx) ++
-                         (if in_parallel then "(in parallel)" else "") ++ "]"
+                verify in_idx = do
+                    tM $ wss (Color Blue False)
+                       $ "[tx " ++ show idx ++ "/" ++ show ntxns ++ " " ++ take 8 (show (txid tx)) ++ "..., " ++
+                         show in_idx ++ "/" ++ show len ++ "]"
 
                     verifyInput bc tx_state ver_conf branch tx in_idx
 
                 parVerify tstate = do
-                    tLnM "checking input in parallel"
+                    -- tLnM "checking input in parallel"
 
-                    res <- forkMap tstate THREAD_VALIDATION (mapM (verify True)) sep_idxs
+                    res <- forkMap tstate THREAD_VALIDATION (mapM verify) sep_idxs
             
                     return (sum (concat res))
 
-                seqVerify = foldM (\val idx -> (val +) <$> verify False idx) 0 idxs
+                seqVerify = foldM (\val idx -> (val +) <$> verify idx) 0 idxs
 
             in_value <-
                 if length idxs >= tckr_min_parallel_input_check conf then do
@@ -722,7 +727,7 @@ verifyBlockTx bc branch block = do
 
         addTx tx_state (cur_height bnode) block 0
 
-    end_time <- msCPUTime :: IO Integer
+    end_time <- msMonoTime :: IO Integer
 
     tLnM ("verified " ++ show (length all_txns) ++
           " txns in " ++ show (end_time - begin_time) ++ "ms")
@@ -768,6 +773,13 @@ revertBlockOnUTXO bc tx_state branch block = do
             addOutput tx_state (cur_height prev_bnode)
                       (block_data prev_bnode) (fi tx_idx) (fi out_idx)
 
+hasBlock :: BlockChain -> Hash256 -> IO Bool
+hasBlock (BlockChain { bc_chain = chain }) hash =
+    if not (hasBlockInOrphan chain hash) then
+        hasBlockInChain chain hash
+    else
+        return True
+
 -- throws a TCKRError when rejecting the block
 addBlockFail :: BlockChain -> Block -> IO BlockChain
 addBlockFail bc@(BlockChain {
@@ -787,7 +799,7 @@ addBlockFail bc@(BlockChain {
     let all_txns = FD.toList txns'
 
     expectFalseIO "block already exists" $
-        chain `hasBlockInChain` block
+        chain `hasBlockInChain` block_hash
 
     -- don't check if the block is in orphan pool
 
@@ -816,7 +828,7 @@ addBlockFail bc@(BlockChain {
     expectTrue "merkle root claimed not correct" $
         merkleRoot block == merkle_root
 
-    let is_orphan_block = chain `hasBlockInOrphan` block
+    let is_orphan_block = chain `hasBlockInOrphan` block_hash
 
     case insertBlock chain block of
         Nothing -> do -- no previous hash found

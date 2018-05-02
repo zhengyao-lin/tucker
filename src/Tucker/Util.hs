@@ -11,7 +11,7 @@ import qualified Data.Foldable as FD
 import qualified Data.Set.Ordered as OSET
 import qualified Data.ByteString.Char8 as BS
 
-import System.CPUTime
+import System.Clock
 import System.IO.Unsafe
 import qualified System.Console.ANSI as CA
 
@@ -101,8 +101,11 @@ ns2s t = t `div` 1000000000
 -- picosec(e-12) to second
 ps2s t = t `div` 1000000000000
 
-msCPUTime :: Integral t => IO t
-msCPUTime = fi <$> ps2ms <$> getCPUTime
+-- monotonic clock
+msMonoTime :: Integral t => IO t
+msMonoTime = do
+    spec <- getTime Monotonic
+    return (fi (toNanoSecs spec `div` 1000000))
 
 dupFill :: [a] -> Int -> Int -> [a]
 dupFill lst times max =
@@ -369,9 +372,9 @@ first pred lst =
 
 timeit :: Integral t => IO a -> IO t
 timeit action = do
-    begin <- msCPUTime
+    begin <- msMonoTime
     action
-    end <- msCPUTime
+    end <- msMonoTime
     
     return (fi (end - begin))
 

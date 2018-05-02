@@ -91,14 +91,14 @@ pingDelay env node msg = do
     ping <- encodeMsg conf BTC_CMD_PING $ pure $ encodeLE (PingPongPayload nonce)
 
     -- setA (ping_delay node) maxBound -- set a maximum in case the node doesn't reply
-    start <- msCPUTime
+    start <- msMonoTime
     -- timeoutRetryS (timeout_s env) $
     
     tSend trans ping
 
     recv env node [] BTC_CMD_PONG $ \(PingPongPayload back_nonce) -> do
         if back_nonce == nonce then do
-            end <- msCPUTime
+            end <- msMonoTime
             -- setA (ping_delay node) (end - start)
 
             nodeChangeTransState node
@@ -144,9 +144,16 @@ sync env n = do
     sync_inv_var <- newA OSET.empty
     finished_var <- newA 0 :: IO (Atom Int)
 
+    -- current height of the main branch
+    main_height <- envMainBranchHeight env
+
     let callback = do
             envFork env THREAD_OTHER (sync env n)
             return ()
+
+        all_finished = do
+            envInfo env "all blocks syncronized, exiting sync"
+            envSyncChain env
 
         taskDone sched node hashes = do
             removeNode sched node
@@ -158,9 +165,12 @@ sync env n = do
                 -- no double execution when finished > n
                 cancel sched
 
-                sync_inv <- getA sync_inv_var
+                sync_inv <- FD.toList <$> getA sync_inv_var
+                sync_inv <- envFilterExistingBlock env sync_inv
 
-                if length sync_inv < envConf env tckr_max_getdata_batch then do
+                let last_batch = length sync_inv < envConf env tckr_max_getdata_batch
+
+                if last_batch then do
                     -- not given a full batch -- we are reaching the tip
                     -- set the sync-ready flag
                     envInfo env "last batch received, setting sync ready flag"
@@ -170,33 +180,51 @@ sync env n = do
 
                 if null sync_inv then
                     -- no sync inv
-                    envInfo env "all blocks syncronized, exiting sync"
+                    all_finished
                 else do
-                    let final_hashes = FD.toList sync_inv
+                    let final_hashes = sync_inv
 
                     envMsg env $
                         "fetching final inventory of " ++
                         show (length final_hashes) ++ " item(s)"
 
-                    scheduleFetch env final_hashes callback
+                    scheduleFetch env final_hashes $ 
+                        if last_batch then
+                            all_finished
+                        else
+                            callback
             else
                 return ()
 
         action sched = NormalAction (syncChain (taskDone sched))
-         
+        
+        node_pred blacklist node =
+            nodeStartHeight node > main_height &&
+            node `notElem` blacklist
+
         reassign sched tasks blacklist =
-            envSpreadActionExcept [] blacklist env (const [action sched]) tasks
+            envSpreadActionExcept (node_pred blacklist) env (const [action sched]) tasks
 
-    newScheduler env
-        (tckr_sync_inv_timeout (global_conf env))
-        (\sched -> reassign sched (replicate n NullTask) []) -- init assign
-        reassign -- reassign
-        $ \sched _ -> do -- fail
-            envMsg env "failed to find active nodes to sync inventory"
-            cancel sched
-            return []
+    at_tip <- envIsLongestChain env
 
-    return ()
+    -- already synchronized
+    -- because nodes don't return empty invs
+    -- so it's(maybe) the only way to tell
+    -- if you are on the tip at the beginning
+    if at_tip then do
+        envSetSyncReady env True
+        all_finished
+    else do
+        newScheduler env
+            (tckr_sync_inv_timeout (global_conf env))
+            (\sched -> reassign sched (replicate n NullTask) []) -- init assign
+            reassign -- reassign
+            $ \sched _ -> do -- fail
+                envMsg env "failed to find active nodes to sync inventory"
+                cancel sched
+                return []
+
+        return ()
 
 -- fetch & sync the block inventory
 syncChain :: (Node -> [Hash256] -> IO ())
@@ -272,18 +300,21 @@ scheduleFetch env init_hashes callback = do
             clearBlacklist sched
             doFetch sched (fetchTaskToHashes (mconcat task)) blacklist
 
+        node_pred blacklist node =
+            nodeHasService node (NodeServiceType node_flag) &&
+            node `notElem` blacklist
+
         doFetch sched hashes blacklist =
             envSpreadActionExcept
-                node_flag
-                blacklist env
-                (\task -> [NormalAction (fetchBlock use_segwit task)]) $
+                (node_pred blacklist) env
+                (\task -> [NormalAction (fetchBlock task)]) $
                 buildFetchTasks (tckr_max_block_task conf) hashes (taskDone sched)
 
         taskDone sched node task results = do
             removeFromBlacklist sched node
             valid <- removeTask sched task
 
-            envFork env THREAD_OTHER $ LK.with var_lock $ do
+            LK.with var_lock $ do
                 added <- getA added_var
                 
                 -- is this still a valid task
@@ -305,72 +336,57 @@ scheduleFetch env init_hashes callback = do
                                 nodeMsg env node $ "irrelavent block " ++ show block
 
                     refreshBlock sched node
-                    return ()
                     -- nodeMsg env node $ "task decoding finished"
-                else do
+                else
                     -- task already finished
                     nodeMsg env node $ "duplicated assignment"
 
-            return ()
-
-        -- refreshFinal node res =
-        --     case res of
-        --         Right _ -> return ()
-        --         Left err -> do
-        --             -- need to release the lock
-        --             LK.release var_lock
-        --             if shouldExitOn err then do
-        --                 nodeMsg env node "killing the main thread(bug)"
-        --                 envExit env err
-        --             else
-        --                 nodeMsg env node ("refresh failed with: " ++ show err)
-
         -- refresh block inventory
-        refreshBlock sched node = do
-            envFork env THREAD_VALIDATION $ do
-                LK.with var_lock $ do
-                    old_added <- getA added_var
+        refreshBlock sched node = LK.with var_lock $ do
+            old_added <- getA added_var
 
-                    let all_blocks = mapM (getA . snd) tarray
-                        new_succ = all_blocks >>= return . takeWhile maybeToBool . drop old_added
+            let all_blocks = mapM (getA . snd) tarray
+                new_succ = all_blocks >>= return . takeWhile maybeToBool . drop old_added
 
-                    -- newly received successive blocks
-                    new_succ_count <- length <$> new_succ
-            
-                    new_added <- appA (+ new_succ_count) added_var
+            -- newly received successive blocks
+            new_succ_count <- length <$> new_succ
+    
+            new_added <- appA (+ new_succ_count) added_var
 
-                    if new_succ_count /= 0 then do
-                        envMsg env (show new_succ_count ++ " block(s) to add")
+            if new_succ_count /= 0 then do
+                envMsg env (show new_succ_count ++ " block(s) to add")
 
-                        -- NOTE: the downloaded part is cleared first
-                        -- so that there won't be a double increase in memory usage
-                        -- when addind the block(becasue of the reference to these fields)
+                -- NOTE: the downloaded part is cleared first
+                -- so that there won't be a double increase in memory usage
+                -- when addind the block(becasue of the reference to these fields)
 
-                        let clear_fields = drop old_added $ take new_added tarray
+                let clear_fields = drop old_added $ take new_added tarray
 
-                        -- clear corresponding fields to free some memory
-                        -- and add the blocks to the chain
-                        -- hopefully the block list is stored in the stack so it can be free'd soon
-                        let readNClear =
-                                forM clear_fields $ \(_, blockv) -> do
-                                    (Just block) <- getA blockv
-                                    -- EDIT ME
-                                    -- BSR.appendFile "test_blocks" (encodeLE block)
-                                    setA blockv Nothing
-                                    return block
-                            
-                        readNClear >>= envAddBlocks env node
+                -- clear corresponding fields to free some memory
+                -- and add the blocks to the chain
+                -- hopefully the block list is stored in the stack so it can be free'd soon
+                let readNClear =
+                        forM clear_fields $ \(_, blockv) -> do
+                            (Just block) <- getA blockv
+                            -- EDIT ME
+                            -- BSR.appendFile "test_blocks" (encodeLE block)
+                            setA blockv Nothing
+                            return block
+                
+                envFork env THREAD_VALIDATION $ do
+                    readNClear >>= envAddBlocks env node
+                    nodeMsg env node (show new_added ++ " new block(s) added")
 
-                        nodeMsg env node (show new_added ++ " new block(s) added")
-
-                        if new_added == total then do
-                            nodeMsg env node "all fetching finished"
-                            cancel sched
-                            callback
-                        else
-                            return ()
+                    if new_added == total then do
+                        nodeMsg env node "all fetching finished"
+                        cancel sched
+                        callback
                     else
                         return ()
+
+                return ()
+            else
+                return ()
 
     newScheduler env (tckr_block_fetch_timeout conf)
         (\sched -> doFetch sched init_hashes []) -- init assign
@@ -381,19 +397,24 @@ scheduleFetch env init_hashes callback = do
 
 -- 00000000a967199a2fad0877433c93df785a8d8ce062e5f9b451cd1397bdbf62
 
-fetchBlock :: Bool -> BlockFetchTask -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
-fetchBlock use_segwit task env node _ = do
-    let conf = global_conf env
-        trans = conn_trans node
+getFullBlocksMsg :: MainLoopEnv -> [Hash256] -> IO ByteString
+getFullBlocksMsg env hashes = do
+    -- check if segwit is activated
+    use_segwit <- envForkEnabled env "segwit"
 
-        hashes = fetchTaskToHashes task
-        -- use segwit if it's active
+    let conf = global_conf env
         flag = if use_segwit then INV_TYPE_WITNESS_BLOCK else INV_TYPE_BLOCK
         invs = map (InvVector flag) hashes
 
-    getdata <- encodeMsg conf BTC_CMD_GETDATA $ encodeGetdataPayload invs
-    -- timeoutRetryS (timeout_s env) $ 
-    tSend trans getdata
+    encodeMsg conf BTC_CMD_GETDATA $ encodeGetdataPayload invs
+
+fetchBlock :: BlockFetchTask -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+fetchBlock task env node _ = do
+    let conf = global_conf env
+        trans = conn_trans node
+        hashes = fetchTaskToHashes task 
+
+    getFullBlocksMsg env hashes >>= tSend trans
 
     -- nodeMsg env node "getdata sent"
 

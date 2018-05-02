@@ -402,24 +402,29 @@ envNodeFull env =
 nodeService :: Node -> NodeServiceType
 nodeService = vers_serv . vers_payload
 
+nodeHasService :: Node -> NodeServiceType -> Bool
+nodeHasService node serv =
+    nodeService node `serviceInclude` serv
+
 -- spread actions to nodes except the ones in the black list
 -- return [] if no available node is found
 envSpreadActionExcept :: NodeTask t
-                      => [NodeServiceTypeSingle] -> [Node]
+                      => (Node -> Bool)
                       -> MainLoopEnv -> (t -> [NodeAction]) -> [t] -> IO [(Node, t)]
-envSpreadActionExcept node_flag blacklist env gen_action tasks = do
+envSpreadActionExcept pred env gen_action tasks = do
     nodes <- getA (node_list env)
 
-    alive_nodes <- flip filterM nodes $ \node -> do
+    valid_nodes <- flip filterM nodes $ \node -> do
         alive <- getA (alive node)
         tcount <- length <$> getA (action_list node)
 
-        let support_flag = nodeService node `serviceInclude` NodeServiceType node_flag
+        let cond = pred node
+
+        -- let support_flag = nodeService node `serviceInclude` NodeServiceType node_flag
 
         -- limit the maximum task load on one node
         return $
-            alive &&
-            support_flag &&
+            alive && cond &&
             tcount <= envConf env tckr_node_max_task + 1 -- base handler
 
     -- filter out dead nodes
@@ -430,10 +435,8 @@ envSpreadActionExcept node_flag blacklist env gen_action tasks = do
     -- envMsg env $ "blacklist: " ++ show blacklist
 
     let sorted = sortBy (\(d1, _) (d2, _) -> compareTransState d2 d1)
-                        (zip states alive_nodes)
-        sorted_nodes =
-            filter (`notElem` blacklist) $
-            map snd sorted
+                        (zip states valid_nodes)
+        sorted_nodes = map snd sorted
 
         taskn = length tasks
         noden = length sorted_nodes
@@ -462,7 +465,7 @@ envSpreadActionExcept node_flag blacklist env gen_action tasks = do
             
         return assignment
 
-envSpreadAction = envSpreadActionExcept [] []
+envSpreadAction = envSpreadActionExcept (const True)
 
 envSpreadSimpleAction :: MainLoopEnv -> NodeAction -> Int -> IO [(Node, NullTask)]
 envSpreadSimpleAction env action n =
@@ -472,9 +475,33 @@ envAppendNode :: MainLoopEnv -> Node -> IO ()
 envAppendNode env node =
     appA (++ [node]) (node_list env) >> return ()
 
+envSyncChain :: MainLoopEnv -> IO ()
+envSyncChain env =
+    getA (block_chain env) >>=
+    LK.with (chain_lock env) . syncBlockChain
+
+envHasBlock :: MainLoopEnv -> Hash256 -> IO Bool
+envHasBlock env hash =
+    LK.with (chain_lock env) $
+        getA (block_chain env) >>= (`hasBlock` hash)
+
+envFilterExistingBlock :: MainLoopEnv -> [Hash256] -> IO [Hash256]
+envFilterExistingBlock env hashes =
+    LK.with (chain_lock env) $
+        filterM ((not <$>) . envHasBlock env) hashes
+
 envAddBlock :: MainLoopEnv -> Node -> Block -> IO ()
 envAddBlock env node block =
     envAddBlocks env node [block]
+
+envAddBlockIfNotExist :: MainLoopEnv -> Node -> Block -> IO ()
+envAddBlockIfNotExist env node block =
+    LK.with (chain_lock env) $ do
+        has <- envHasBlock env (block_hash block)
+        if not has then
+            envAddBlock env node block
+        else
+            return ()
 
 -- removing explicit reference to the block list
 -- NOTE: may help reduce space leaks?
@@ -514,3 +541,21 @@ nodeClientInfo node =
     in
         -- /<user-agent>/<vers>/<service>
         vstrToString user_agent ++ show vers ++ "/" ++ show vers_serv
+
+nodeStartHeight :: Node -> Height
+nodeStartHeight = fi . start_height . vers_payload
+
+-- check if the client has a greater or equal chain height than
+-- other clients on the network
+-- NOTE: this can be only used in startup because tree height is not updated
+envIsLongestChain :: MainLoopEnv -> IO Bool
+envIsLongestChain env = do
+    nodes <- getA (node_list env)
+    bc <- getA (block_chain env)
+    let height = mainBranchHeight bc
+
+    return (all (<= height) (map nodeStartHeight nodes))
+
+envMainBranchHeight :: MainLoopEnv -> IO Height
+envMainBranchHeight env =
+    mainBranchHeight <$> getA (block_chain env)

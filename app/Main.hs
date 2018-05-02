@@ -18,10 +18,6 @@ import Tucker.Console
 import Tucker.P2P.Init
 import Tucker.Storage.Util
 
-import Test.All
-import Test.Chain
-import Test.HUnit
-
 data Flag
     = TuckerPath String
     | UseMainNet

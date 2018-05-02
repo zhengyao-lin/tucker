@@ -29,6 +29,7 @@ module Tucker.Storage.Block (
     allBranches,
     topNBlocks,
 
+    saveMainBranch,
     saveBlock,
 
     prevBlockNode,
@@ -39,7 +40,6 @@ module Tucker.Storage.Block (
 
     hasBlockInChain,
     hasBlockInOrphan,
-    hasBlock,
 
     isMainBranch,
     mainBranch,
@@ -55,7 +55,7 @@ module Tucker.Storage.Block (
 import Data.Int
 import Data.Word
 import Data.List hiding (map)
-import qualified Data.Set.Ordered as OSET
+import qualified Data.Set as SET
 
 import Control.Monad
 import Control.Applicative
@@ -97,23 +97,24 @@ instance Ord Branch where
 
 data Chain =
     Chain {
-        chain_conf    :: TCKRConf,
+        chain_conf      :: TCKRConf,
 
-        bucket_block  :: DBBucket Hash256 (Height, Block),
-        bucket_chain  :: DBBucket Height Hash256,
+        bucket_block    :: DBBucket Hash256 (Height, Block),
+        bucket_chain    :: DBBucket Height Hash256,
 
-        saved_height  :: Height, -- hight of the lowest block stored in memory
+        saved_height    :: Height, -- hight of the lowest block stored in memory
 
-        orphan_pool   :: OSET.OSet Block,
-        buffer_chain  :: Maybe Branch, -- NEVER use buffer_chain alone
+        orphan_pool_idx :: SET.Set Hash256,
+        orphan_pool     :: [Block],
+        buffer_chain    :: Maybe Branch, -- NEVER use buffer_chain alone
         -- replace the old buffer chain when a new buffer chain is formed
         -- the length of the buffer chain should >= tckr_max_tree_insert_depth
 
         -- the buffer chain should be transparent to external modules
 
-        edge_branches :: [Branch],
+        edge_branches   :: [Branch],
 
-        main_branch   :: Int -- idx of the main branch
+        main_branch     :: Int -- idx of the main branch
     }
 
 -- structure
@@ -176,7 +177,8 @@ initChain conf@(TCKRConf {
 
             saved_height = 0,
 
-            orphan_pool = OSET.empty,
+            orphan_pool_idx = SET.empty,
+            orphan_pool = [],
             
             buffer_chain = Nothing,
             edge_branches = [],
@@ -461,6 +463,8 @@ branchToBlockList' cur (Just (BlockNode {
 
 branchToBlockList = branchToBlockList' [] . Just
 
+saveMainBranch chain = saveBranch chain (mainBranch chain)
+
 -- save the height -> hash mappings
 -- in the branch to the db
 saveBranch :: Chain -> Branch -> IO ()
@@ -499,9 +503,9 @@ tryFixBranch chain@(Chain {
                 fi $ length (branchToBlockList (head branches))
             else 0
 
-        winner@(BlockNode {
+        main@(BlockNode {
             prev_node = mprev
-        }) = maximum branches
+        }) = mainBranch chain -- maximum branches
 
     -- print depth
 
@@ -515,7 +519,7 @@ tryFixBranch chain@(Chain {
                 -- save the whole winner chain
                 -- so that everything have now is in
                 -- the db, and utxo can be saved as well
-                saveBranch chain winner
+                saveBranch chain main
 
                 return $ Just $ chain {
                     -- update saved_height
@@ -525,7 +529,7 @@ tryFixBranch chain@(Chain {
                             Just bufc -> cur_height bufc + 1,
 
                     buffer_chain = Just prev,
-                    edge_branches = [winner {
+                    edge_branches = [main {
                         prev_node = Nothing
                     }]
                 }
@@ -577,42 +581,51 @@ prevBlockNode chain branch =
 
 addOrphan :: Chain -> Block -> Chain
 addOrphan chain block =
-    chain {
-        orphan_pool = orphan_pool chain OSET.|> block
-    }
+    if block_hash block `SET.member` (orphan_pool_idx chain) then chain
+    else
+        chain {
+            orphan_pool_idx = SET.insert (block_hash block) (orphan_pool_idx chain),
+            orphan_pool = orphan_pool chain ++ [block]
+        }
 
 removeOrphan :: Chain -> Block -> Chain
 removeOrphan chain block =
     chain {
-        orphan_pool = block `OSET.delete` orphan_pool chain
+        orphan_pool_idx = SET.delete (block_hash block) (orphan_pool_idx chain),
+        orphan_pool = delete block (orphan_pool chain)
     }
 
 orphanList :: Chain -> [Block]
-orphanList = OSET.toAscList . orphan_pool
+orphanList = orphan_pool
 
 -- received before && is in a branch
-hasBlockInChain :: Chain -> Block -> IO Bool
+hasBlockInChain :: Chain -> Hash256 -> IO Bool
 hasBlockInChain chain@(Chain {
-    bucket_block = bucket_block
-}) block@(Block {
-    block_hash = hash
-}) = do
+    bucket_block = bucket_block,
+    bucket_chain = bucket_chain,
+    saved_height = saved_height,
+    edge_branches = branches
+}) hash = do
     mres <- lookupAsIO bucket_block hash :: IO (Maybe (Height, Placeholder))
     
     case mres of
         Nothing -> return False
         Just (height, _) ->
-            (block `elem`) <$> blocksAtHeight chain height
+            if height >= saved_height then do
+                let found = maybeCat (map (searchBranchHash chain hash) branches)
 
-hasBlockInOrphan :: Chain -> Block -> Bool
-hasBlockInOrphan chain block =
-    block `OSET.member` orphan_pool chain
+                if null found then return False
+                else return True
+            else do
+                mhash <- lookupIO bucket_chain height :: IO (Maybe Hash256)
 
--- search two places for the block: block db and the orphan pool
-hasBlock :: Chain -> Block -> IO Bool
-hasBlock chain block =
-    (||) <$> hasBlockInChain chain block
-         <*> return (hasBlockInOrphan chain block)
+                return $ case mhash of
+                    Nothing -> False
+                    Just hash' -> hash == hash'
+
+hasBlockInOrphan :: Chain -> Hash256 -> Bool
+hasBlockInOrphan chain hash =
+    hash `SET.member` orphan_pool_idx chain
 
 isMainBranch :: Chain -> Branch -> Bool
 isMainBranch chain branch =

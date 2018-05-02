@@ -73,7 +73,7 @@ instance Encodable InvPayload where
     encodeB end (InvPayload inv_vect) = encodeVListB end inv_vect
 
 instance Decodable InvPayload where
-    decoder = vlistD decoder >>= (return . InvPayload)
+    decoder = InvPayload <$> vlistD decoder
 
 encodeInvPayload :: [InvVector] -> IO ByteString
 encodeInvPayload = return . encodeLE . InvPayload

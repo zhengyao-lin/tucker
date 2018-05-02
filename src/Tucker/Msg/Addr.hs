@@ -32,4 +32,4 @@ encodeAddrPayload :: [NetAddr] -> IO ByteString
 encodeAddrPayload = return . encodeLE . AddrPayload
 
 encodeGetaddrPayload :: IO ByteString
-encodeGetaddrPayload = return $ BSR.empty
+encodeGetaddrPayload = return BSR.empty

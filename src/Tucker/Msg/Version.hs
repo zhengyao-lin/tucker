@@ -98,8 +98,8 @@ instance Decodable VersionPayload where
             relay = relay
         }
 
-buildVersionPayload :: TCKRConf -> NetAddr -> IO VersionPayload
-buildVersionPayload conf addr = do
+buildVersionPayload :: TCKRConf -> Height -> NetAddr -> IO VersionPayload
+buildVersionPayload conf height addr = do
     timestamp <- unixTimestamp
     vers_nonce <- getStdRandom (randomR (0, maxBound :: Word64))
 
@@ -116,13 +116,13 @@ buildVersionPayload conf addr = do
         vers_nonce = vers_nonce,
 
         user_agent = vstr (tckr_user_agent conf),
-        start_height = 0,
+        start_height = fi height,
         relay = False
     }
 
-encodeVersionPayload :: TCKRConf -> NetAddr -> IO ByteString
-encodeVersionPayload conf addr =
-    buildVersionPayload conf addr >>= (pure . encodeLE)
+encodeVersionPayload :: TCKRConf -> Height -> NetAddr -> IO ByteString
+encodeVersionPayload conf height addr =
+    encodeLE <$> buildVersionPayload conf height addr
 
 encodeVerackPayload :: IO ByteString
 encodeVerackPayload = return $ BSR.empty

@@ -90,28 +90,44 @@ defaultHandler env node msg@(MsgHead {
 
         h BTC_CMD_BLOCK = do
             d $ \(BlockPayload block) -> do
-                error "new block?"
-                envAddBlock env node block
+                ready <- envIsSyncReady env
+
+                if ready then do                    
+                    -- envInfo env "adding new block"
+                    envAddBlockIfNotExist env node block
+                else
+                    envInfo env "an unsolicited block received"
+
                 return []
 
         h BTC_CMD_INV = do
-            d $ \(InvPayload inv_vect) ->
-                let first@(InvVector itype _) = head inv_vect
-                in case itype of
-                    INV_TYPE_BLOCK -> do -- new block received
-                        ready <- envIsSyncReady env
+            d $ \(InvPayload inv_vect) -> do
+                if null inv_vect then
+                    envWarn env "peer sending empty inventory"
+                else do
+                    let hashes = map invToHash256 inv_vect
+                        trans = conn_trans node
+                        first@(InvVector itype _) = head inv_vect
+                    
+                    case itype of
+                        INV_TYPE_BLOCK -> do -- new block received
+                            ready <- envIsSyncReady env
 
-                        if ready then do
-                            envInfo env ("new block(s) received: " ++ show first ++ ", ...")
-                            error "not yet implemented"
-                        else
-                            envMsg env "ignoring new block(s) due to unfinished sync process"
+                            if ready then do
+                                envInfo env ("new block(s) received: " ++ show first ++ ", ...")
 
-                        return []
+                                -- filter out existing blocks
+                                hashes <- envFilterExistingBlock env hashes
 
-                    _ -> do
-                        envWarn env ("unknown inventory received: " ++ show first ++ ", ...")
-                        return []
+                                -- ask for the block
+                                A.getFullBlocksMsg env hashes >>= tSend trans
+                            else
+                                envMsg env "ignoring new block(s) due to unfinished sync process"
+
+                        _ ->
+                            envWarn env ("unknown inventory received: " ++ show first ++ ", ...")
+
+                return []
 
         h _ = do
             nodeMsg env node $ "unhandled message: " ++ (show command)
@@ -210,8 +226,11 @@ handshake env node = do
     net_addr <- ip4ToNetAddr "127.0.0.1"
                 (tckr_listen_port conf)
                 (tckr_node_service conf)
+
+    cur_height <- envMainBranchHeight env
+
     version <- encodeMsg conf BTC_CMD_VERSION $
-               encodeVersionPayload conf net_addr
+               encodeVersionPayload conf cur_height net_addr
 
     -- send version
     tSend trans version
