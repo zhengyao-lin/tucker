@@ -175,7 +175,7 @@ nextEmptyBlock bc@(BlockChain {
     let main = mainBranch chain
         next_height = cur_height main + 1
 
-    [tip] <- topNBlocks chain main 1
+    [tip] <- topNBlockHashes chain main 1
 
     now <- unixTimestamp
     mtp <- medianTimePast bc main next_height
@@ -185,7 +185,7 @@ nextEmptyBlock bc@(BlockChain {
     return $ updateBlockHashes $ Block {
         block_hash = undefined,
         vers = 0,
-        prev_hash = block_hash tip,
+        prev_hash = tip,
         merkle_root = 0,
         btimestamp = max mtp now,
         hash_target =  target,
@@ -194,11 +194,17 @@ nextEmptyBlock bc@(BlockChain {
         enc_cache = Nothing
     }
 
-latestBlocks :: BlockChain -> Int -> IO [Block]
-latestBlocks (BlockChain { bc_chain = chain }) n =
+latestBlockHashes :: BlockChain -> Int -> IO [Hash256]
+latestBlockHashes (BlockChain { bc_chain = chain }) n =
     fmap concat $
     forM (allBranches chain) $ \branch ->
-        topNBlocks chain branch n
+        topNBlockHashes chain branch n
+
+-- blocks used for synchronization
+flagBlockHashes :: BlockChain -> Int -> IO [Hash256]
+flagBlockHashes bc@(BlockChain { bc_chain = chain }) n = do
+    latest <- latestBlockHashes bc n
+    return (latest ++ [bottomMemBlockHash chain])
 
 corrupt = reject "corrupted database"
 
@@ -230,6 +236,28 @@ calNewTarget conf old_target actual_span =
 --     return $
 --         if null ts then 0
 --         else median ts
+
+data BlockCondition
+    = AtHeight Height
+    | WithHash Hash256
+
+-- block at a specific height in the main branch
+-- NOTE: it returns a partial block
+lookupBlock :: BlockChain -> BlockCondition -> IO (Maybe (Height, Block))
+lookupBlock (BlockChain {
+    bc_chain = chain
+}) cond = do
+    let main = mainBranch chain
+    
+    res <- case cond of
+        AtHeight height -> branchAtHeight chain main height
+        WithHash hash -> branchWithHash chain main hash
+
+    return ((\b -> (cur_height b, block_data b)) <$> res)
+
+getFullBlock :: BlockChain -> Block -> IO (Maybe Block)
+getFullBlock bc block =
+    toFullBlock (bc_chain bc) block
 
 -- mtp of a branch node
 medianTimePastBranch bc branch = medianTimePast bc branch (cur_height branch)

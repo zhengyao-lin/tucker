@@ -20,6 +20,7 @@ module Tucker.Storage.Block (
     blockWithHash,
     branchWithHash,
 
+    toFullBlock,
     toFullBlockNode,
     toFullBlockNodeFail,
 
@@ -27,7 +28,8 @@ module Tucker.Storage.Block (
     tryFixBranch,
 
     allBranches,
-    topNBlocks,
+    topNBlockHashes,
+    bottomMemBlockHash,
 
     saveMainBranch,
     saveBlock,
@@ -381,21 +383,29 @@ branchWithHash chain@(Chain {
                     else
                         return Nothing -- not in the chain(probably due to data lost)
 
-toFullBlockNode :: Chain -> Branch -> IO (Maybe Branch)
-toFullBlockNode (Chain {
+toFullBlock :: Chain -> Block -> IO (Maybe Block)
+toFullBlock (Chain {
     bucket_block = bucket_block
-}) node@(BlockNode {
-    block_data = block
-}) =
-    if isFullBlock block then return (Just node)
+}) block =
+    if isFullBlock block then return (Just block)
     else do
         mres <- lookupIO bucket_block (block_hash block)
 
         case mres of
             Nothing -> return Nothing -- full block not found
-            Just (_, block) ->
-                -- replace with full block
-                return (Just (node { block_data = block }))
+            Just (_, block) -> return (Just block)
+
+toFullBlockNode :: Chain -> Branch -> IO (Maybe Branch)
+toFullBlockNode chain node@(BlockNode {
+    block_data = block
+}) = do
+    mres <- toFullBlock chain block
+
+    case mres of
+        Nothing -> return Nothing -- not found
+        Just block ->
+            -- replace with full block
+            return (Just (node { block_data = block }))
 
 toFullBlockNodeFail :: Chain -> Branch -> IO Branch
 toFullBlockNodeFail chain node = do
@@ -562,13 +572,25 @@ takeBranch chain n node = takeBranch' chain n (Just node)
 
 -- top n blocks of a paticular branch(if height < n, return height blocks)
 -- in descending order of heights
-topNBlocks :: Chain -> Branch -> Int -> IO [Block]
-topNBlocks chain branch n' =
-    maybeCat <$> mapM (blockAtHeight chain branch) range
+topNBlockHashes :: Chain -> Branch -> Int -> IO [Hash256]
+topNBlockHashes chain branch n' =
+    map block_hash <$> maybeCat <$> mapM (blockAtHeight chain branch) range
     where
         n = fi n'
         height = branchHeight branch
         range = [ height, height - 1 .. height - n + 1 ]
+
+branchEnd :: Branch -> Branch
+branchEnd n@(BlockNode { prev_node = Nothing }) = n
+branchEnd (BlockNode { prev_node = Just n }) = branchEnd n
+
+-- last block stored in mem
+bottomMemBlockHash :: Chain -> Hash256
+bottomMemBlockHash chain =
+    block_hash $ block_data $
+    case buffer_chain chain of
+        Just chain -> branchEnd chain
+        Nothing -> branchEnd (mainBranch chain)
 
 -- previous node of a node
 -- only garanteed to return Just when

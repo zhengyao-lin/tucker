@@ -231,12 +231,12 @@ syncChain callback env node msg = do
 
     nodeMsg env node $ "start fetching inventory"
 
-    latest <- getA (block_chain env) >>= flip latestBlocks (tckr_known_inv_count conf)
+    latest <- getA (block_chain env) >>= flip flagBlockHashes (tckr_known_inv_count conf)
 
-    nodeMsg env node $ "latest known blocks" ++ show (map block_hash latest)
+    nodeMsg env node $ "latest known blocks" ++ show latest
 
     getblocks <- encodeMsg conf BTC_CMD_GETBLOCKS $
-                 encodeGetblocksPayload conf (map block_hash latest) nullHash256
+                 encodeGetblocksPayload conf latest nullHash256
 
     -- timeoutRetryS (timeout_s env) $
     tSend trans getblocks

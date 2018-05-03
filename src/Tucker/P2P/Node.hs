@@ -567,3 +567,7 @@ envIsLongestChain env = do
 envMainBranchHeight :: MainLoopEnv -> IO Height
 envMainBranchHeight env =
     mainBranchHeight <$> getA (block_chain env)
+
+envWithChain :: MainLoopEnv -> (BlockChain -> IO a) -> IO a
+envWithChain env proc =
+    LK.with (chain_lock env) (getA (block_chain env) >>= proc)

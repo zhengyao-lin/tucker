@@ -376,3 +376,6 @@ blockWeight :: Block -> Int
 blockWeight block =
     3 * sizeOf (clearEncCache (stripBlockWitness block))
     + sizeOf block
+
+encodeBlockPayload :: Block -> IO ByteString
+encodeBlockPayload = return . encodeLE

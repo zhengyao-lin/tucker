@@ -23,6 +23,8 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 import qualified Tucker.P2P.Action as A
 
+import Tucker.Storage.Chain
+
 -- NOTE:
 -- when trying to sync block chain,
 -- exec fetchBlock on at least <a> nodes
@@ -63,13 +65,11 @@ defaultHandler env node msg@(MsgHead {
 
             return []
 
-        h BTC_CMD_GETHEADERS = do
-            return []
+        -- h BTC_CMD_GETHEADERS = return []
         
-        h BTC_CMD_ALERT = do
-            return []
+        h BTC_CMD_ALERT = return []
 
-        h BTC_CMD_ADDR = do
+        h BTC_CMD_ADDR =
             d $ \addrmsg@(AddrPayload {
                 addrs = net_addrs
             }) -> do
@@ -98,7 +98,83 @@ defaultHandler env node msg@(MsgHead {
 
                 return []
 
-        h BTC_CMD_INV = do
+        h BTC_CMD_GETDATA =
+            d $ \(InvPayload invs) -> do
+                let -- return Just hash for blocks that have not been found
+                    lookupAndSend :: (Block -> Block) -> Hash256 -> IO (Maybe Hash256)
+                    lookupAndSend preproc hash =
+                        envWithChain env $ \bc -> do
+                            res <- lookupBlock bc (WithHash hash)
+                            case res of
+                                Just (_, block) -> do
+                                    res <- getFullBlock bc block
+                                    case res of
+                                        Nothing -> return (Just hash)
+                                        Just block -> do
+                                            -- send back the block
+                                            msg <- encodeMsg conf BTC_CMD_BLOCK $
+                                                encodeBlockPayload (preproc block)
+                                            tSend trans msg
+
+                                            return Nothing
+
+                                Nothing -> return (Just hash)
+
+                notfounds' <-
+                    forM invs $ \(InvVector htype hash) -> do
+                        res <- case htype of
+                            INV_TYPE_BLOCK -> lookupAndSend stripBlockWitness hash
+                            INV_TYPE_WITNESS_BLOCK -> lookupAndSend id hash
+                            INV_TYPE_TX -> error "tx mem pool not supported"
+                            INV_TYPE_WITNESS_TX -> error "tx mem pool not supported"
+
+                        return (InvVector htype <$> res)
+
+                let notfounds = maybeCat notfounds'
+
+                unless (null notfounds) $ do
+                    -- inform node about not-found objects
+                    notfound <- encodeMsg conf BTC_CMD_NOTFOUND $
+                                encodeNotfoundPayload notfounds
+
+                    tSend trans notfound
+
+                return []
+
+        h BTC_CMD_GETBLOCKS =
+            d $ \(GetblocksPayload {
+                locator = locators,
+                stop_hash = stop_hash
+            }) -> do
+                nodeInfo env node ("node requested getblocks with locators: " ++ show locators)
+
+                hashes <- envWithChain env $ \bc -> do
+                    res <- mapM (lookupBlock bc . WithHash) locators
+                    
+                    let cur_height = mainBranchHeight bc
+                        begin_height =
+                            case first isJust res of
+                                Just (Just (height, _)) -> height + 1
+                                Nothing -> 1 -- start right after the genesis
+
+                        range = take (tckr_max_getdata_batch conf)
+                                     [ begin_height .. cur_height ]
+
+                    res <- mapM (lookupBlock bc . AtHeight) range
+
+                    let hashes = map (block_hash . snd) (maybeCat res)
+                        final = takeWhile (/= stop_hash) hashes
+
+                    return final
+
+                -- reply with hashes
+                inv <- encodeMsg conf BTC_CMD_INV $
+                       encodeInvPayload (map (InvVector INV_TYPE_BLOCK) hashes)
+                tSend trans inv
+
+                return []
+
+        h BTC_CMD_INV =
             d $ \(InvPayload inv_vect) -> do
                 if null inv_vect then
                     nodeWarn env node "peer sending empty inventory"
