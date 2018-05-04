@@ -218,7 +218,7 @@ instance Decodable NetAddr where
         time <- decoder
         net <- decoder
         ipv6o4 <- bsD 16
-        port <- decoderBE 
+        port <- decoderBE
         
         return $ NetAddr {
             time = time,

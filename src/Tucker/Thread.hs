@@ -112,7 +112,7 @@ forkMap__ state ttype proc lst = do
 
     mapM_ takeMVar mvars
 
--- forkMap and ignore return values(but may fail with exceptions)
+-- forkMap and return values(but may fail with exceptions)
 forkMap :: ThreadState -> ThreadType -> (a -> IO b) -> [a] -> IO [b]
 forkMap state ttype proc lst = do
     mvars <- forM lst $ \x -> do

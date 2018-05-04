@@ -103,8 +103,6 @@ buildVersionPayload conf height addr = do
     timestamp <- unixTimestamp
     vers_nonce <- getStdRandom (randomR (0, maxBound :: Word64))
 
-    -- ip4ToNetAddr "127.0.0.1" (tckr_listen_port conf) btc_cli_service
-
     return $ VersionPayload {
         cli_vers = fi $ tckr_net_version conf,
         vers_serv = tckr_node_service conf,

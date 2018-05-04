@@ -79,6 +79,8 @@ defaultHandler env node msg@(MsgHead {
                 new_list <- forM net_addrs netAddrToAddrInfo
                 filted   <- filterProbingList env new_list
 
+                -- tLnM (show (new_list, filted))
+
                 unless (full || null filted) $ do
                     -- try to probe new nodes
                     envFork env THREAD_OTHER (probe env filted)
@@ -366,7 +368,7 @@ server env = do
     let conf = global_conf env
         port = tckr_listen_port conf
 
-    addr <- ipToAddr (tckr_listen_addr conf) (fi port)
+    addr <- ipToAddrInfo (tckr_listen_addr conf) (fi port)
     sock <- buildSocketTo addr
 
     bind sock (addrAddress addr)
