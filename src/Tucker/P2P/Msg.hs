@@ -125,14 +125,13 @@ nodeExpectOneMsg env node =
 -- return (msg, rest, received length)
 tRecvOneMsg :: Transport -> Int -> ByteString
             -> IO (Either TCKRError MsgHead, ByteString, Int)
-tRecvOneMsg trans timeout_s buf = do
+tRecvOneMsg trans timeout buf = do
     let wait = (\(_, stop, _, _) -> stop)
-        timeout_us = timeout_s * 1000000
 
     (buf, _, res, recv_len) <-
         (flip $ iterateUntilM wait) (buf, False, Right (LackData 0), 0) $
             \(buf, _, _, recv_len) -> do
-                res <- timeout timeout_us $ tRecvSome trans $ 1024 * 1024
+                res <- timeoutS timeout $ tRecvSome trans (1024 * 1024)
 
                 return $ case res of
                     Nothing -> (buf, True, Right (LackData 0), recv_len)
@@ -158,7 +157,7 @@ tRecvOneMsg trans timeout_s buf = do
 tRecvOneMsgNonBlocking :: Transport -> ByteString
                        -> IO (Either TCKRError MsgHead, ByteString, Int)
 tRecvOneMsgNonBlocking trans buf = do
-    res <- tRecvNonBlocking trans $ 1024 * 1024
+    res <- tRecvNonBlocking trans (1024 * 1024)
 
     let nbuf = BSR.append buf res
         recv_len = BSR.length res

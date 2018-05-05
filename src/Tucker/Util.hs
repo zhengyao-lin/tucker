@@ -71,6 +71,11 @@ instance FD.Foldable PartialList where
     toList (PartialList len) = replicate len partial_access
     toList (FullList list) = list
 
+instance Monoid (PartialList a) where
+    mempty = FullList []
+    mappend (FullList a) (FullList b) = FullList (a ++ b)
+    mappend _ _ = error "partial list involved in list appending"
+
 unixTimestamp :: Integral a => IO a
 unixTimestamp = round `fmap` getPOSIXTime
 

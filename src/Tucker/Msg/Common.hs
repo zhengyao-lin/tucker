@@ -275,23 +275,22 @@ instance Decodable MsgHead where
         if not clen then
             return (LackData head_size)
         else do
-            magicno       <- bsD 4
-            command       <- decoder
-            payload_len   <- decoder :: Decoder Word32
-            checksum      <- bsD 4
+            magicno     <- bsD 4
+            command     <- decoder
+            payload_len <- decoder :: Decoder Word32
+            checksum    <- bsD 4
 
-            clen          <- checkLenD $ fi payload_len
-            -- len           <- lenD
+            clen        <- checkLenD (fi payload_len)
 
             -- tLn ("!!! received: " ++ show command ++ " " ++ show len ++ "/" ++ show payload_len) $
 
-            if not clen then
+            if not clen then -- not eough data
                 return (LackData (head_size + fi payload_len))
             else do
-                payload       <- bsD $ fi payload_len
+                payload <- bsD (fi payload_len)
 
                 if payloadCheck payload == checksum then
-                    return $ MsgHead {
+                    return MsgHead {
                         magicno = magicno,
                         command = command,
                         payload = payload
@@ -314,7 +313,7 @@ encodeVListB end list =
     encodeB end (fi (length list) :: VInt) <> encodeB end list
 
 payloadCheck :: ByteString -> ByteString
-payloadCheck = BS.take 4 . sha256 . sha256
+payloadCheck = BS.take 4 . doubleSHA256
 
 padnull :: Int -> String -> ByteString
 padnull full str =

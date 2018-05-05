@@ -88,10 +88,10 @@ instance MsgPayload HeadersPayload
 
 instance Encodable HeadersPayload where
     encodeB end (HeadersPayload headers) =
-        encodeVListB end headers
+        encodeVListB end (map (\(BlockHeader b) -> networkBlockHeader b) headers)
 
 instance Decodable HeadersPayload where
-    decoder = vlistD decoder >>= (return . HeadersPayload)
+    decoder = HeadersPayload <$> vlistD decoder
 
 instance Encodable BlockHeader where
     encodeB end (BlockHeader (Block {
@@ -218,8 +218,8 @@ instance Encodable BlockPayload where
 instance Decodable BlockPayload where
     decoder = BlockPayload <$> decoder
 
--- encodeHeadersPayload :: [BlockHeader] -> IO ByteString -- HeadersPayload
--- encodeHeadersPayload = return . encodeLE . HeadersPayload
+encodeHeadersPayload :: [BlockHeader] -> IO ByteString -- HeadersPayload
+encodeHeadersPayload = return . encodeLE . HeadersPayload
 
 -- encodeBlock
 
@@ -256,10 +256,25 @@ targetBDiff conf hash =
 isHashOf :: Hash256 -> Block -> Bool
 isHashOf hash = (== hash) . block_hash
 
+-- NOTE that the block header here is not
+-- extactly the block header structure defined in
+-- the bitcoin protocol, in which block headers always
+-- have their txn_count field to be 0
 blockHeader :: Block -> Block
-blockHeader block = block {
+blockHeader block =
+    block {
         txns = toPartial (txns block)
     }
+
+removeTxns :: Block -> Block
+removeTxns block =
+    block {
+        txns = mempty
+    }
+
+-- block with all txns removed
+networkBlockHeader :: Block -> Block
+networkBlockHeader = removeTxns
 
 isFullBlock :: Block -> Bool
 isFullBlock block = isFull (txns block)

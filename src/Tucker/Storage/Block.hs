@@ -347,9 +347,10 @@ branchAtHeight chain@(Chain {
         case mhash of
             Nothing -> return Nothing
             Just hash -> do
-                mpair <- lookupIO bucket_block hash
+                -- read header only
+                mpair <- lookupAsIO bucket_block hash :: IO (Maybe (Height, BlockHeader))
                 return $ case mpair of
-                    Just (_, block) -> Just (createSingleNode block height)
+                    Just (_, BlockHeader block) -> Just (createSingleNode block height)
                     Nothing -> Nothing
 
 blockWithHash chain branch hash =
@@ -367,11 +368,11 @@ branchWithHash chain@(Chain {
     case searchBranchHash chain hash branch of
         Just bn -> return (Just bn)
         Nothing -> do
-            mres <- lookupIO bucket_block hash
+            mres <- lookupAsIO bucket_block hash :: IO (Maybe (Height, BlockHeader))
 
             case mres of
                 Nothing -> return Nothing
-                Just (height, block) -> do
+                Just (height, BlockHeader block) -> do
                     mhash <- lookupIO bucket_chain height
 
                     -- print (isPartial (txns block))

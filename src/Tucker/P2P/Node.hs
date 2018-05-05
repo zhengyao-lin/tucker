@@ -468,7 +468,7 @@ envSpreadActionExcept pred env gen_action tasks = do
             assignment = zip target_nodes new_tasks
 
         -- assume length target_nodes == length new_tasks
-        forM_ assignment $ \(node, task) -> do
+        forM_ assignment $ \(node, task) ->
             -- nodeMsg env node $ "prepending new action(s)"
 
             -- append new actions to each node
@@ -481,6 +481,18 @@ envSpreadAction = envSpreadActionExcept (const True)
 envSpreadSimpleAction :: MainLoopEnv -> NodeAction -> Int -> IO [(Node, NullTask)]
 envSpreadSimpleAction env action n =
     envSpreadAction env (const [action]) (replicate n NullTask)
+
+envBroadcastActionExcept :: (Node -> Bool) -> MainLoopEnv -> NodeAction -> IO ()
+envBroadcastActionExcept pred env action = do
+    nodes <- getA (node_list env)
+
+    valid_nodes <- flip filterM nodes $ \node -> do
+        alive <- getA (alive node)
+        let cond = pred node
+        return (alive && cond)
+
+    forM_ valid_nodes $ \node ->
+        nodePrependActions node [action]
 
 envAppendNode :: MainLoopEnv -> Node -> IO ()
 envAppendNode env node =
@@ -505,11 +517,16 @@ envAddBlock :: MainLoopEnv -> Node -> Block -> IO ()
 envAddBlock env node block =
     envAddBlocks env node [block]
 
-envAddBlockIfNotExist :: MainLoopEnv -> Node -> Block -> IO ()
+envAddBlockIfNotExist :: MainLoopEnv -> Node -> Block -> IO Bool
 envAddBlockIfNotExist env node block =
     LK.with (chain_lock env) $ do
         has <- envHasBlock env (block_hash block)
-        unless has (envAddBlock env node block)
+
+        if not has then do
+            envAddBlock env node block
+            return True
+        else
+            return False
 
 -- removing explicit reference to the block list
 -- NOTE: may help reduce space leaks?

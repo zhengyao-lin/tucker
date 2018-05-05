@@ -67,6 +67,11 @@ data SoftFork =
 instance Eq SoftFork where
     f1 == f2 = fork_name f1 == fork_name f2 && fork_bit f1 == fork_bit f2
 
+tucker_default_socket_hints =
+    defaultHints {
+        addrSocketType = Stream -- using tcp
+    }
+
 data TCKRConf =
     TCKRConf {
         tckr_net_version     :: Integer,
@@ -153,7 +158,8 @@ data TCKRConf =
         tckr_block_fetch_timeout :: Int, -- in sec
         tckr_node_max_blacklist_count :: Int,
 
-        tckr_max_getdata_batch :: Int,
+        tckr_max_getblocks_batch :: Int,
+        tckr_max_getheaders_batch :: Int,
 
         tckr_sync_inv_timeout :: Int, -- in sec
 
@@ -262,7 +268,8 @@ tucker_default_conf_mainnet mpath = do
         tckr_max_tree_insert_depth = 64,
         tckr_mem_only = False,
 
-        tckr_max_getdata_batch = 500,
+        tckr_max_getblocks_batch = 500,
+        tckr_max_getheaders_batch = 2000,
         -- receive 500 blocks a time(if inv is greater than that, trim the tail)
 
         tckr_node_max_task = 3, -- excluding the base handler

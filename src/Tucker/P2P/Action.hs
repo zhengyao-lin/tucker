@@ -168,7 +168,7 @@ sync env n = do
                 sync_inv <- FD.toList <$> getA sync_inv_var
                 sync_inv <- envFilterExistingBlock env sync_inv
 
-                let last_batch = length sync_inv < envConf env tckr_max_getdata_batch
+                let last_batch = length sync_inv < envConf env tckr_max_getblocks_batch
 
                 when last_batch $ do
                     -- not given a full batch -- we are reaching the tip
@@ -247,7 +247,7 @@ syncChain callback env node msg = do
         nodeMsg env node $ "inv received with " ++ show (length inv_vect) ++ " item(s)" -- ++ show inv_vect
 
         let hashes = map invToHash256 $
-                     take (tckr_max_getdata_batch conf) inv_vect
+                     take (tckr_max_getblocks_batch conf) inv_vect
 
         callback node hashes
         
@@ -436,7 +436,7 @@ fetchBlock task env node _ = do
             return []
 
 seekNode :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
-seekNode env node msg = do
+seekNode env node _ = do
     full <- envNodeFull env
 
     unless full $ do
@@ -444,3 +444,11 @@ seekNode env node msg = do
         tSend (conn_trans node) getaddr
 
     return [ DumpMe ]
+
+sendMsg :: ByteString -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+sendMsg msg env node _ = do
+    tSend (conn_trans node) msg
+    return [ DumpMe ]
+
+sendMsgA :: ByteString -> NodeAction
+sendMsgA = NormalAction . sendMsg

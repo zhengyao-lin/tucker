@@ -42,10 +42,8 @@ ip4ToNetAddr addr port serv = do
 ipToAddrInfo :: String -> Word16 -> IO AddrInfo
 ipToAddrInfo ip port =
     head <$>
-    getAddrInfo (Just defaultHints {
-        addrSocketType = Stream
-        -- addrFlags = [AI_NUMERICHOST, AI_NUMERICSERV],
-    }) (Just ip) (Just (show port))
+    getAddrInfo (Just tucker_default_socket_hints)
+                (Just ip) (Just (show port))
 
 -- AF_INET SOCK_STREAM (addrSocketType addr) 
 
@@ -56,9 +54,8 @@ buildSocketTo addr =
 -- look up node seeds using a domain
 seedLookup :: TCKRConf -> String -> IO [AddrInfo]
 seedLookup conf host =
-    getAddrInfo (Just defaultHints {
-        addrSocketType = Stream
-    }) (Just host) (Just (show (tckr_listen_port conf)))
+    getAddrInfo (Just tucker_default_socket_hints)
+                (Just host) (Just (show (tckr_listen_port conf)))
 
     `catch` \e -> (e :: SomeException) `seq` return []
 
@@ -75,30 +72,36 @@ sockAddrToNetAddr :: SockAddr -> NodeServiceType -> IO NetAddr
 
 sockAddrToNetAddr (SockAddrInet port host) serv = do
     time <- unixTimestamp
-    pure $ NetAddr {
+    return NetAddr {
         time = time,
         net_serv = serv,
-        ipv6o4 = ip4ToIP6 $ encodeBE (fromIntegral host :: Word32),
-        port = fromIntegral port
+        ipv6o4 = ip4ToIP6 (encodeBE (fi host :: Word32)),
+        port = fi port
     }
 
 sockAddrToNetAddr (SockAddrInet6 port _ (h1, h2, h3, h4) _) serv = do
     time <- unixTimestamp
-    pure $ NetAddr {
+    return NetAddr {
         time = time,
         net_serv = serv,
         ipv6o4 = BSR.concat [
-            encodeBE (fromIntegral h1 :: Word32),
-            encodeBE (fromIntegral h2 :: Word32),
-            encodeBE (fromIntegral h3 :: Word32),
-            encodeBE (fromIntegral h4 :: Word32)
+            encodeBE (fi h1 :: Word32),
+            encodeBE (fi h2 :: Word32),
+            encodeBE (fi h3 :: Word32),
+            encodeBE (fi h4 :: Word32)
         ],
-        port = fromIntegral port
+        port = fi port
     }
 
 netAddrToAddrInfo :: NetAddr -> IO AddrInfo
-netAddrToAddrInfo netaddr = do
-    let ip6 = show $ fromHostAddress6 (
+netAddrToAddrInfo netaddr =
+    head <$> getAddrInfo
+        (Just tucker_default_socket_hints)
+        (Just (if use_ip4 then ip4 else ip6))
+        (Just (show (port netaddr)))
+
+    where
+        ip6 = show $ fromHostAddress6 (
                 ntohl (decodeFailBE h1),
                 ntohl (decodeFailBE h2),
                 ntohl (decodeFailBE h3),
@@ -107,41 +110,14 @@ netAddrToAddrInfo netaddr = do
         
         ip4 = show $ fromHostAddress (ntohl (decodeFailBE h4))
 
-    -- return $ tLn (show (isSupportedFamily AF_INET6)) $
-    -- return $
-    head <$>
-        if is_ip4 || not (isSupportedFamily AF_INET6) then do
-            getAddrInfo (Just defaultHints {
-                addrSocketType = Stream,
-                addrFamily = AF_INET
-            }) (Just ip4) (Just (show (port netaddr)))
-        else -- use ip6
-            getAddrInfo (Just $ defaultHints {
-                addrSocketType = Stream,
-                addrFamily = AF_INET6
-            }) (Just ip6) (Just (show (port netaddr)))
-
-    where
         ip = ipv6o4 netaddr
         h1 = BSR.take 4 $ BSR.drop 0 ip
         h2 = BSR.take 4 $ BSR.drop 4 ip
         h3 = BSR.take 4 $ BSR.drop 8 ip
         h4 = BSR.take 4 $ BSR.drop 12 ip
 
-        is_ip4 = BSR.isPrefixOf ip4ToIP6Pref ip
-
--- nodeNetAddr :: Node -> IO (Maybe NetAddr)
--- nodeNetAddr node = do
---     let sockaddr = addrAddress $ addr node
---     vers <- getA $ vers_payload node
---     alive <- getA $ alive node
-
---     if vers == VersionPending || not alive then
---         -- error "version not ready(no handshake?)"
---         return Nothing
---     else do
---         netaddr <- sockAddrToNetAddr sockaddr (vers_serv vers)
---         return $ Just $ netaddr
+        use_ip4 = BSR.isPrefixOf ip4ToIP6Pref ip ||
+                  not (isSupportedFamily AF_INET6)
 
 isSameIP :: SockAddr -> SockAddr -> Bool
 isSameIP (SockAddrInet _ h1) (SockAddrInet _ h2) = h1 == h2

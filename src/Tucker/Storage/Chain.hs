@@ -242,7 +242,7 @@ data BlockCondition
     | WithHash Hash256
 
 -- block at a specific height in the main branch
--- NOTE: it returns a partial block
+-- returning a partial block with its height
 lookupBlock :: BlockChain -> BlockCondition -> IO (Maybe (Height, Block))
 lookupBlock (BlockChain {
     bc_chain = chain

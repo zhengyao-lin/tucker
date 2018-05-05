@@ -44,6 +44,26 @@ defaultHandler env node msg@(MsgHead {
         trans = conn_trans node
         conf = global_conf env
 
+        nBlocksFrom :: Int -> [Hash256] -> Hash256 -> IO [Block]
+        nBlocksFrom n locators stop_hash =
+            envWithChain env $ \bc -> do
+                res <- mapM (lookupBlock bc . WithHash) locators
+                
+                let cur_height = mainBranchHeight bc
+                    begin_height =
+                        case first isJust res of
+                            Just (Just (height, _)) -> height + 1
+                            Nothing -> 1 -- start right after the genesis
+
+                    range = take n [ begin_height .. cur_height ]
+
+                res <- mapM (lookupBlock bc . AtHeight) range
+
+                let hashes = map snd (maybeCat res)
+                    final = takeWhile ((/= stop_hash) . block_hash) hashes
+
+                return final
+
         d :: MsgPayload t => (t -> IO [RouterAction]) -> IO [RouterAction]
         d = decodePayload env node payload (pure [])
 
@@ -92,9 +112,17 @@ defaultHandler env node msg@(MsgHead {
             d $ \(BlockPayload block) -> do
                 ready <- envIsSyncReady env
 
-                if ready then
+                if ready then do
                     -- envInfo env "adding new block"
-                    envAddBlockIfNotExist env node block
+                    added <- envAddBlockIfNotExist env node block
+
+                    when added $ do
+                        inv <- encodeMsg conf BTC_CMD_INV $
+                               encodeInvPayload [InvVector INV_TYPE_BLOCK (block_hash block)]
+
+                        -- propagate inv to nodes other than the current one
+                        envBroadcastActionExcept (/= node) env (A.sendMsgA inv)
+
                 else
                     nodeInfo env node "an unsolicited block received"
 
@@ -150,31 +178,38 @@ defaultHandler env node msg@(MsgHead {
             }) -> do
                 nodeInfo env node ("node requested getblocks with locators: " ++ show locators)
 
-                hashes <- envWithChain env $ \bc -> do
-                    res <- mapM (lookupBlock bc . WithHash) locators
-                    
-                    let cur_height = mainBranchHeight bc
-                        begin_height =
-                            case first isJust res of
-                                Just (Just (height, _)) -> height + 1
-                                Nothing -> 1 -- start right after the genesis
-
-                        range = take (tckr_max_getdata_batch conf)
-                                     [ begin_height .. cur_height ]
-
-                    res <- mapM (lookupBlock bc . AtHeight) range
-
-                    let hashes = map (block_hash . snd) (maybeCat res)
-                        final = takeWhile (/= stop_hash) hashes
-
-                    return final
+                hashes <-
+                    map block_hash <$>
+                    nBlocksFrom (tckr_max_getblocks_batch conf) locators stop_hash
 
                 -- reply with hashes
-                inv <- encodeMsg conf BTC_CMD_INV $
-                       encodeInvPayload (map (InvVector INV_TYPE_BLOCK) hashes)
-                tSend trans inv
+                unless (null hashes) $ do
+                    inv <- encodeMsg conf BTC_CMD_INV $
+                           encodeInvPayload (map (InvVector INV_TYPE_BLOCK) hashes)
+                    tSend trans inv
 
                 return []
+
+        h BTC_CMD_GETHEADERS =
+            d $ \(GetblocksPayload {
+                locator = locators,
+                stop_hash = stop_hash
+            }) -> do
+                -- nodeInfo env node ("node requested getheaders with locators: " ++ show locators)
+
+                headers <-
+                    map BlockHeader <$>
+                    nBlocksFrom (tckr_max_getheaders_batch conf) locators stop_hash
+
+                nodeInfo env node ("returning headers of size " ++ show (length headers))
+
+                headers <- encodeMsg conf BTC_CMD_HEADERS $
+                           encodeHeadersPayload headers
+                tSend trans headers
+
+                return []
+
+        -- h BTC_CMD_HEADERS =
 
         h BTC_CMD_INV =
             d $ \(InvPayload inv_vect) -> do
