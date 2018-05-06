@@ -4,7 +4,7 @@ github:              "rod-lin/tucker"
 license:             MIT
 author:              "Rod Lin"
 maintainer:          "rod.yeti@outlook.com"
-copyright:           "2018 Rod"
+copyright:           "2018 Rod Lin"
 
 extra-source-files:
 - README.md
@@ -53,32 +53,31 @@ dependencies:
 
 library:
   source-dirs: src
-
-c-sources:
-  - chash/mine.c
-  - chash/sha256.c
-  - chash/hash256.c
-  - chash/enc.c
-
+  c-sources:
+    - chash/mine.c
+    - chash/sha256.c
+    - chash/hash256.c
+    - chash/enc.c
+    
 executables:
   tucker-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    - -optc-O3
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts=-N
+      - -optc-O3
     dependencies:
-    - tucker
+      - tucker
 
 tests:
   tucker-test:
     main:                Main.hs
     source-dirs:         test
     ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts=-N
     dependencies:
-    - tucker
+      - tucker

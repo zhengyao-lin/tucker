@@ -59,13 +59,6 @@ seedLookup conf host =
 
     `catch` \e -> (e :: SomeException) `seq` return []
 
--- try to trim a message from the received data
--- if a complete message is found, return (Right MsgHead {}, rest of data)
--- if the message is incomplete, return (Right LackData, original data)
--- if the message if incorrect, return (Left err, original data)
--- trimMsg :: ByteString -> (Either TCKRError MsgHead, ByteString)
--- trimMsg = decodeLE
-
 -- SockAddr is a part of AddrInfo
 -- NetAddr is a component of bitcoin protocol
 sockAddrToNetAddr :: SockAddr -> NodeServiceType -> IO NetAddr
