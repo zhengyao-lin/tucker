@@ -1,8 +1,6 @@
 module Tucker.P2P.Init where
 
 import Data.Foldable as FD
-import qualified Data.Set as SET
-import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
 import Control.Concurrent

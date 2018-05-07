@@ -2,15 +2,16 @@
 
 -- general map
 
-module Tucker.IOMap where
+module Tucker.Container.IOMap where
 
-import qualified Data.Map.Strict as MP
 import qualified Data.ByteString as BSR
 
 import Control.Monad
 
 import Tucker.Enc
 import Tucker.Atom
+
+import qualified Tucker.Container.Map as MAP
 
 class IOMap a k v | a -> k, a -> v where
     lookupIO :: a -> k -> IO (Maybe v)
@@ -37,19 +38,19 @@ class IOMap a k v | a -> k, a -> v where
     countIO :: Integral t => a -> IO t
     countIO a = foldKeyIO a 0 (\n _ -> return (n + 1))
 
-data CacheMap a k v = CacheMap (Atom (MP.Map k (Maybe v))) a
+data CacheMap a k v = CacheMap (Atom (MAP.TMap k (Maybe v))) a
 type CacheMapWrap a k v = CacheMap (a k v) k v
 
 wrapCacheMap :: a -> IO (CacheMap a k v)
 wrapCacheMap parent = do
-    mmap <- newA MP.empty
+    mmap <- newA MAP.empty
     return (CacheMap mmap parent)
 
 syncCacheMap :: IOMap a k v => CacheMap a k v -> IO ()
 syncCacheMap (CacheMap mmap parent) = do
-    map <- appA_ (const MP.empty) mmap
+    map <- appA_ (const MAP.empty) mmap
 
-    forM_ (MP.toList map) $ \(k, mv) ->
+    forM_ (MAP.toList map) $ \(k, mv) ->
         case mv of
             Nothing -> deleteIO parent k
             Just v -> insertIO parent k v
@@ -58,18 +59,18 @@ unwrapCacheMap :: IOMap a k v => CacheMap a k v -> IO a
 unwrapCacheMap bmap@(CacheMap _ parent) =
     syncCacheMap bmap >> return parent
 
-instance (Ord k, IOMap a k v) => IOMap (CacheMap a k v) k v where
+instance (MAP.Constraint k, IOMap a k v) => IOMap (CacheMap a k v) k v where
     lookupIO (CacheMap mmap parent) k = do
         map <- getA mmap
-        case MP.lookup k map of
+        case MAP.lookup k map of
             Nothing -> lookupIO parent k
             Just res -> return res
 
     insertIO (CacheMap mmap _) k v =
-        appA (MP.insert k (Just v)) mmap >> return ()
+        appA (MAP.insert k (Just v)) mmap >> return ()
 
     deleteIO (CacheMap mmap _) k =
-        appA (MP.insert k Nothing) mmap >> return ()
+        appA (MAP.insert k Nothing) mmap >> return ()
 
     foldKeyIO (CacheMap mmap parent) init proc = do
         map_var <- getA mmap >>= newA
@@ -77,22 +78,7 @@ instance (Ord k, IOMap a k v) => IOMap (CacheMap a k v) k v where
         foldKeyIO parent init $ \init k -> do
             map <- getA map_var
 
-            case MP.lookup k map of
+            case MAP.lookup k map of
                 Nothing -> proc init k
                 Just Nothing -> return init -- deleted already
                 Just (Just _) -> proc init k
-
-    -- sync (GeneralCacheMap mmap parent) = do
-    --     map <- appA_ (const MP.empty) mmap
-
-    --     forM_ (MP.toList map) $ \(k, mv) ->
-    --         case mv of
-    --             Nothing -> delete parent (decodeFailLE k)
-    --             Just v -> set parent (decodeFailLE k) v
-
--- instance (Encodable k, Decodable k, IOMap ByteString v a)
---          => IOMap k v (CacheMap k v a) where
-
---     lookupIO a k = lookupIO a (encodeLE k)
---     insertIO a k v = insertIO a (encodeLE K) v
---     deleteIO a k = deleteIO a (encodeLE k)

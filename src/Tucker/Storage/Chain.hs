@@ -24,10 +24,11 @@ import Tucker.Util
 import Tucker.Auth
 import Tucker.Conf
 import Tucker.Error
-import Tucker.IOMap
 import Tucker.Signal
 import Tucker.Thread
 import Tucker.DeepSeq
+
+import Tucker.Container.IOMap
 
 import Tucker.Storage.Tx
 import Tucker.Storage.Block

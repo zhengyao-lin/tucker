@@ -4,7 +4,6 @@ module Tucker.Storage.Tx where
 
 import Data.Word
 import Data.Bits
-import qualified Data.Set as SET
 import qualified Data.Foldable as FD
 
 import Tucker.DB
@@ -12,8 +11,10 @@ import Tucker.Msg
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Conf
-import Tucker.IOMap
 import Tucker.DeepSeq
+
+import Tucker.Container.IOMap
+import qualified Tucker.Container.Set as SET
 
 type TxLocator = (Hash256, Word32)
 
@@ -101,9 +102,9 @@ data TxState u =
 
         -- currently useless without mining
         -- valid yet not included in blocks
-        tx_mem_pool    :: SET.Set TxPayload,
+        tx_mem_pool    :: SET.TSet TxPayload,
         -- input not found but may be valid in the near future
-        tx_orphan_pool :: SET.Set TxPayload
+        tx_orphan_pool :: SET.TSet TxPayload
     }
 
 instance NFData (TxState a) where

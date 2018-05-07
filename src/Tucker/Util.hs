@@ -8,7 +8,6 @@ import Data.Bits
 import Data.List
 import Data.Time.Clock.POSIX
 import qualified Data.Foldable as FD
-import qualified Data.Set.Ordered as OSET
 import qualified Data.ByteString.Char8 as BS
 
 import System.Clock
@@ -24,6 +23,8 @@ import qualified Control.Monad.Trans.Maybe as MT
 
 import Tucker.Error
 import Tucker.DeepSeq
+
+import qualified Tucker.Container.Set as SET
 
 type Id a = a
 
@@ -77,7 +78,7 @@ instance Monoid (PartialList a) where
     mappend _ _ = error "partial list involved in list appending"
 
 unixTimestamp :: Integral a => IO a
-unixTimestamp = round `fmap` getPOSIXTime
+unixTimestamp = floor `fmap` getPOSIXTime
 
 replace pos new list = take pos list ++ new : drop (pos + 1) list
 replaceApp pos f list = take pos list ++ f (list !! pos) : drop (pos + 1) list
@@ -197,14 +198,14 @@ sepWhenM pred =
         else
             return (l1, l2 ++ [v])) ([], [])
 
-listUnion :: Ord a => [[a]] -> [a]
-listUnion lists =
-    FD.toList $
-    foldl (OSET.|<>) OSET.empty $
-    map OSET.fromList lists
+listUnion :: SET.Constraint a => [[a]] -> [a]
+listUnion = unique . concat
 
-unique :: Ord a => [a] -> [a]
-unique = FD.toList . OSET.fromList
+unique :: SET.Constraint a => [a] -> [a]
+unique lst =
+    snd $
+    foldl (\(s, l) e -> if e `SET.member` s then (s, l) else (SET.insert e s, l ++ [e]))
+          (SET.empty, []) lst
 
 printf :: TP.PrintfType r => String -> r
 printf = TP.printf

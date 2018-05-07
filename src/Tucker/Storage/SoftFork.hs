@@ -4,7 +4,6 @@ module Tucker.Storage.SoftFork where
 
 import Data.Word
 import Data.List
-import qualified Data.Map.Strict as MP
 
 import Control.Monad
 import Control.Applicative
@@ -15,7 +14,9 @@ import Tucker.Enc
 import Tucker.Util
 import Tucker.Conf
 import Tucker.Atom
-import Tucker.IOMap
+
+import Tucker.Container.IOMap
+import qualified Tucker.Container.Map as MAP
 
 instance Decodable [SoftFork] where
     decoder = many decoder
@@ -27,7 +28,7 @@ data SoftForkState =
     SoftForkState {
         fork_conf   :: TCKRConf,
 
-        sf_status   :: Atom (MP.Map String SoftFork),
+        sf_status   :: Atom (MAP.TMap String SoftFork),
 
         bucket_fork :: CacheMapWrap DBBucket SoftForkId [SoftFork],
         bucket_stat :: CacheMapWrap DBBucket SoftForkId Word32
@@ -59,11 +60,11 @@ initForkState conf@(TCKRConf {
             -- append new forks
             insertIO bucket_fork i (cur_forks ++ forks)
 
-    sf_status <- newA MP.empty
+    sf_status <- newA MAP.empty
 
     -- set up name -> fork mappings
     forM_ all_forks $ \fork -> do
-        appA (MP.insert (fork_name fork) fork) sf_status
+        appA (MAP.insert (fork_name fork) fork) sf_status
         return ()
 
     return $ SoftForkState {
@@ -88,14 +89,14 @@ getForkStatus (SoftForkState {
     sf_status = sf_status
 }) name =
     maybe FORK_STATUS_UNDEFINED fork_status <$>
-    MP.lookup name <$>
+    MAP.lookup name <$>
     getA sf_status
 
 getForkByName :: SoftForkState -> String -> IO (Maybe SoftFork)
 getForkByName (SoftForkState {
     sf_status = sf_status
 }) name =
-    MP.lookup name <$> getA sf_status
+    MAP.lookup name <$> getA sf_status
 
 -- csv 768095(locked in)
 --     770112(active)
@@ -121,7 +122,7 @@ changeForkStatus (SoftForkState {
     case elemIndex fork forks of
         Just i -> do
             let nlist = replace i new_fork forks
-            appA (MP.insert (fork_name fork) new_fork) sf_status
+            appA (MAP.insert (fork_name fork) new_fork) sf_status
 
             insertIO bucket_fork bit nlist
 

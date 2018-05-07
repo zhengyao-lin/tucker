@@ -21,7 +21,6 @@ import Crypto.PubKey.ECC.ECDSA hiding (sign, verify)
 import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 
 import Crypto.Hash (hash, Digest)
-import Crypto.Hash.NoHash
 import Crypto.Hash.Algorithms
 
 -- import Data.ByteString.Base58

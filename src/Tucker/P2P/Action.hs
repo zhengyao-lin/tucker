@@ -1,18 +1,14 @@
 module Tucker.P2P.Action where
 
 import Data.List
-import qualified Data.Map as MAP
-import qualified Data.Set as SET
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
-import qualified Data.Set.Ordered as OSET
 
 import Control.Monad
 import Control.Exception
 import Control.Concurrent
 import Control.Applicative
 import Control.Monad.Loops
-import Control.Concurrent.Thread.Delay
 
 -- import System.IO
 import System.Exit
@@ -27,6 +23,7 @@ import Tucker.Error
 import Tucker.Thread
 import Tucker.Transport
 import qualified Tucker.Lock as LK
+import qualified Tucker.Container.Map as MAP
 
 import Tucker.P2P.Msg
 import Tucker.P2P.Node
@@ -141,7 +138,7 @@ instance NodeTask BlockFetchTask where
 -- sync with n nodes
 sync :: MainLoopEnv -> Int -> IO ()
 sync env n = do
-    sync_inv_var <- newA OSET.empty
+    sync_inv_var <- newA []
     finished_var <- newA 0 :: IO (Atom Int)
 
     -- current height of the main branch
@@ -158,14 +155,14 @@ sync env n = do
         taskDone sched node hashes = do
             removeNode sched node
 
-            appA (OSET.|<> OSET.fromList hashes) sync_inv_var
+            appA (hashes:) sync_inv_var
             finished <- appA (+1) finished_var
 
             when (finished == n) $ do
                 -- no double execution when finished > n
                 cancel sched
 
-                sync_inv <- FD.toList <$> getA sync_inv_var
+                sync_inv <- listUnion <$> getA sync_inv_var
                 sync_inv <- envFilterExistingBlock env sync_inv
 
                 let last_batch = length sync_inv < envConf env tckr_max_getblocks_batch

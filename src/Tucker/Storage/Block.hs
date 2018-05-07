@@ -57,7 +57,6 @@ module Tucker.Storage.Block (
 import Data.Int
 import Data.Word
 import Data.List hiding (map)
-import qualified Data.Set as SET
 
 import Control.Monad
 import Control.Applicative
@@ -68,8 +67,11 @@ import Tucker.Enc
 import Tucker.Util
 import Tucker.Conf
 import Tucker.Error
-import Tucker.IOMap
 import Tucker.DeepSeq
+
+import Tucker.Container.IOMap
+import qualified Tucker.Container.Set as SET
+import qualified Tucker.Container.OMap as OMAP
 
 data Branch
     = BlockNode {
@@ -106,8 +108,11 @@ data Chain =
 
         saved_height    :: Height, -- hight of the lowest block stored in memory
 
-        orphan_pool_idx :: SET.Set Hash256,
-        orphan_pool     :: [Block],
+        -- orphan_pool_idx :: SET.TSet Hash256,
+        -- orphan_pool     :: [Block],
+
+        orphan_pool     :: OMAP.OMap Hash256 Block,
+
         buffer_chain    :: Maybe Branch, -- NEVER use buffer_chain alone
         -- replace the old buffer chain when a new buffer chain is formed
         -- the length of the buffer chain should >= tckr_max_tree_insert_depth
@@ -179,8 +184,7 @@ initChain conf@(TCKRConf {
 
             saved_height = 0,
 
-            orphan_pool_idx = SET.empty,
-            orphan_pool = [],
+            orphan_pool = OMAP.empty,
             
             buffer_chain = Nothing,
             edge_branches = [],
@@ -602,22 +606,18 @@ prevBlockNode chain branch =
 
 addOrphan :: Chain -> Block -> Chain
 addOrphan chain block =
-    if block_hash block `SET.member` (orphan_pool_idx chain) then chain
-    else
-        chain {
-            orphan_pool_idx = SET.insert (block_hash block) (orphan_pool_idx chain),
-            orphan_pool = orphan_pool chain ++ [block]
-        }
+    chain {
+        orphan_pool = OMAP.insert (block_hash block) block (orphan_pool chain)
+    }
 
 removeOrphan :: Chain -> Block -> Chain
 removeOrphan chain block =
     chain {
-        orphan_pool_idx = SET.delete (block_hash block) (orphan_pool_idx chain),
-        orphan_pool = delete block (orphan_pool chain)
+        orphan_pool = OMAP.delete (block_hash block) (orphan_pool chain)
     }
 
 orphanList :: Chain -> [Block]
-orphanList = orphan_pool
+orphanList = map snd . OMAP.toList . orphan_pool
 
 -- received before && is in a branch
 hasBlockInChain :: Chain -> Hash256 -> IO Bool
@@ -646,7 +646,7 @@ hasBlockInChain chain@(Chain {
 
 hasBlockInOrphan :: Chain -> Hash256 -> Bool
 hasBlockInOrphan chain hash =
-    hash `SET.member` orphan_pool_idx chain
+    hash `OMAP.member` orphan_pool chain
 
 isMainBranch :: Chain -> Branch -> Bool
 isMainBranch chain branch =

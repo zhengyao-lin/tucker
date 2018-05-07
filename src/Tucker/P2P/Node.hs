@@ -2,9 +2,8 @@ module Tucker.P2P.Node where
 
 import Data.List
 import Data.Word
+import Data.Hashable
 import Data.Foldable as FD
-import qualified Data.Set as SET
-import qualified Data.Set.Ordered as OSET
 
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
@@ -160,6 +159,9 @@ instance Eq Node where
 instance Ord Node where
     compare (Node { thread_id = t1 }) (Node { thread_id = t2 })
         = compare t1 t2
+
+instance Hashable Node where
+    hashWithSalt salt n = hashWithSalt salt (thread_id n)
 
 instance Show Node where
     show node =

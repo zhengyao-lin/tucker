@@ -4,9 +4,7 @@ import Data.Word
 
 import Control.Monad
 import Control.Concurrent
-import Control.Concurrent.Thread.Delay
 
-import System.Mem
 import System.Environment
 
 import Tucker.Conf

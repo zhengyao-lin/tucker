@@ -2,7 +2,6 @@ module Tucker.Lock where
 
 import Control.Monad
 import Control.Concurrent
-import qualified Control.Concurrent.Lock as LK
 
 import Tucker.Atom
 import Tucker.Util
@@ -24,8 +23,6 @@ new = do
         raw_lock = raw_lock
     }
 
--- note this acquire function has different semantics with LK.acquire
--- as it will not block the thread when multiple acquires are performed
 acquire :: Lock -> IO ()
 acquire lock = do
     my_tid <- myThreadId

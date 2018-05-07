@@ -8,6 +8,7 @@ import Data.Int
 import Data.Char
 import Data.Word
 import Data.Bits
+import Data.Hashable
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -35,6 +36,10 @@ instance Ord OutPoint where
 
 instance NFData OutPoint where
     rnf (OutPoint h w) = rnf (h, w)
+
+instance Hashable OutPoint where
+    hashWithSalt salt (OutPoint h idx) =
+        hashWithSalt (salt + fi idx) h
 
 -- note this has to be signed
 -- given a positive value a
@@ -148,6 +153,9 @@ data TxPayload =
 
 instance Eq TxPayload where
     tx1 == tx2 = txid tx1 == txid tx2
+
+instance Hashable TxPayload where
+    hashWithSalt s t = hashWithSalt s (txid t)
 
 instance NFData TxPayload where
     rnf (TxPayload txid wtxid version flag tx_in tx_out tx_witness lock_time) =

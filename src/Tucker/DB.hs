@@ -7,7 +7,6 @@ module Tucker.DB where
 
 import Data.Hex
 import Data.Word
-import qualified Data.Map.Strict as MP
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
@@ -24,7 +23,8 @@ import Control.Monad.Trans.Resource
 import Tucker.Enc
 import Tucker.Util
 import Tucker.Atom
-import Tucker.IOMap
+
+import Tucker.Container.IOMap
 
 type Database = D.DB
 
@@ -106,9 +106,6 @@ data DBBucket k v =
     DBBucket {
         bucket_pref :: ByteString,
         raw_db      :: Database
-
-        -- use buffer map if present
-        -- buffer_map  :: Atom (Maybe (MP.Map ByteString (Maybe ByteString)))
     }
 
 instance Show (DBBucket k v) where

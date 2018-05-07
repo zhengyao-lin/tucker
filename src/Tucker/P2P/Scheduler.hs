@@ -1,7 +1,6 @@
 module Tucker.P2P.Scheduler where
 
 import Data.List
-import qualified Data.Set as SET
 
 import Control.Monad
 import Control.Concurrent
@@ -10,6 +9,7 @@ import Tucker.Atom
 import Tucker.Util
 import Tucker.Thread
 import qualified Tucker.Lock as LK
+import qualified Tucker.Container.Set as SET
 
 import Tucker.P2P.Node
 
@@ -18,7 +18,7 @@ data Scheduler t =
     Scheduler {
         sched_tid   :: ThreadId,
         var_lock    :: LK.Lock,
-        blacklist   :: Atom (SET.Set Node),
+        blacklist   :: Atom (SET.TSet Node),
         cur_assign  :: Atom [(Node, t)],
         sched_alive :: Atom Bool
     }

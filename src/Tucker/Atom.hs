@@ -5,8 +5,6 @@ module Tucker.Atom where
 
 import Data.IORef
 
-import qualified System.IO.Strict as SIO
-
 import Tucker.Util
 
 -- type Atom t = TVar t
@@ -55,6 +53,3 @@ peekA x f =
 lseq :: [a] -> b -> b
 lseq []     w = w
 lseq (x:xs) w = x `seq` lseq xs w
-
-putStr' = SIO.run . SIO.putStr
-putStrLn' = SIO.run . SIO.putStrLn

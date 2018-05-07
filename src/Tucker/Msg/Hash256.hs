@@ -7,6 +7,7 @@ import Data.Int
 import Data.Bits
 import Data.Word
 import Data.Char
+import Data.Hashable
 import qualified Data.ByteArray as BA
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
@@ -121,6 +122,10 @@ instance Decodable Hash256 where
 
 instance Sizeable Hash256 where
     sizeOf _ = 32
+
+instance Hashable Hash256 where
+    hashWithSalt salt (Hash256 bs) =
+        (fi (decodeFailLE (BSR.drop 28 bs) :: Word32)) `xor` salt
 
 nullHash256 = Hash256 nullHash256BS
 nullHash256BS = BSR.replicate 32 0

@@ -20,10 +20,9 @@ extra-source-files:
 description:         Please see the README on Github at <https://github.com/rod-lin/tucker>
 
 dependencies:
-- base >= 4.7 && < 5
+- base >= 4.7
 - bytestring
 - stm
-- strict-io
 - time
 - monad-loops
 - network
@@ -35,12 +34,8 @@ dependencies:
 - hex
 - random
 - HUnit
-- unbounded-delays
 - cryptonite
 - memory
-- containers
-- ordered-containers
-- concurrent-extra
 - mtl
 - split
 - transformers
@@ -50,6 +45,9 @@ dependencies:
 - secp256k1
 - clock
 - iproute
+- hashable
+- unordered-containers
+- insert-ordered-containers
 
 library:
   source-dirs: src
