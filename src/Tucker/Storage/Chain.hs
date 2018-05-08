@@ -139,6 +139,18 @@ what do we need to check for each transaction:
 5. validity of values involved(amount of input, amount of output, sum(inputs) >= sum(outputs))
 6. the highest 3 bits must be 001
 
+
+mem pool transaction check
+
+not coinbase, regular input/output check
+no duplication in mem pool and main branch
+referenced output not in other tx in the pool
+
+when searching for output: make sure to search the transaction pool as well
+Add to transaction pool
+Relay transaction to peers
+For each orphan transaction that uses this one as one of its inputs, run all these steps (including this one) recursively on that orphan
+
 -}
 
 {-
@@ -556,26 +568,9 @@ verifyInput bc@(BlockChain {
             prev_out = outp@(OutPoint prev_txid out_idx)
         }) = tx_in tx !! in_idx
 
-    -- tLnM (show outp)
-
     -- :: UTXOValue
     uvalue <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
         lookupUTXO tx_state outp
-
-    -- muvalue <- lookupUTXO tx_state outp
-
-    -- uvalue <-
-    --     case muvalue of
-    --         Just uvalue -> return uvalue
-    --         Nothing -> do
-    --             tLnM "remember to remove me!!!!"
-    --             addOutPoint bc outp
-    --             expectMaybeIO ("outpoint not in utxo " ++ show outp) $
-    --                 lookupUTXO tx_state outp
-
-    -- prev_bnode <- parentBranchOfTx bc tx_state branch prev_txid
-
-    -- segwit tx 7a37e24659e0313b9e59aabbcc447c290fe34a4f80f8e0117cbfd1c6d1dfa804
 
     when (verify_enable_csv ver_conf &&
           version tx >= 2) $ do
@@ -641,6 +636,26 @@ updateChain bc chain =
     return $ bc {
         bc_chain = chain
     }
+
+hasTxInChain :: BlockChain -> Hash256 -> IO ()
+hasTxInChain bc txid = error "not implemented"
+    -- findTxId -> check if the block is in the main branch
+
+-- verify tx in the pool and either reject it or put it into the mem pool or orphan pool
+verifyPoolTx :: BlockChain -> TxPayload -> IO ()
+verifyPoolTx bc tx = error "not implemented"
+    -- (no check for locktime)
+    -- check for duplication(in chain, mem pool, and orphan pool)
+    -- for each input:
+    --     check utxo exists either in chain or in mem pool(lookupUTXOMemPool)
+    --     if not, add to orphan pool
+    --     else
+    --         (no coinbase maturity)
+    --         check script
+    --         return value
+    -- check total input >= total output
+    -- done, put it into the mem pool
+    -- (these checks are sufficient for now)
 
 -- NOTE: the block given is not necessarily the top block
 verifyBlockTx :: BlockChain -> Branch -> Block -> IO ()
