@@ -19,7 +19,6 @@ import Tucker.DeepSeq
 import Tucker.Container.IOMap
 import qualified Tucker.Container.Set as SET
 import qualified Tucker.Container.Map as MAP
-import qualified Tucker.Container.OMap as OMAP
 
 type TxLocator = (Hash256, Word32)
 
@@ -91,6 +90,8 @@ instance Decodable UTXOValue where
 
 -- class (UTXOMap a, IsCacheMap a) => UTXOCacheN a where
 
+type PoolTx = (TxPayload, Timestamp)
+
 -- a giant structure handling all transactions(orphans, mempool, ...)
 data TxState u =
     TxState {
@@ -112,10 +113,10 @@ data TxState u =
         -- valid yet not included in blocks
         tx_out_mask    :: Atom (SET.TSet OutPoint), -- outputs used by mem pool txns
         tx_out_new     :: Atom (UTXOArg MAP.TMap), -- new outputs enabled by the mem pool txns
-        tx_mem_pool    :: Atom (MAP.TMap Hash256 TxPayload),
+        tx_mem_pool    :: Atom (MAP.TMap Hash256 PoolTx),
         
         -- input not found but may be valid in the near future
-        tx_orphan_pool :: Atom (OMAP.OMap Hash256 TxPayload)
+        tx_orphan_pool :: Atom (MAP.TMap Hash256 PoolTx)
     }
 
 instance NFData (TxState a) where
@@ -136,7 +137,7 @@ initTxState conf@(TCKRConf {
     out_mask <- newA SET.empty
     out_new <- newA MAP.empty
     mem_pool <- newA MAP.empty
-    orphan_pool <- newA OMAP.empty
+    orphan_pool <- newA MAP.empty
 
     return $ TxState {
         tx_set_conf = conf,
@@ -214,10 +215,6 @@ lookupUTXO :: UTXOMap a => TxState a -> OutPoint -> IO (Maybe UTXOValue)
 lookupUTXO state outpoint = do
     lookupIO (utxo_map state) outpoint
 
-    -- return $ mvalue >>= \v ->
-    --     if v >= 0 then return v
-    --     else fail "spent value"
-
 -- lookup for a accepted txid
 findTxId :: TxState a -> Hash256 -> IO (Maybe TxLocator)
 findTxId = lookupIO . bucket_tx
@@ -244,7 +241,7 @@ withCacheUTXO state proc = do
 
 -- lookup mem pool along with mem pool
 -- only returns TxOuput because we can not guarantee more info(block height, etc.)
-lookupUTXOMemPool :: UTXOMap a => TxState a -> OutPoint -> IO (Maybe TxOutput)
+lookupUTXOMemPool :: UTXOMap a => TxState a -> OutPoint -> IO (Maybe UTXOValue)
 lookupUTXOMemPool state outpoint = do
     res <- lookupIO (utxo_map state) outpoint
 
@@ -252,14 +249,14 @@ lookupUTXOMemPool state outpoint = do
         Nothing -> do
             -- look up out_new
             res <- MAP.lookup outpoint <$> getA (tx_out_new state)
-            return (u_tx_out <$> res)
+            return res
 
         Just out -> do
             -- make sure it's not masked by the mem pool txns
             masked <- SET.member outpoint <$> getA (tx_out_mask state)
 
             if masked then return Nothing
-            else return (Just (u_tx_out out))
+            else return (Just out)
 
 addMemPoolTx :: UTXOMap a => TxState a -> TxPayload -> IO ()
 addMemPoolTx (TxState {
@@ -267,8 +264,10 @@ addMemPoolTx (TxState {
     tx_out_new = out_new,
     tx_mem_pool = mem_pool
 }) tx = do
+    now <- unixTimestamp
+
     -- add the tx to the mem pool
-    appA (MAP.insert (txid tx) tx) mem_pool
+    appA (MAP.insert (txid tx) (tx, now)) mem_pool
 
     -- add all used output to out_mask
     forM_ (tx_in tx) $ \input ->
@@ -277,7 +276,7 @@ addMemPoolTx (TxState {
     -- add new output enabled by the tx
     forM_ ([0..] `zip` tx_out tx) $ \(i, out) ->
         flip appA out_new $ MAP.insert (OutPoint (txid tx) (fi i)) (UTXOValue {
-            parent_ts = maxBound,
+            parent_ts = now, -- mem pool tx is always "current"
             parent_height = maxBound,
             tx_index = maxBound,
             u_tx_out = out
@@ -293,7 +292,7 @@ removeMemPoolTx (TxState {
 
     case mtx of
         Nothing -> return ()
-        Just tx -> do
+        Just (tx, _) -> do
             -- delete tx from the mem pool
             appA (MAP.delete txid) mem_pool
 
@@ -304,3 +303,33 @@ removeMemPoolTx (TxState {
             -- remove new output enabled by the tx
             forM_ ([0..] `zip` tx_out tx) $ \(i, out) ->
                 appA (MAP.delete (OutPoint txid (fi i))) out_new
+
+addOrphanTx :: UTXOMap a => TxState a -> TxPayload -> IO ()
+addOrphanTx state tx = do
+    now <- unixTimestamp
+    appA (MAP.insert (txid tx) (tx, now)) (tx_orphan_pool state)
+    return ()
+
+removeOrphanTx :: UTXOMap a => TxState a -> Hash256 -> IO ()
+removeOrphanTx state hash = do
+    appA (MAP.delete hash) (tx_orphan_pool state)
+    return ()
+
+filterOrphanPoolTx :: UTXOMap a => TxState a -> (TxPayload -> Bool) -> IO [TxPayload]
+filterOrphanPoolTx state pred =
+    filter pred <$> map (fst . snd) <$> MAP.toList <$> getA (tx_orphan_pool state)
+
+-- remove timeout txns in the pool
+timeoutPoolTx :: UTXOMap a => TxState a -> Timestamp -> IO ()
+timeoutPoolTx state min = do
+    appA (MAP.filter ((>= min) . snd)) (tx_mem_pool state)
+    appA (MAP.filter ((>= min) . snd)) (tx_orphan_pool state)
+    return ()
+
+hasTxInMemPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
+hasTxInMemPool state hash =
+    MAP.member hash <$> getA (tx_mem_pool state)
+
+hasTxInOrphanPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
+hasTxInOrphanPool state hash =
+    MAP.member hash <$> getA (tx_orphan_pool state)

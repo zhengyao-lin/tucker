@@ -8,6 +8,8 @@ class NFData a where
     rnf :: a -> ()
     rnf v = v `seq` () -- default
 
+instance NFData ()
+    
 instance NFData Int
 instance NFData Int8
 instance NFData Int16

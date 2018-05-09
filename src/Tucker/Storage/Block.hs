@@ -40,6 +40,7 @@ module Tucker.Storage.Block (
     removeOrphan,
     orphanList,
 
+    hasBlockInBranch,
     hasBlockInChain,
     hasBlockInOrphan,
 
@@ -618,6 +619,10 @@ removeOrphan chain block =
 
 orphanList :: Chain -> [Block]
 orphanList = map snd . OMAP.toList . orphan_pool
+
+hasBlockInBranch :: Chain -> Branch -> Hash256 -> IO Bool
+hasBlockInBranch chain branch hash =
+    isJust <$> branchWithHash chain branch hash
 
 -- received before && is in a branch
 hasBlockInChain :: Chain -> Hash256 -> IO Bool
