@@ -108,7 +108,7 @@ defaultHandler env node msg@(MsgHead {
 
                 return []
 
-        h BTC_CMD_BLOCK = do
+        h BTC_CMD_BLOCK =
             d $ \(BlockPayload block) -> do
                 ready <- envIsSyncReady env
 
@@ -125,6 +125,25 @@ defaultHandler env node msg@(MsgHead {
 
                 else
                     nodeInfo env node "an unsolicited block received"
+
+                return []
+
+        h BTC_CMD_TX =
+            d $ \tx -> do
+                ready <- envIsSyncReady env
+
+                when ready $ do
+                    added <- envAddPoolTxIfNotExist env node tx
+
+                    -- broadcast tx
+                    when added $ do
+                        nodeInfo env node ("broadcasting tx " ++ show (txid tx))
+
+                        inv <- encodeMsg conf BTC_CMD_INV $
+                               encodeInvPayload [InvVector INV_TYPE_TX (txid tx)]
+
+                        -- propagate inv to nodes other than the current one
+                        envBroadcastActionExcept (/= node) env (A.sendMsgA inv)
 
                 return []
 
@@ -155,8 +174,8 @@ defaultHandler env node msg@(MsgHead {
                         res <- case htype of
                             INV_TYPE_BLOCK -> lookupAndSend stripBlockWitness hash
                             INV_TYPE_WITNESS_BLOCK -> lookupAndSend id hash
-                            INV_TYPE_TX -> error "tx mem pool not supported"
-                            INV_TYPE_WITNESS_TX -> error "tx mem pool not supported"
+                            INV_TYPE_TX -> error "mem pool tx lookup not supported"
+                            INV_TYPE_WITNESS_TX -> error "mem pool tx pool not supported"
 
                         return (InvVector htype <$> res)
 
@@ -230,10 +249,22 @@ defaultHandler env node msg@(MsgHead {
                                 -- filter out existing blocks
                                 hashes <- envFilterExistingBlock env hashes
 
-                                -- ask for the block
-                                A.getFullBlocksMsg env hashes >>= tSend trans
+                                -- request for the block
+                                A.getFullDataMsg env INV_TYPE_BLOCK hashes >>= tSend trans
                             else
                                 nodeMsg env node "ignoring new block(s) due to unfinished sync process"
+
+                        INV_TYPE_TX -> do
+                            ready <- envIsSyncReady env
+
+                            when ready $ do
+                                nodeInfo env node ("new txns received: " ++ show first ++ ", ...")
+
+                                -- filter out existing txns
+                                hashes <- envFilterExistingTx env hashes
+
+                                -- request for full txns
+                                A.getFullDataMsg env INV_TYPE_TX hashes >>= tSend trans
 
                         _ ->
                             nodeWarn env node ("unknown inventory received: " ++ show first ++ ", ...")

@@ -383,13 +383,20 @@ scheduleFetch env init_hashes callback = do
 
 -- 00000000a967199a2fad0877433c93df785a8d8ce062e5f9b451cd1397bdbf62
 
-getFullBlocksMsg :: MainLoopEnv -> [Hash256] -> IO ByteString
-getFullBlocksMsg env hashes = do
+getFullDataMsg :: MainLoopEnv -> InvType -> [Hash256] -> IO ByteString
+getFullDataMsg env itype hashes = do
     -- check if segwit is activated
     use_segwit <- envForkEnabled env "segwit"
 
     let conf = global_conf env
-        flag = if use_segwit then INV_TYPE_WITNESS_BLOCK else INV_TYPE_BLOCK
+        flag =
+            if use_segwit then
+                case itype of
+                    INV_TYPE_BLOCK -> INV_TYPE_WITNESS_BLOCK
+                    INV_TYPE_TX -> INV_TYPE_WITNESS_TX
+                    _ -> itype
+            else itype
+
         invs = map (InvVector flag) hashes
 
     encodeMsg conf BTC_CMD_GETDATA $ encodeGetdataPayload invs
@@ -400,7 +407,7 @@ fetchBlock task env node _ = do
         trans = conn_trans node
         hashes = fetchTaskToHashes task 
 
-    getFullBlocksMsg env hashes >>= tSend trans
+    getFullDataMsg env INV_TYPE_BLOCK hashes >>= tSend trans
 
     -- nodeMsg env node "getdata sent"
 

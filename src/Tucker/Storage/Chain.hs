@@ -653,6 +653,15 @@ hasTxInBranch bc branch txid = do
 
     -- findTxId -> check if the block is in the main branch
 
+hasTx :: BlockChain -> Hash256 -> IO Bool
+hasTx bc txid =
+    let tx_state = bc_tx_state bc in
+    anyM (\f -> f txid) [
+        hasTxInMemPool tx_state,
+        hasTxInOrphanPool tx_state,
+        hasTxInBranch bc (mainBranch (bc_chain bc))
+    ]
+
 -- NOTE: the block given is not necessarily the top block
 verifyBlockTx :: BlockChain -> Branch -> Block -> IO ()
 verifyBlockTx bc branch block = do

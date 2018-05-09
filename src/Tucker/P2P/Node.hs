@@ -500,20 +500,19 @@ envAppendNode :: MainLoopEnv -> Node -> IO ()
 envAppendNode env node =
     appA (++ [node]) (node_list env) >> return ()
 
+envWithChain :: MainLoopEnv -> (BlockChain -> IO a) -> IO a
+envWithChain env proc =
+    LK.with (chain_lock env) (getA (block_chain env) >>= proc)
+
 envSyncChain :: MainLoopEnv -> IO ()
-envSyncChain env =
-    getA (block_chain env) >>=
-    LK.with (chain_lock env) . syncBlockChain
+envSyncChain env = envWithChain env syncBlockChain
 
 envHasBlock :: MainLoopEnv -> Hash256 -> IO Bool
-envHasBlock env hash =
-    LK.with (chain_lock env) $
-        getA (block_chain env) >>= (`hasBlock` hash)
+envHasBlock env hash = envWithChain env (`hasBlock` hash)
 
 envFilterExistingBlock :: MainLoopEnv -> [Hash256] -> IO [Hash256]
 envFilterExistingBlock env hashes =
-    LK.with (chain_lock env) $
-        filterM ((not <$>) . envHasBlock env) hashes
+    filterM ((not <$>) . envHasBlock env) hashes
 
 envAddBlock :: MainLoopEnv -> Node -> Block -> IO ()
 envAddBlock env node block =
@@ -543,13 +542,37 @@ envAddBlocks env node =
         after chain = setA (block_chain env) chain >> LK.release (chain_lock env)
         proc block res =
             case res of
-                Left err ->
-                    error $ "error when adding block " ++ show block ++ ": " ++ show err
+                Left err -> -- TODO: remove this on release
+                    error ("error when adding block " ++ show block ++ ": " ++ show err)
                 
                 Right bc -> do
                     nodeMsg env node $
                         "added " ++ show block ++
                         "[" ++ show (mainBranchHeight bc) ++ "]"
+
+envHasTx :: MainLoopEnv -> Hash256 -> IO Bool
+envHasTx env hash = envWithChain env (`hasTx` hash)
+
+envFilterExistingTx :: MainLoopEnv -> [Hash256] -> IO [Hash256]
+envFilterExistingTx env hashes =
+    filterM ((not <$>) . envHasTx env) hashes
+
+envAddPoolTxIfNotExist :: MainLoopEnv -> Node -> TxPayload -> IO Bool
+envAddPoolTxIfNotExist env node tx =
+    envWithChain env $ \chain -> do
+        has <- envHasTx env (txid tx)
+
+        unless has $ do
+            res <- addPoolTx chain tx
+            case res of
+                Nothing ->
+                    nodeMsg env node ("added tx " ++ show (txid tx))
+                    
+
+                Just err -> -- TODO: remove this on release
+                    error ("failed to add pool tx " ++ show (txid tx) ++ ": " ++ show err)
+
+        return (not has)
 
 -- check if a specific soft fork is enabled
 envForkEnabled :: MainLoopEnv -> String -> IO Bool
@@ -586,7 +609,3 @@ envIsLongestChain env = do
 envMainBranchHeight :: MainLoopEnv -> IO Height
 envMainBranchHeight env =
     mainBranchHeight <$> getA (block_chain env)
-
-envWithChain :: MainLoopEnv -> (BlockChain -> IO a) -> IO a
-envWithChain env proc =
-    LK.with (chain_lock env) (getA (block_chain env) >>= proc)
