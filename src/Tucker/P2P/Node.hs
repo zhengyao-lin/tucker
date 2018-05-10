@@ -220,6 +220,14 @@ envSetSyncReady env = setA (sync_ready env)
 envIsSyncReady :: MainLoopEnv -> IO Bool
 envIsSyncReady = getA . sync_ready
 
+envWhenSyncReady :: MainLoopEnv -> IO () -> IO ()
+envWhenSyncReady env action =
+    envIsSyncReady env >>= flip when action
+
+envWhenSyncReady_ :: MainLoopEnv -> IO a -> IO ()
+envWhenSyncReady_ env action =
+    envIsSyncReady env >>= flip when_ action
+
 initEnv :: TCKRConf -> ResIO MainLoopEnv
 initEnv conf = do
     -- tid <- lift myThreadId

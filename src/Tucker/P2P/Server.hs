@@ -130,9 +130,7 @@ defaultHandler env node msg@(MsgHead {
 
         h BTC_CMD_TX =
             d $ \tx -> do
-                ready <- envIsSyncReady env
-
-                when ready $ do
+                envWhenSyncReady env $ do
                     added <- envAddPoolTxIfNotExist env node tx
 
                     -- broadcast tx
@@ -195,17 +193,19 @@ defaultHandler env node msg@(MsgHead {
                 locator = locators,
                 stop_hash = stop_hash
             }) -> do
-                nodeInfo env node ("node requested getblocks with locators: " ++ show locators)
+                envWhenSyncReady_ env $
+                    envFork env THREAD_OTHER $ do
+                        nodeInfo env node ("node requested getblocks with locators: " ++ show locators)
 
-                hashes <-
-                    map block_hash <$>
-                    nBlocksFrom (tckr_max_getblocks_batch conf) locators stop_hash
+                        hashes <-
+                            map block_hash <$>
+                            nBlocksFrom (tckr_max_getblocks_batch conf) locators stop_hash
 
-                -- reply with hashes
-                unless (null hashes) $ do
-                    inv <- encodeMsg conf BTC_CMD_INV $
-                           encodeInvPayload (map (InvVector INV_TYPE_BLOCK) hashes)
-                    tSend trans inv
+                        -- reply with hashes
+                        unless (null hashes) $ do
+                            inv <- encodeMsg conf BTC_CMD_INV $
+                                encodeInvPayload (map (InvVector INV_TYPE_BLOCK) hashes)
+                            tSend trans inv
 
                 return []
 
@@ -215,16 +215,17 @@ defaultHandler env node msg@(MsgHead {
                 stop_hash = stop_hash
             }) -> do
                 -- nodeInfo env node ("node requested getheaders with locators: " ++ show locators)
+                envWhenSyncReady_ env $ do
+                    envFork env THREAD_OTHER $ do
+                        headers <-
+                            map BlockHeader <$>
+                            nBlocksFrom (tckr_max_getheaders_batch conf) locators stop_hash
 
-                headers <-
-                    map BlockHeader <$>
-                    nBlocksFrom (tckr_max_getheaders_batch conf) locators stop_hash
+                        nodeInfo env node ("returning headers of size " ++ show (length headers))
 
-                nodeInfo env node ("returning headers of size " ++ show (length headers))
-
-                headers <- encodeMsg conf BTC_CMD_HEADERS $
-                           encodeHeadersPayload headers
-                tSend trans headers
+                        headers <- encodeMsg conf BTC_CMD_HEADERS $
+                                encodeHeadersPayload headers
+                        tSend trans headers
 
                 return []
 
@@ -255,9 +256,7 @@ defaultHandler env node msg@(MsgHead {
                                 nodeMsg env node "ignoring new block(s) due to unfinished sync process"
 
                         INV_TYPE_TX -> do
-                            ready <- envIsSyncReady env
-
-                            when ready $ do
+                            envWhenSyncReady env $ do
                                 nodeInfo env node ("new txns received: " ++ show first ++ ", ...")
 
                                 -- filter out existing txns

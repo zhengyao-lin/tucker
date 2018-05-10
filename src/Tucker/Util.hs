@@ -391,3 +391,6 @@ isJust _ = False
 isNothing :: Maybe a -> Bool
 isNothing Nothing = True
 isNothing _ = False
+
+when_ cond = when cond . (>> return ())
+unless_ cond = unless cond . (>> return ())

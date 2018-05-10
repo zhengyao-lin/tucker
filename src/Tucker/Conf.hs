@@ -186,7 +186,10 @@ data TCKRConf =
 
         tckr_block_weight_limit :: Int,
 
-        tckr_job_number :: Int
+        tckr_job_number :: Int,
+
+        tckr_pool_tx_limit :: Int, -- when the number of pool tx reaches the limit, remove all timeout txns
+        tckr_pool_tx_timeout :: Timestamp
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -329,7 +332,10 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_block_weight_limit = 4000000,
 
-        tckr_job_number = 1
+        tckr_job_number = 1,
+
+        tckr_pool_tx_limit = 256,
+        tckr_pool_tx_timeout = 7 * 60 * 60 -- 7 hours
     }
 
     where

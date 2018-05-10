@@ -963,10 +963,20 @@ addPoolTx bc tx =
 -- verify tx in the pool and either reject it or put it into the mem pool or orphan pool
 addPoolTxFail :: BlockChain -> TxPayload -> IO ()
 addPoolTxFail bc@(BlockChain {
+    bc_conf = conf,
     bc_tx_state = tx_state
 }) tx = do
     -- (no check for locktime)
     let main = mainBranch (bc_chain bc)
+
+    ntx <- countPoolTx tx_state
+    now <- unixTimestamp
+
+    when (ntx >= tckr_pool_tx_limit conf) $ do
+        timeoutPoolTx tx_state (now - tckr_pool_tx_timeout conf)
+        fin <- countPoolTx tx_state
+
+        tLnM ("reducing mem pool/orphan pool to a total size of " ++ show fin)
 
     is_orphan <- hasTxInOrphanPool tx_state (txid tx)
     

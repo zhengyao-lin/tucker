@@ -326,6 +326,11 @@ timeoutPoolTx state min = do
     appA (MAP.filter ((>= min) . snd)) (tx_orphan_pool state)
     return ()
 
+countPoolTx :: UTXOMap a => TxState a -> IO Int
+countPoolTx state =
+    (+) <$> (MAP.size <$> getA (tx_mem_pool state))
+        <*> (MAP.size <$> getA (tx_orphan_pool state))
+
 hasTxInMemPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
 hasTxInMemPool state hash =
     MAP.member hash <$> getA (tx_mem_pool state)
