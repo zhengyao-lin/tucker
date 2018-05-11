@@ -504,6 +504,8 @@ envBroadcastActionExcept pred env action = do
     forM_ valid_nodes $ \node ->
         nodePrependActions node [action]
 
+envBroadcastAction = envBroadcastActionExcept (const True)
+
 envAppendNode :: MainLoopEnv -> Node -> IO ()
 envAppendNode env node =
     appA (++ [node]) (node_list env) >> return ()

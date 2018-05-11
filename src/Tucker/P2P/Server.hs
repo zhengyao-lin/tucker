@@ -122,7 +122,6 @@ defaultHandler env node msg@(MsgHead {
 
                         -- propagate inv to nodes other than the current one
                         envBroadcastActionExcept (/= node) env (A.sendMsgA inv)
-
                 else
                     nodeInfo env node "an unsolicited block received"
 
@@ -148,8 +147,8 @@ defaultHandler env node msg@(MsgHead {
         h BTC_CMD_GETDATA =
             d $ \(InvPayload invs) -> do
                 let -- return Just hash for blocks that have not been found
-                    lookupAndSend :: (Block -> Block) -> Hash256 -> IO (Maybe Hash256)
-                    lookupAndSend preproc hash =
+                    lookupBlockAndSend :: (Block -> Block) -> Hash256 -> IO (Maybe Hash256)
+                    lookupBlockAndSend preproc hash =
                         envWithChain env $ \bc -> do
                             res <- lookupBlock bc (WithHash hash)
                             case res of
@@ -160,20 +159,34 @@ defaultHandler env node msg@(MsgHead {
                                         Just block -> do
                                             -- send back the block
                                             msg <- encodeMsg conf BTC_CMD_BLOCK $
-                                                encodeBlockPayload (preproc block)
+                                                   encodeBlockPayload (preproc block)
                                             tSend trans msg
 
                                             return Nothing
 
                                 Nothing -> return (Just hash)
 
+                    lookupTxAndSend :: (TxPayload -> TxPayload) -> Hash256 -> IO (Maybe Hash256)
+                    lookupTxAndSend preproc txid =
+                        envWithChain env $ \bc -> do
+                            res <- lookupMemPool bc txid
+
+                            case res of
+                                Nothing -> return (Just txid)
+                                Just tx -> do
+                                    msg <- encodeMsg conf BTC_CMD_TX $
+                                           encodeTxPayload tx
+                                    tSend trans msg
+
+                                    return Nothing
+
                 notfounds' <-
                     forM invs $ \(InvVector htype hash) -> do
                         res <- case htype of
-                            INV_TYPE_BLOCK -> lookupAndSend stripBlockWitness hash
-                            INV_TYPE_WITNESS_BLOCK -> lookupAndSend id hash
-                            INV_TYPE_TX -> error "mem pool tx lookup not supported"
-                            INV_TYPE_WITNESS_TX -> error "mem pool tx pool not supported"
+                            INV_TYPE_BLOCK -> lookupBlockAndSend stripBlockWitness hash
+                            INV_TYPE_WITNESS_BLOCK -> lookupBlockAndSend id hash
+                            INV_TYPE_TX -> lookupTxAndSend stripWitness hash
+                            INV_TYPE_WITNESS_TX -> lookupTxAndSend id hash
 
                         return (InvVector htype <$> res)
 
@@ -204,7 +217,7 @@ defaultHandler env node msg@(MsgHead {
                         -- reply with hashes
                         unless (null hashes) $ do
                             inv <- encodeMsg conf BTC_CMD_INV $
-                                encodeInvPayload (map (InvVector INV_TYPE_BLOCK) hashes)
+                                   encodeInvPayload (map (InvVector INV_TYPE_BLOCK) hashes)
                             tSend trans inv
 
                 return []
@@ -224,12 +237,23 @@ defaultHandler env node msg@(MsgHead {
                         nodeInfo env node ("returning headers of size " ++ show (length headers))
 
                         headers <- encodeMsg conf BTC_CMD_HEADERS $
-                                encodeHeadersPayload headers
+                                   encodeHeadersPayload headers
                         tSend trans headers
 
                 return []
 
         -- h BTC_CMD_HEADERS =
+
+        h BTC_CMD_MEMPOOL =
+            envWithChain env $ \bc -> do
+                txids <- map txid <$> allMemPoolTxns bc
+
+                inv <- encodeMsg conf BTC_CMD_INV $
+                       encodeInvPayload (map (InvVector INV_TYPE_TX) txids)
+
+                tSend trans inv
+
+                return []
 
         h BTC_CMD_INV =
             d $ \(InvPayload inv_vect) -> do
@@ -255,7 +279,7 @@ defaultHandler env node msg@(MsgHead {
                             else
                                 nodeMsg env node "ignoring new block(s) due to unfinished sync process"
 
-                        INV_TYPE_TX -> do
+                        INV_TYPE_TX ->
                             envWhenSyncReady env $ do
                                 nodeInfo env node ("new txns received: " ++ show first ++ ", ...")
 
@@ -267,6 +291,28 @@ defaultHandler env node msg@(MsgHead {
 
                         _ ->
                             nodeWarn env node ("unknown inventory received: " ++ show first ++ ", ...")
+
+                return []
+
+        h BTC_CMD_REJECT =
+            d $ \rej@(RejectPayload {
+                message = message,
+                ccode = ccode,
+                reason = reason,
+                rdata = rdata
+            }) -> do
+                case message of
+                    "tx" -> do
+                        let dres = decodeAllLE rdata
+                            txid =
+                                case dres :: Either TCKRError Hash256 of
+                                    Right hash -> show hash
+                                    Left err -> "(unparsed data)"
+
+                        nodeWarn env node ("rejected tx " ++ txid ++ ": " ++ show ccode ++ " " ++ show reason)
+
+                    _ ->
+                        nodeWarn env node ("unknown rejection: " ++ show rej)
 
                 return []
 

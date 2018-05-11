@@ -27,17 +27,19 @@ data RejectType
     | REJECT_CHECKPOINT deriving (Show, Eq)
         
 reject_type_map = [
-        (REJECT_MALFORMED, 0x01),
-        (REJECT_INVALID, 0x10),
-        (REJECT_OBSOLETE, 0x11),
-        (REJECT_DUPLICATE, 0x12),
-        (REJECT_NONSTANDARD, 0x40),
-        (REJECT_DUST, 0x41),
+        (REJECT_MALFORMED,       0x01),
+        (REJECT_INVALID,         0x10),
+        (REJECT_OBSOLETE,        0x11),
+        (REJECT_DUPLICATE,       0x12),
+        (REJECT_NONSTANDARD,     0x40),
+        (REJECT_DUST,            0x41),
         (REJECT_INSUFFICIENTFEE, 0x42),
-        (REJECT_CHECKPOINT, 0x43)
+        (REJECT_CHECKPOINT,      0x43)
     ]
 
 reject_type_map_r = map (\(a, b) -> (b, a)) reject_type_map
+
+instance MsgPayload RejectPayload
 
 instance Encodable RejectType where
     encodeB end t =
@@ -54,9 +56,9 @@ instance Decodable RejectType where
 
 data RejectPayload =
     RejectPayload {
-        message :: VStr,
+        message :: String,
         ccode   :: RejectType,
-        reason  :: VStr,
+        reason  :: String,
         rdata   :: ByteString
     } deriving (Show, Eq)
 
@@ -67,8 +69,8 @@ instance Encodable RejectPayload where
         reason = reason,
         rdata = rdata
     }) =
-        e message <> e ccode <>
-        e reason <> e rdata
+        e (vstr message) <> e ccode <>
+        e (vstr reason) <> e rdata
         where
             e :: Encodable t => t -> Builder
             e = encodeB end
@@ -80,9 +82,9 @@ instance Decodable RejectPayload where
         reason <- decoder
         rdata <- allD -- eat the rest
         return $ RejectPayload {
-            message = message,
+            message = vstrToString message,
             ccode = ccode,
-            reason = reason,
+            reason = vstrToString reason,
             rdata = rdata
         }
 

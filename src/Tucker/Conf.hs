@@ -257,7 +257,7 @@ tucker_default_conf_mainnet mpath = do
     
         tckr_speed_test_span = 5,
 
-        tckr_gc_interval = 20 * 1000, -- 20 sec
+        tckr_gc_interval = 30 * 1000, -- 20 sec
         
         tckr_max_block_task = 20,
         tckr_min_parallel_input_check = 128, -- maxBound,

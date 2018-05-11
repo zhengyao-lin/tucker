@@ -122,6 +122,9 @@ gcLoop env@(MainLoopEnv {
                 envSpreadSimpleAction env (NormalAction seekNode) (length new_list)
                 return ()
 
+        stat <- getA (block_chain env) >>= txPoolStatus
+        envMsg env ("tx pool status: " ++ show stat)
+
 -- syncOne env n = do
 --     envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n
 --     return ()

@@ -780,6 +780,19 @@ mainBranchHeight (BlockChain {
 }) =
     branchHeight (mainBranch chain)
 
+-- return (mem pool size, orphan pool size)
+txPoolStatus :: BlockChain -> IO (Int, Int)
+txPoolStatus bc =
+    (,) <$> memPoolSize (bc_tx_state bc)
+        <*> orphanPoolSize (bc_tx_state bc)
+
+-- get mem pool txns
+allMemPoolTxns :: BlockChain -> IO [TxPayload]
+allMemPoolTxns bc = memPoolTxns (bc_tx_state bc)
+
+lookupMemPool :: BlockChain -> Hash256 -> IO (Maybe TxPayload)
+lookupMemPool bc txid = lookupMemPoolTx (bc_tx_state bc) txid
+
 -- revert the change of a block on UTXO
 -- assuming the block is a full block
 revertBlockOnUTXO :: UTXOMap a => BlockChain -> TxState a -> Branch -> Block -> IO ()
@@ -948,8 +961,8 @@ addBlockFail bc@(BlockChain {
             bc <- updateChain bc (removeOrphan chain block)
 
             -- remove accepted txns from mem pool
-            forM_ (tail all_txns) $ \tx ->
-                removeOrphanTx (bc_tx_state bc) (txid tx)
+            forM_ (tail all_txns) $ \tx -> do
+                removePoolTx tx_state (txid tx)
 
             bc <- collectOrphanBlock bc block_hash
             
@@ -969,12 +982,12 @@ addPoolTxFail bc@(BlockChain {
     -- (no check for locktime)
     let main = mainBranch (bc_chain bc)
 
-    ntx <- countPoolTx tx_state
+    ntx <- txPoolSize tx_state
     now <- unixTimestamp
 
     when (ntx >= tckr_pool_tx_limit conf) $ do
         timeoutPoolTx tx_state (now - tckr_pool_tx_timeout conf)
-        fin <- countPoolTx tx_state
+        fin <- txPoolSize tx_state
 
         tLnM ("reducing mem pool/orphan pool to a total size of " ++ show fin)
 
@@ -999,7 +1012,9 @@ addPoolTxFail bc@(BlockChain {
             case muvalue of
                 Nothing -> do
                     addOrphanTx tx_state tx
-                    reject "orphaned tx due to the lack of outpoint in utxo/mem pool"
+                    -- reject "orphaned tx due to the lack of outpoint in utxo/mem pool"
+
+                    return maxBound
 
                 Just uvalue -> do
                     -- TODO: add coinbase maturity check?
@@ -1010,23 +1025,24 @@ addPoolTxFail bc@(BlockChain {
                     -- return input value
                     return (value (u_tx_out uvalue))
 
-    let total_out_value = getOutputValue tx
-        fee = sum values - total_out_value
-    
-    expectTrue "sum of inputs less than the sum of output" $
-        fee >= 0
+    unless (any (== maxBound) values) $ do
+        let total_out_value = getOutputValue tx
+            fee = sum values - total_out_value
+        
+        expectTrue "sum of inputs less than the sum of output" $
+            fee >= 0
 
-    addMemPoolTx tx_state tx
+        addMemPoolTx tx_state tx
 
-    -- retry on any orphan txns with input pointing to the current tx
-    dep_orphan_txns <-
-        filterOrphanPoolTx tx_state $ \otx ->
-            flip any (tx_in otx) $ \(TxInput { prev_out = OutPoint prev_txid _ }) ->
-                prev_txid == txid tx
+        -- retry on any orphan txns with input pointing to the current tx
+        dep_orphan_txns <-
+            filterOrphanPoolTx tx_state $ \otx ->
+                flip any (tx_in otx) $ \(TxInput { prev_out = OutPoint prev_txid _ }) ->
+                    prev_txid == txid tx
 
-    -- there is unlikely infinite recursion because
-    -- we assume txns don't have cyclic dependence
-    mapM_ (addPoolTx bc) dep_orphan_txns
+        -- there is unlikely infinite recursion because
+        -- we assume txns don't have cyclic dependence
+        mapM_ (addPoolTx bc) dep_orphan_txns
 
 reject :: String -> a
 reject msg = throw $ TCKRError msg

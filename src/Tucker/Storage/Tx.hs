@@ -311,9 +311,14 @@ addOrphanTx state tx = do
     return ()
 
 removeOrphanTx :: UTXOMap a => TxState a -> Hash256 -> IO ()
-removeOrphanTx state hash = do
-    appA (MAP.delete hash) (tx_orphan_pool state)
+removeOrphanTx state txid = do
+    appA (MAP.delete txid) (tx_orphan_pool state)
     return ()
+
+removePoolTx :: UTXOMap a => TxState a -> Hash256 -> IO ()
+removePoolTx state txid = do
+    removeMemPoolTx state txid
+    removeOrphanTx state txid
 
 filterOrphanPoolTx :: UTXOMap a => TxState a -> (TxPayload -> Bool) -> IO [TxPayload]
 filterOrphanPoolTx state pred =
@@ -326,14 +331,29 @@ timeoutPoolTx state min = do
     appA (MAP.filter ((>= min) . snd)) (tx_orphan_pool state)
     return ()
 
-countPoolTx :: UTXOMap a => TxState a -> IO Int
-countPoolTx state =
-    (+) <$> (MAP.size <$> getA (tx_mem_pool state))
-        <*> (MAP.size <$> getA (tx_orphan_pool state))
+-- tx pool includes both the mem pool and orphan pool
+txPoolSize :: UTXOMap a => TxState a -> IO Int
+txPoolSize state =
+    (+) <$> memPoolSize state
+        <*> orphanPoolSize state
+
+memPoolSize :: UTXOMap a => TxState a -> IO Int
+memPoolSize state = MAP.size <$> getA (tx_mem_pool state)
+
+orphanPoolSize :: UTXOMap a => TxState a -> IO Int
+orphanPoolSize state = MAP.size <$> getA (tx_orphan_pool state)
 
 hasTxInMemPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
 hasTxInMemPool state hash =
     MAP.member hash <$> getA (tx_mem_pool state)
+
+memPoolTxns :: UTXOMap a => TxState a -> IO [TxPayload]
+memPoolTxns state =
+    map (fst . snd) <$> MAP.toList <$> getA (tx_mem_pool state)
+
+lookupMemPoolTx :: UTXOMap a => TxState a -> Hash256 -> IO (Maybe TxPayload)
+lookupMemPoolTx state txid =
+    (fst <$>) <$> MAP.lookup txid <$> getA (tx_mem_pool state)
 
 hasTxInOrphanPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
 hasTxInOrphanPool state hash =

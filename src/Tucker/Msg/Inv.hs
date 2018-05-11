@@ -119,4 +119,4 @@ encodeGetblocksPayload conf locator stop_hash =
 encodeGetheadersPayload = encodeGetblocksPayload
 
 encodeMempoolPayload :: IO ByteString
-encodeMempoolPayload = return $ BSR.empty
+encodeMempoolPayload = return BSR.empty

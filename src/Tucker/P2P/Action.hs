@@ -152,6 +152,9 @@ sync env n = do
             envInfo env "all blocks synchronized, exiting sync"
             envSyncChain env
 
+            envInfo env "broadcasting request for mem pool"
+            envBroadcastAction env (NormalAction requestMemPool)
+            
         taskDone sched node hashes = do
             removeNode sched node
 
@@ -444,9 +447,15 @@ seekNode env node _ = do
     full <- envNodeFull env
 
     unless full $ do
-        getaddr <- encodeMsg (global_conf env) BTC_CMD_GETADDR $ encodeGetaddrPayload
+        getaddr <- encodeMsg (global_conf env) BTC_CMD_GETADDR encodeGetaddrPayload
         tSend (conn_trans node) getaddr
 
+    return [ DumpMe ]
+
+requestMemPool :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
+requestMemPool env node _ = do
+    mp <- encodeMsg (global_conf env) BTC_CMD_MEMPOOL encodeMempoolPayload
+    tSend (conn_trans node) mp
     return [ DumpMe ]
 
 sendMsg :: ByteString -> MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
