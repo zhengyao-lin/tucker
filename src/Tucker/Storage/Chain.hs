@@ -187,21 +187,32 @@ nextEmptyBlock bc@(BlockChain {
 }) = do
     let main = mainBranch chain
         next_height = cur_height main + 1
-
-    [tip] <- topNBlockHashes chain main 1
-
+        use_min_diff = tckr_use_special_min_diff_mine conf
+        tip = mainBranchTip bc
+        last_time = btimestamp tip
+    
     now <- unixTimestamp
     mtp <- medianTimePast bc main next_height
 
-    target <- targetAtHeight bc main next_height now
+    target <-
+        if use_min_diff then
+            return (fi (tckr_bdiff_diff1_target conf))
+        else
+            targetAtHeight bc main next_height last_time
 
-    return $ updateBlockHashes $ Block {
+    return $ updateBlockHashes Block {
         block_hash = undefined,
         vers = 0,
-        prev_hash = tip,
+        prev_hash = block_hash tip,
         merkle_root = 0,
-        btimestamp = max mtp now,
-        hash_target =  target,
+
+        btimestamp =
+            if use_min_diff then
+                last_time + 2 * tckr_target_spacing conf + 1
+            else
+                max mtp now,
+
+        hash_target = target,
         nonce = 0,
         txns = FullList [],
         enc_cache = Nothing
@@ -240,33 +251,14 @@ calNewTarget conf old_target actual_span =
 
         new_target = old_target * (fi new_span) `div` (fi expect_span)
 
--- medianTimePast :: BlockChain -> Branch -> Int -> IO Timestamp
--- medianTimePast bc@(BlockChain {
---     bc_chain = chain
--- }) branch n = do
---     ts <- map btimestamp <$> (topNBlocks chain branch n)
-
---     return $
---         if null ts then 0
---         else median ts
-
-data BlockCondition
-    = AtHeight Height
-    | WithHash Hash256
-
 -- block at a specific height in the main branch
 -- returning a partial block with its height
-lookupBlock :: BlockChain -> BlockCondition -> IO (Maybe (Height, Block))
-lookupBlock (BlockChain {
+lookupMainBranchBlock :: BlockChain -> BlockSearchType -> IO (Maybe (Height, Block))
+lookupMainBranchBlock (BlockChain {
     bc_chain = chain
-}) cond = do
-    let main = mainBranch chain
-    
-    res <- case cond of
-        AtHeight height -> branchAtHeight chain main height
-        WithHash hash -> branchWithHash chain main hash
-
-    return ((\b -> (cur_height b, block_data b)) <$> res)
+}) cond =
+    (\b -> (cur_height b, block_data b)) <$$>
+    lookupBlockNode chain [mainBranch chain] cond
 
 getFullBlock :: BlockChain -> Block -> IO (Maybe Block)
 getFullBlock bc block =
@@ -284,7 +276,8 @@ medianTimePast bc@(BlockChain {
     let n = tckr_mtp_number conf
 
     mblocks <-
-        mapM (blockAtHeight chain branch) [ height - 1, height - 2 .. height - fi n ]
+        mapM (lookupBlock chain [branch] . AtHeight)
+        [ height - 1, height - 2 .. height - fi n ]
 
     let ts = map btimestamp (maybeCat mblocks)
 
@@ -392,26 +385,20 @@ if height % 2016 == 0 and the block is in the main branch then
             _ -> nothing
 -}
 
--- shouldUseSpecialDiff :: BlockChain -> IO Bool
--- shouldUseSpecialDiff (BlockChain {
---     bc_conf = conf,
---     bc_last_recv = last_recv
--- }) = do
---     now <- unixTimestamp
---     return $ tckr_use_special_min_diff conf &&
---              (last_recv == 0 || now - last_recv >= tckr_special_min_timeout conf)
-
 -- correct target of a branch at a specific height
 targetAtHeight :: BlockChain -> Branch -> Height -> Timestamp -> IO Hash256
 targetAtHeight bc@(BlockChain {
     bc_conf = conf,
     bc_chain = chain
 }) branch height check_time = do
+    let bh1 = height - 1
+        bh2 = height - fi (tckr_retarget_span conf)
+
     -- previous block
     Just (Block {
         hash_target = old_target,
         btimestamp = t2
-    }) <- blockAtHeight chain branch (height - 1)
+    }) <- lookupBlock chain [branch] (AtHeight bh1)
 
     -- NOTE: there is a bug here
     -- in a chain with special-min-diff rule,
@@ -420,14 +407,14 @@ targetAtHeight bc@(BlockChain {
     -- we need to look up further up the chain for regular difficulty
 
     if tckr_use_special_min_diff conf &&
-        check_time - t2 >= tckr_special_min_timeout conf then
+        check_time - t2 > 2 * tckr_target_spacing conf then
         -- special-min-diff(mainly for testnet)
         -- allow diff1 blocks when last_recv == 0 as well because
         -- we don't know the specific time of receiving the last block
         return $ fi (tckr_bdiff_diff1_target conf)
     else if shouldRetarget conf height then do
         Just (Block { btimestamp = t1 }) <-
-            blockAtHeight chain branch (height - fi (tckr_retarget_span conf))
+            lookupBlock chain [branch] (AtHeight bh2)
 
         return $ calNewTarget conf old_target (t2 - t1)
     else
@@ -555,7 +542,7 @@ parentBranchOfTx bc@(BlockChain {
 
     -- should ONLY be used if you checking coinbase maturity or csv validity
     bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
-        branchWithHash chain branch (locatorToHash locator)
+        lookupBlockNode chain [branch] (WithHash (locatorToHash locator))
 
     -- bnode <- expectMaybeIO ("failed to load full block for " ++ show bnode) $
     --     toFullBlockNode chain bnode
@@ -669,7 +656,7 @@ verifyBlockTx bc branch block = do
         conf = bc_conf bc
 
     bnode <- expectMaybeIO "the block being verified is not in the given branch" $
-        branchWithHash (bc_chain bc) branch (block_hash block)
+        lookupBlockNode (bc_chain bc) [branch] (WithHash (block_hash block))
 
     begin_time <- msMonoTime
     ver_conf <- genVerifyConf bc branch (Just bnode)
@@ -780,6 +767,11 @@ mainBranchHeight (BlockChain {
 }) =
     branchHeight (mainBranch chain)
 
+mainBranchTip :: BlockChain -> Block
+mainBranchTip bc =
+    let chain = bc_chain bc in
+    block_data (mainBranch chain)
+
 -- return (mem pool size, orphan pool size)
 txPoolStatus :: BlockChain -> IO (Int, Int)
 txPoolStatus bc =
@@ -820,17 +812,15 @@ revertBlockOnUTXO bc tx_state branch block = do
 
 hasBlock :: BlockChain -> Hash256 -> IO Bool
 hasBlock (BlockChain { bc_chain = chain }) hash =
-    if not (hasBlockInOrphan chain hash) then
-        hasBlockInChain chain hash
+    if hasBlockInOrphan chain hash then return True
     else
-        return True
+        hasBlockInChain chain hash
 
 -- throws a TCKRError when rejecting the block
 addBlockFail :: BlockChain -> Block -> IO BlockChain
 addBlockFail bc@(BlockChain {
     bc_conf = conf,
-    bc_tx_state = tx_state,
-    bc_chain = chain
+    bc_tx_state = tx_state
 }) block@(Block {
     block_hash = block_hash,
     hash_target = hash_target,
@@ -844,7 +834,7 @@ addBlockFail bc@(BlockChain {
     let all_txns = FD.toList txns'
 
     expectFalseIO "block already exists" $
-        chain `hasBlockInChain` block_hash
+        (bc_chain bc) `hasBlockInChain` block_hash
 
     -- don't check if the block is in orphan pool
 
@@ -859,8 +849,8 @@ addBlockFail bc@(BlockChain {
 
     cur_time <- unixTimestamp
 
-    expectTrue "timestamp too large" $
-        timestamp <= cur_time + tckr_max_block_future_diff conf
+    expectTrue "timestamp exceeds furture timestamp limit" $
+        timestamp <= cur_time + tckr_max_block_time_future_diff conf
 
     expectTrue "first transaction is not coinbase" $
         isCoinbase (head all_txns)
@@ -873,13 +863,13 @@ addBlockFail bc@(BlockChain {
     expectTrue "merkle root claimed not correct" $
         merkleRoot block == merkle_root
 
-    case insertBlock chain block of
+    case insertBlock (bc_chain bc) block of
         Nothing -> do -- no previous hash found
             expectFalse "repeated orphan block" $
-                chain `hasBlockInOrphan` block_hash
+                (bc_chain bc) `hasBlockInOrphan` block_hash
 
             tLnM "block orphaned"
-            updateChain bc (addOrphan chain block)
+            updateChain bc (addOrphan (bc_chain bc) block)
 
         Just (branch, chain) -> do
             -- block inserted, new branch leaf created
@@ -892,7 +882,7 @@ addBlockFail bc@(BlockChain {
             -- save the block data first
             -- all actions below will find the block
             -- in the chain as other normal blocks
-            saveBlock chain (cur_height branch) block
+            saveBlock (bc_chain bc) (cur_height branch) block
 
             when (tckr_enable_mtp_check conf) $
                 expectTrueIO "MTP rule not met" $
@@ -902,7 +892,7 @@ addBlockFail bc@(BlockChain {
                 expectTrueIO "wrong difficulty" $
                     hashTargetValid bc branch
 
-            let main_branch = mainBranch chain
+            let main_branch = mainBranch (bc_chain bc)
 
             bc <-
                 if main_branch == branch then do
@@ -931,25 +921,25 @@ addBlockFail bc@(BlockChain {
                     tLnM "!!! main branch change"
 
                     -- set main branch
-                    bc <- updateChain bc (setMainBranch chain branch)
+                    bc <- updateChain bc (setMainBranch (bc_chain bc) branch)
 
                     -- if block check fails here, the new block will be rejected
                     -- and no update in main branch is possible
                     withCacheUTXO tx_state $ \tx_state -> do
-                        let (fp1, fp2) = forkPath chain main_branch branch
+                        let (fp1, fp2) = forkPath (bc_chain bc) main_branch branch
 
                         -- [[TxPayload]]
                         -- fp1 is in descending order of heights
                         -- fp1 is from the original main branch
                         forM_ fp1 $ \bnode -> do
-                            bnode <- toFullBlockNodeFail chain bnode
+                            bnode <- toFullBlockNodeFail (bc_chain bc) bnode
                             revertBlockOnUTXO bc tx_state main_branch (block_data bnode)
         
                         -- recheck all new main branch nodes
                         
                         -- fp2 is in descending order of heights
                         forM_ (reverse fp2) $ \bnode -> do
-                            bnode <- toFullBlockNodeFail chain bnode
+                            bnode <- toFullBlockNodeFail (bc_chain bc) bnode
                             -- verify all blocks in the new main branch
                             verifyBlockTx bc branch (block_data bnode)
 
@@ -958,7 +948,7 @@ addBlockFail bc@(BlockChain {
                     -- still not main branch do nothing
                     return bc
 
-            bc <- updateChain bc (removeOrphan chain block)
+            bc <- updateChain bc (removeOrphan (bc_chain bc) block)
 
             -- remove accepted txns from mem pool
             forM_ (tail all_txns) $ \tx -> do
@@ -985,64 +975,63 @@ addPoolTxFail bc@(BlockChain {
     ntx <- txPoolSize tx_state
     now <- unixTimestamp
 
-    when (ntx >= tckr_pool_tx_limit conf) $ do
-        timeoutPoolTx tx_state (now - tckr_pool_tx_timeout conf)
-        fin <- txPoolSize tx_state
+    timeoutPoolTx tx_state (now - tckr_pool_tx_timeout conf)
 
-        tLnM ("reducing mem pool/orphan pool to a total size of " ++ show fin)
-
-    is_orphan <- hasTxInOrphanPool tx_state (txid tx)
-    
-    when is_orphan $
-        removeOrphanTx tx_state (txid tx)
-
-    -- check for duplication(in chain, mem pool, and orphan pool)
-    expectFalseIO "duplicated tx in chain" $
-        hasTxInBranch bc main (txid tx)
-
-    expectFalseIO "duplicated tx in mem pool" $
-        hasTxInMemPool tx_state (txid tx)
-
-    ver_conf <- genVerifyConf bc main Nothing
-
-    values <- forM ([0..] `zip` tx_in tx) $
-        \(in_idx, TxInput { prev_out = prev_out }) -> do
-            muvalue <- lookupUTXOMemPool tx_state prev_out
-
-            case muvalue of
-                Nothing -> do
-                    addOrphanTx tx_state tx
-                    -- reject "orphaned tx due to the lack of outpoint in utxo/mem pool"
-
-                    return maxBound
-
-                Just uvalue -> do
-                    -- TODO: add coinbase maturity check?
-
-                    -- check script
-                    verifyScript bc ver_conf tx in_idx uvalue
-
-                    -- return input value
-                    return (value (u_tx_out uvalue))
-
-    unless (any (== maxBound) values) $ do
-        let total_out_value = getOutputValue tx
-            fee = sum values - total_out_value
+    if ntx >= tckr_pool_tx_limit conf then
+        tLnM ("mem pool full")
+    else do
+        is_orphan <- hasTxInOrphanPool tx_state (txid tx)
         
-        expectTrue "sum of inputs less than the sum of output" $
-            fee >= 0
+        when is_orphan $
+            removeOrphanTx tx_state (txid tx)
 
-        addMemPoolTx tx_state tx
+        -- check for duplication(in chain, mem pool, and orphan pool)
+        expectFalseIO "duplicated tx in chain" $
+            hasTxInBranch bc main (txid tx)
 
-        -- retry on any orphan txns with input pointing to the current tx
-        dep_orphan_txns <-
-            filterOrphanPoolTx tx_state $ \otx ->
-                flip any (tx_in otx) $ \(TxInput { prev_out = OutPoint prev_txid _ }) ->
-                    prev_txid == txid tx
+        expectFalseIO "duplicated tx in mem pool" $
+            hasTxInMemPool tx_state (txid tx)
 
-        -- there is unlikely infinite recursion because
-        -- we assume txns don't have cyclic dependence
-        mapM_ (addPoolTx bc) dep_orphan_txns
+        ver_conf <- genVerifyConf bc main Nothing
+
+        values <- forM ([0..] `zip` tx_in tx) $
+            \(in_idx, TxInput { prev_out = prev_out }) -> do
+                muvalue <- lookupUTXOMemPool tx_state prev_out
+
+                case muvalue of
+                    Nothing -> do
+                        addOrphanTx tx_state tx
+                        -- reject "orphaned tx due to the lack of outpoint in utxo/mem pool"
+
+                        return maxBound
+
+                    Just uvalue -> do
+                        -- TODO: add coinbase maturity check?
+
+                        -- check script
+                        verifyScript bc ver_conf tx in_idx uvalue
+
+                        -- return input value
+                        return (value (u_tx_out uvalue))
+
+        unless (any (== maxBound) values) $ do
+            let total_out_value = getOutputValue tx
+                fee = sum values - total_out_value
+            
+            expectTrue "sum of inputs less than the sum of output" $
+                fee >= 0
+
+            addMemPoolTx tx_state tx
+
+            -- retry on any orphan txns with input pointing to the current tx
+            dep_orphan_txns <-
+                filterOrphanPoolTx tx_state $ \otx ->
+                    flip any (tx_in otx) $ \(TxInput { prev_out = OutPoint prev_txid _ }) ->
+                        prev_txid == txid tx
+
+            -- there is unlikely infinite recursion because
+            -- we assume txns don't have cyclic dependence
+            mapM_ (addPoolTx bc) dep_orphan_txns
 
 reject :: String -> a
 reject msg = throw $ TCKRError msg

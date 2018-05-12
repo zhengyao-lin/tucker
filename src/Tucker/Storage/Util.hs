@@ -47,7 +47,7 @@ fallbackToHeight bc@(BlockChain {
 
         forM_ revert_range $ \height -> do
             tM ("reverting block at " ++ show height)
-            Just bnode <- branchAtHeight chain branch height
+            Just bnode <- lookupBlockNode chain [branch] (AtHeight height)
             bnode <- toFullBlockNodeFail chain bnode
 
             -- revert utxo

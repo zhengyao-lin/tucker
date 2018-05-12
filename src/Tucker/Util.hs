@@ -392,5 +392,10 @@ isNothing :: Maybe a -> Bool
 isNothing Nothing = True
 isNothing _ = False
 
+firstMaybe = join . first isJust
+
 when_ cond = when cond . (>> return ())
 unless_ cond = unless cond . (>> return ())
+
+(<$$>) :: (Monad m1, Monad m2) => (a -> b) -> m1 (m2 a) -> m1 (m2 b)
+f <$$> m = (f <$>) <$> m

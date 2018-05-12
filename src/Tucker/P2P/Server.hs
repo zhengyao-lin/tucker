@@ -24,6 +24,7 @@ import Tucker.P2P.Util
 import qualified Tucker.P2P.Action as A
 
 import Tucker.Storage.Chain
+import Tucker.Storage.Block
 
 -- NOTE:
 -- when trying to sync block chain,
@@ -47,7 +48,7 @@ defaultHandler env node msg@(MsgHead {
         nBlocksFrom :: Int -> [Hash256] -> Hash256 -> IO [Block]
         nBlocksFrom n locators stop_hash =
             envWithChain env $ \bc -> do
-                res <- mapM (lookupBlock bc . WithHash) locators
+                res <- mapM (lookupMainBranchBlock bc . WithHash) locators
                 
                 let cur_height = mainBranchHeight bc
                     begin_height =
@@ -57,7 +58,7 @@ defaultHandler env node msg@(MsgHead {
 
                     range = take n [ begin_height .. cur_height ]
 
-                res <- mapM (lookupBlock bc . AtHeight) range
+                res <- mapM (lookupMainBranchBlock bc . AtHeight) range
 
                 let hashes = map snd (maybeCat res)
                     final = takeWhile ((/= stop_hash) . block_hash) hashes
@@ -113,7 +114,7 @@ defaultHandler env node msg@(MsgHead {
                 ready <- envIsSyncReady env
 
                 if ready then do
-                    -- envInfo env "adding new block"
+                    envInfo env "adding new block"
                     added <- envAddBlockIfNotExist env node block
 
                     when added $ do
@@ -150,7 +151,7 @@ defaultHandler env node msg@(MsgHead {
                     lookupBlockAndSend :: (Block -> Block) -> Hash256 -> IO (Maybe Hash256)
                     lookupBlockAndSend preproc hash =
                         envWithChain env $ \bc -> do
-                            res <- lookupBlock bc (WithHash hash)
+                            res <- lookupMainBranchBlock bc (WithHash hash)
                             case res of
                                 Just (_, block) -> do
                                     res <- getFullBlock bc block
@@ -276,6 +277,7 @@ defaultHandler env node msg@(MsgHead {
 
                                 -- request for the block
                                 A.getFullDataMsg env INV_TYPE_BLOCK hashes >>= tSend trans
+                                nodeInfo env node "getdata sent"
                             else
                                 nodeMsg env node "ignoring new block(s) due to unfinished sync process"
 

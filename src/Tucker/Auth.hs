@@ -177,7 +177,7 @@ wifToPriv conf wif = do
         Left $ TCKRError "illegal WIF"
     else
         -- let priv_raw = BSR.drop 1 priv_proc in
-        decodeAllBE (BSR.drop 1 priv_proc)
+        decodeAllBE (BSR.take 32 (BSR.drop 1 priv_proc))
         -- case importPriv priv_raw of
         --     Just priv -> Right priv
         --     Nothing -> Left "illegal private key format"

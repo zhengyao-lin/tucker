@@ -15,27 +15,6 @@ less_or_equal_to_hash_le(const hash256_t a, const hash256_t b)
     return hash256_compare(a, b) <= 0;
 }
 
-typedef struct {
-    const byte_t *dat;
-    hash256_t target;
-
-    size_t rsize; // remaining part besides the nonce
-    size_t nsize;
-    size_t osize;
-    ctx_sha256_t *base_ctx;
-
-    nonce_t *answer;
-    int njob;
-    bool stop;
-} common_env_t;
-
-typedef struct {
-    common_env_t *env;
-    nonce_t from;
-    nonce_t to;
-    int id;
-} job_t;
-
 #define MAX_BOUND ((nonce_t)-1)
 
 // a single worker
@@ -43,10 +22,10 @@ void *miner(void *arg)
 {
     job_t job = *(job_t *)arg;
 
-    byte_t *ndat = malloc(job.env->nsize),
-           *remain = ndat + job.env->osize - job.env->rsize;
+    byte_t *ndat = malloc(job.state->nsize),
+           *remain = ndat + job.state->osize - job.state->rsize;
 
-    nonce_t *hole = (nonce_t *)(ndat + job.env->osize), i, j = job.to - job.from;
+    nonce_t *hole = (nonce_t *)(ndat + job.state->osize), i, j = job.to - job.from;
 
     hash256_t hash0, hash;
     size_t proc;
@@ -58,49 +37,49 @@ void *miner(void *arg)
 
 #define MEASURE_TIME 40960
 
-    memcpy(ndat, job.env->dat, job.env->osize);
+    memcpy(ndat, job.state->dat, job.state->osize);
 
     printf("thread created, job [%u, %u]\n", job.from, job.to);
 
     span0 = begin = get_cpu_ms();
 
-    for (i = 0; i <= j && !job.env->stop; i++) {
+    for (i = 0; i <= j && !job.state->stop; i++) {
         if (i && i % MEASURE_TIME == 0) {
             span1 = get_cpu_ms();
             span = (double)(span1 - span0) / 1000;
 
             printf("\rprogress(%d): %u/%u(%.2f%%) global rate: %.1f H/s",
                    job.id, i, j, (double)i / j * 100,
-                   MEASURE_TIME / span * job.env->njob);
+                   MEASURE_TIME / span * job.state->njob);
 
             span0 = span1;
         }
 
         *hole = i + job.from;
 
-        ctx = *job.env->base_ctx; // copy context
+        ctx = job.state->base_ctx; // copy context
         
-        proc = sha256_update(&ctx, remain, job.env->rsize); // further update
+        proc = sha256_update(&ctx, remain, job.state->rsize); // further update
 
         // finalize the first round
         sha256_finalize(&ctx, remain + proc,
-                        job.env->rsize - proc + sizeof(nonce_t),
-                        job.env->nsize);
+                        job.state->rsize - proc + sizeof(nonce_t),
+                        job.state->nsize);
         
         write_ctx(&ctx, hash0);
         sha256(hash0, sizeof(hash0), hash); // double sha256
 
-        // double_sha256(ndat, job.env->nsize, hash);
+        // double_sha256(ndat, job.state->nsize, hash);
 
-        if (less_or_equal_to_hash_le(hash, job.env->target)) {
+        if (less_or_equal_to_hash_le(hash, job.state->target)) {
             printf("\nfound after %.1f seconds\n", (double)(get_cpu_ms() - begin) / 1000);
             // print_hash256(hash);
-            // print_hash256(job.env->target);
+            // print_hash256(job.state->target);
 
             free(ndat);
             
-            *job.env->answer = i + job.from;
-            job.env->stop = true;
+            job.state->answer = i + job.from;
+            job.state->stop = true;
 
             return NULL;
         }
@@ -112,58 +91,75 @@ void *miner(void *arg)
 
 // append a nonce to dat until the double sha256 of it
 // is smaller(in little-endian) than the target
-nonce_t do_mine(const byte_t *dat, size_t size, const hash256_t target, int njob)
+miner_state_t *start_miner(const byte_t *dat, size_t size, const hash256_t target, int njob)
 {
     size_t nsize = size + 4;
 
     size_t rsize = size % CHUNK_SIZE,
            preproc = size - rsize;
 
-    ctx_sha256_t ctx = INIT_CTX;
-
     nonce_t answer = MAX_BOUND;
 
-    // jobs/env
-    common_env_t env = {
+    // jobs/state
+    miner_state_t *state = malloc(sizeof(*state));
+
+    nonce_t intv = MAX_BOUND / njob;
+    int i;
+
+    *state = (miner_state_t) {
         .dat = dat,
         .target = {0},
         .rsize = rsize,
         .nsize = nsize,
         .osize = size,
-        .base_ctx = &ctx,
-        .answer = &answer,
+        .base_ctx = INIT_CTX,
+        .answer = -1,
+        .threads = malloc(sizeof(*state->threads) * njob),
+        .jobs = malloc(sizeof(*state->jobs) * njob),
         .njob = njob,
         .stop = false
     };
-    
-    pthread_t threads[njob];
-    job_t jobs[njob];
 
-    nonce_t intv = MAX_BOUND / njob;
-    int i;
-
-    memcpy(env.target, target, sizeof(hash256_t));
+    memcpy(state->target, target, sizeof(hash256_t));
 
     // preprocess some part of the data(that does not contain nonce)
-    sha256_update(&ctx, dat, size - rsize);
+    sha256_update(&state->base_ctx, dat, size - rsize);
 
     for (i = 0; i < njob; i++) {
-        jobs[i] = (job_t) {
-            .env = &env,
+        state->jobs[i] = (job_t) {
+            .state = state,
             .from = i * intv,
             .to = i + 1 == njob ? MAX_BOUND : i * intv + intv - 1,
             .id = i
         };
 
-        if (pthread_create(threads + i, NULL, miner, jobs + i))
+        if (pthread_create(state->threads + i, NULL, miner, state->jobs + i))
             fprintf(stderr, "failed to create thread\n");
     }
 
-    for (i = 0; i < njob; i++) {
-        pthread_join(threads[i], NULL);
+    return state;
+}
+
+nonce_t join_miner(miner_state_t *state)
+{
+    int i;
+
+    for (i = 0; i < state->njob; i++) {
+        pthread_join(state->threads[i], NULL);
     }
 
-    printf("found: %u\n", answer);
+    printf("found: %u\n", state->answer);
 
-    return answer;
+    return state->answer;
+}
+
+void free_miner(miner_state_t *state)
+{
+    free(state->threads);
+    free(state);
+}
+
+void kill_miner(miner_state_t *state)
+{
+    state->stop = true;
 }

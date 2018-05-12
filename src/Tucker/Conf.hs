@@ -145,7 +145,7 @@ data TCKRConf =
         -- use dup_node
 
         -- max difference of the timestamp of a block with the time received
-        tckr_max_block_future_diff :: Word32, -- in sec
+        tckr_max_block_time_future_diff :: Word32, -- in sec
 
         -- the difficulty changes every tckr_retarget_span blocks
         tckr_retarget_span :: Word32,
@@ -153,7 +153,8 @@ data TCKRConf =
         tckr_soft_fork_lock_threshold :: Word32, -- roughly 95% of retarget span
 
         tckr_use_special_min_diff :: Bool, -- support special-min-difficulty or not(mainly on testnet)
-        tckr_special_min_timeout :: Timestamp,
+        tckr_use_special_min_diff_mine :: Bool, -- use special-min-difficulty rule for mining
+        tckr_target_spacing :: Timestamp,
 
         tckr_block_fetch_timeout :: Int, -- in sec
         tckr_node_max_blacklist_count :: Int,
@@ -189,7 +190,12 @@ data TCKRConf =
         tckr_job_number :: Int,
 
         tckr_pool_tx_limit :: Int, -- when the number of pool tx reaches the limit, remove all timeout txns
-        tckr_pool_tx_timeout :: Timestamp
+        tckr_pool_tx_timeout :: Timestamp,
+
+        tckr_enable_miner :: Bool,
+        tckr_miner_p2pkh_addr :: String,
+        tckr_miner_msg :: String,
+        tckr_enable_mempool :: Bool
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -280,14 +286,16 @@ tucker_default_conf_mainnet mpath = do
         tckr_fetch_dup_node = 8,
         tckr_fetch_dup_max_task = 4,
 
-        tckr_max_block_future_diff = 60 * 2, -- 2 hours
+        tckr_max_block_time_future_diff = 60 * 60 * 2, -- 2 hours
 
         tckr_retarget_span = 2016,
         tckr_expect_retarget_time = 14 * 24 * 60 * 60, -- 2 weeks in sec
         tckr_soft_fork_lock_threshold = 1916,
 
         tckr_use_special_min_diff = False,
-        tckr_special_min_timeout = 20 * 60, -- 20 min
+        tckr_use_special_min_diff_mine = False,
+        tckr_target_spacing = 10 * 60, -- 10 min
+        -- tckr_special_min_timeout = 20 * 60, -- 20 min
 
         tckr_block_fetch_timeout = 10,
 
@@ -335,7 +343,12 @@ tucker_default_conf_mainnet mpath = do
         tckr_job_number = 1,
 
         tckr_pool_tx_limit = 256,
-        tckr_pool_tx_timeout = 7 * 60 * 60 -- 7 hours
+        tckr_pool_tx_timeout = 7 * 60 * 60, -- 7 hours
+
+        tckr_enable_miner = True,
+        tckr_miner_p2pkh_addr = "mu2XoBFnT4RGqbLsFLoRuBHCqrXjbPkwBm",
+        tckr_miner_msg = "/Tucker/Rody Rody Go",
+        tckr_enable_mempool = False
     }
 
     where
@@ -360,6 +373,7 @@ tucker_default_conf_testnet3 mpath = do
         tckr_genesis_raw = hex2bs "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4ADAE5494DFFFF001D1AA4AE180101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000",
     
         tckr_use_special_min_diff = True,
+        tckr_use_special_min_diff_mine = True,
 
         tckr_p2sh_enable_time = 1329264000,
         tckr_dup_tx_disable_time = 1329696000,

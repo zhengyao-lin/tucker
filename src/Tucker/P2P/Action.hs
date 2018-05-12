@@ -136,8 +136,8 @@ instance NodeTask BlockFetchTask where
                 proc node task (fetch_block task)
 
 -- sync with n nodes
-sync :: MainLoopEnv -> Int -> IO ()
-sync env n = do
+sync :: MainLoopEnv -> Int -> IO a -> IO ()
+sync env n fin_cb = do
     sync_inv_var <- newA []
     finished_var <- newA 0 :: IO (Atom Int)
 
@@ -145,15 +145,21 @@ sync env n = do
     main_height <- envMainBranchHeight env
 
     let callback = do
-            envFork env THREAD_OTHER (sync env n)
+            envFork env THREAD_OTHER (sync env n fin_cb)
             return ()
 
         all_finished = do
             envInfo env "all blocks synchronized, exiting sync"
             envSyncChain env
 
-            envInfo env "broadcasting request for mem pool"
-            envBroadcastAction env (NormalAction requestMemPool)
+            when (envConf env tckr_enable_mempool) $ do
+                envInfo env "broadcasting request for mem pool"
+                envBroadcastAction env (NormalAction requestMemPool)
+
+            -- finishing callback
+            fin_cb
+
+            return ()
             
         taskDone sched node hashes = do
             removeNode sched node

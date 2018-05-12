@@ -19,6 +19,7 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 import Tucker.P2P.Action
 import Tucker.P2P.Server
+import Tucker.P2P.Mining
 
 import Tucker.Storage.Chain
 
@@ -66,8 +67,8 @@ pingLoop env =
             when (alive && now - last_seen > reping_time) $
                 nodePrependActions node [ NormalAction pingDelay ]
 
-gcLoop :: MainLoopEnv -> IO ()
-gcLoop env@(MainLoopEnv {
+collector :: MainLoopEnv -> IO ()
+collector env@(MainLoopEnv {
     global_conf = TCKRConf {
         tckr_node_alive_span = max_alive_span,
         tckr_node_max_blacklist_count = max_bl_count,
@@ -144,8 +145,11 @@ mainLoop conf = runResourceT $ do
 
         -- bootstrap finished, start sync, gc, and server
 
-        envFork env THREAD_BASE (gcLoop env)
-        envFork env THREAD_OTHER (sync env 3)
+        envFork env THREAD_BASE (collector env)
         envFork env THREAD_BASE (server env)
+
+        envFork env THREAD_OTHER $ sync env 3 $
+            when_ (envConf env tckr_enable_miner) $
+                envFork env THREAD_BASE (miner env)
 
         forever yieldWait

@@ -21,6 +21,7 @@ import Tucker.Enc
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Atom
+import Tucker.Auth
 import Tucker.Util
 import Tucker.Error
 import Tucker.Thread
@@ -150,22 +151,27 @@ data Node =
         cur_trans_state :: Atom TransferState,
 
         alive           :: Atom Bool
-    }
+    } | NullNode
 
 instance Eq Node where
     (Node { thread_id = t1 }) == (Node { thread_id = t2 })
         = t1 == t2
 
+    _ == _ = error "using null nodes"
+
 instance Ord Node where
     compare (Node { thread_id = t1 }) (Node { thread_id = t2 })
         = compare t1 t2
 
+    compare _ _ = error "using null nodes"
+
 instance Hashable Node where
+    hashWithSalt _ NullNode = error "using null nodes"
     hashWithSalt salt n = hashWithSalt salt (thread_id n)
 
 instance Show Node where
-    show node =
-        "node on " ++ show (sock_addr node)
+    show NullNode = "(null node)"
+    show node = "node on " ++ show (sock_addr node)
 
 -- used in spreading actions
 -- a task can be anything specified for a action
@@ -619,3 +625,11 @@ envIsLongestChain env = do
 envMainBranchHeight :: MainLoopEnv -> IO Height
 envMainBranchHeight env =
     mainBranchHeight <$> getA (block_chain env)
+
+envMainBranchTipHash :: MainLoopEnv -> IO Hash256
+envMainBranchTipHash env =
+    envWithChain env (return . block_hash . mainBranchTip)
+
+envNextInitBlock :: MainLoopEnv -> ByteString -> Address -> IO Block
+envNextInitBlock env msg addr =
+    envWithChain env $ \bc -> nextInitBlock bc msg addr

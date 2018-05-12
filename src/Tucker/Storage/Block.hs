@@ -5,6 +5,7 @@ module Tucker.Storage.Block (
     Height,
     Branch(..),
     Chain,
+    BlockSearchType(..),
 
     initChain,
     branchHeights,
@@ -13,12 +14,8 @@ module Tucker.Storage.Block (
     heightInDb,
     removeHeightInDb,
     
-    blocksAtHeight,
-    blockAtHeight,
-    branchAtHeight,
-
-    blockWithHash,
-    branchWithHash,
+    lookupBlockNode,
+    lookupBlock,
 
     toFullBlock,
     toFullBlockNode,
@@ -121,9 +118,14 @@ data Chain =
         -- the buffer chain should be transparent to external modules
 
         edge_branches   :: [Branch],
+        mem_block_set   :: SET.TSet Hash256,
 
         main_branch     :: Int -- idx of the main branch
     }
+
+data BlockSearchType
+    = AtHeight Height
+    | WithHash Hash256
 
 -- structure
 -- -----
@@ -189,14 +191,13 @@ initChain conf@(TCKRConf {
             
             buffer_chain = Nothing,
             edge_branches = [],
+            mem_block_set = SET.empty,
 
             main_branch = 0
         }
 
     entries <- quickCountIO bucket_chain
     let height = entries - 1 :: Height
-
-    -- error "exit"
 
     tLnM ("a chain of height " ++ show height ++ " is found in the database")
 
@@ -209,7 +210,7 @@ initChain conf@(TCKRConf {
             (Right genesis, _) -> do
                 insertIO bucket_block (block_hash genesis) (0, genesis)
 
-                return $ chain {
+                return chain {
                     edge_branches = [BlockNode {
                         prev_node = Nothing,
                         block_data = blockHeader genesis,
@@ -226,13 +227,10 @@ initChain conf@(TCKRConf {
 
         -- in descending order of height
         hashes <- maybeCat <$> mapM (lookupIO bucket_chain) range
-               :: IO [Hash256]
-
-        res    <- maybeCat <$> mapM (lookupAsIO bucket_block) hashes
-               :: IO [(Height, BlockHeader)] -- read headers only
+        res <- maybeCat <$> mapM (lookupAsIO bucket_block) hashes -- read headers only
         
         let fold_proc (height, BlockHeader block) Nothing =
-                Just $ BlockNode {
+                Just BlockNode {
                     prev_node = Nothing,
                     block_data = block,
                     acc_diff = targetBDiff conf (hash_target block),
@@ -240,16 +238,12 @@ initChain conf@(TCKRConf {
                 }
 
             fold_proc (height, BlockHeader block) (Just node) =
-                Just $ BlockNode {
+                Just BlockNode {
                     prev_node = Just node,
                     block_data = block,
                     acc_diff = targetBDiff conf (hash_target block) + acc_diff node,
                     cur_height = height
                 }
-
-        -- print height
-
-        -- print (height, max_depth, range)
 
         return $ case foldr fold_proc Nothing res of
             Nothing -> error "corrupted database(height not correct)"
@@ -273,8 +267,8 @@ branchHeights :: Chain -> [Height]
 branchHeights (Chain { edge_branches = branches }) =
     map cur_height branches
 
-branchHeight :: Branch -> Height
 branchHeight = cur_height
+allBranches = edge_branches
 
 -- max height of any buffer chain node
 bufferChainHeight :: Chain -> Height
@@ -313,8 +307,31 @@ searchBranchHash chain hash =
 searchBranchHeight chain height =
     searchBranch chain ((== height) . cur_height)
 
-createSingleNode :: Block -> Height -> Branch
-createSingleNode block height =
+refreshMemBlockSet :: Chain -> Chain
+refreshMemBlockSet chain =
+    let proc = map (block_hash . snd) . branchToBlockList
+        
+        buffer = case buffer_chain chain of
+            Nothing -> []
+            Just b -> proc b
+
+        branches = concatMap proc (edge_branches chain)
+
+    in chain {
+        mem_block_set = SET.fromList (branches ++ buffer)
+    }
+
+addMemBlock :: Chain -> Hash256 -> Chain
+addMemBlock chain hash =
+    chain {
+        mem_block_set = SET.insert hash (mem_block_set chain)
+    }
+
+isMemBlock :: Chain -> Hash256 -> Bool
+isMemBlock chain = (`SET.member` (mem_block_set chain))
+
+createSingleNode :: Height -> Block -> Branch
+createSingleNode height block =
     BlockNode {
         block_data = block,
         cur_height = height,
@@ -322,72 +339,76 @@ createSingleNode block height =
         prev_node = error "accessing single node"
     }
 
--- blocks at a specific height
-blocksAtHeight :: Chain -> Height -> IO [Block]
-blocksAtHeight chain height =
-    (maybeCat <$>) $ forM (edge_branches chain) $
-        \b -> blockAtHeight chain b height
+lookupMemBlockAtHeight :: Chain -> [Branch] -> Height -> Maybe Branch
+lookupMemBlockAtHeight chain branches' height = do
+    let branches = filter ((>= height) . cur_height) branches'
 
-blockAtHeight chain branch height =
-    maybe Nothing (Just . block_data) <$> branchAtHeight chain branch height
+    if height >= saved_height chain then
+        firstMaybe (map (searchBranchHeight chain height) branches)
+    else
+        Nothing
 
--- block at a specific height on a branch
-branchAtHeight :: Chain -> Branch -> Height -> IO (Maybe Branch)
-branchAtHeight chain@(Chain {
-    bucket_chain = bucket_chain,
-    bucket_block = bucket_block,
-    saved_height = saved_height
-}) branch@(BlockNode {
-    cur_height = max_height
-}) height =
-    if height > max_height || height < 0 then
-        return Nothing
-    else if height >= saved_height then
-        -- the block should be in memory
-        return (searchBranchHeight chain height branch)
-    else do
-        -- the block should be in the db
-        mhash <- lookupIO bucket_chain height
-        
-        case mhash of
-            Nothing -> return Nothing
-            Just hash -> do
-                -- read header only
-                mpair <- lookupAsIO bucket_block hash :: IO (Maybe (Height, BlockHeader))
-                return $ case mpair of
-                    Just (_, BlockHeader block) -> Just (createSingleNode block height)
-                    Nothing -> Nothing
+lookupMemBlockWithHash :: Chain -> [Branch] -> Hash256 -> Maybe Branch
+lookupMemBlockWithHash chain branches hash =
+    if isMemBlock chain hash then
+        firstMaybe (map (searchBranchHash chain hash) branches)
+    else
+        Nothing
 
-blockWithHash chain branch hash =
-    maybe Nothing (Just . block_data) <$> branchWithHash chain branch hash
+-- lookup a block in memory
+lookupMemBlock :: Chain -> [Branch] -> BlockSearchType -> Maybe Branch
+lookupMemBlock chain branches cond =
+    case cond of
+        AtHeight h -> lookupMemBlockAtHeight chain branches h
+        WithHash h -> lookupMemBlockWithHash chain branches h
 
--- block with the given hash on a branch
-branchWithHash :: Chain -> Branch -> Hash256 -> IO (Maybe Branch)
-branchWithHash chain@(Chain {
-    bucket_chain = bucket_chain,
-    bucket_block = bucket_block,
-    saved_height = saved_height
-}) branch@(BlockNode {
-    cur_height = max_height
-}) hash =
-    case searchBranchHash chain hash branch of
+-- look up a block in db by hash
+-- using type a, caller can decide how much data to decode
+lookupDBBlockWithHash :: Decodable a => Chain -> Hash256 -> IO (Maybe (Height, a))
+lookupDBBlockWithHash chain hash = do
+    mres <- lookupAsIO (bucket_block chain) hash
+
+    case mres of
+        Nothing -> return Nothing
+        Just (height, a) -> do
+            mhash <- lookupIO (bucket_chain chain) height
+
+            -- the block is indeed in the chain
+            if height < saved_height chain && mhash == Just hash then
+                -- create a tmp node to store the result
+                return (Just (height, a))
+            else
+                return Nothing -- not in the chain(maybe the block was removed from the chain)
+
+lookupDBBlockAtHeight :: Decodable a => Chain -> Height -> IO (Maybe (Height, a))
+lookupDBBlockAtHeight chain height = do
+    -- the block should be in the db
+    mhash <- lookupIO (bucket_chain chain) height
+    
+    case mhash of
+        Nothing -> return Nothing
+        Just hash -> lookupAsIO (bucket_block chain) hash -- :: IO (Maybe (Height, a))
+
+lookupDBBlock :: Decodable a => Chain -> BlockSearchType -> IO (Maybe (Height, a))
+lookupDBBlock chain cond =
+    case cond of
+        AtHeight h -> lookupDBBlockAtHeight chain h
+        WithHash h -> lookupDBBlockWithHash chain h
+
+lookupBlockNode :: Chain -> [Branch] -> BlockSearchType -> IO (Maybe Branch)
+lookupBlockNode chain branches cond =
+    case lookupMemBlock chain branches cond of
         Just bn -> return (Just bn)
         Nothing -> do
-            mres <- lookupAsIO bucket_block hash :: IO (Maybe (Height, BlockHeader))
+            mres <- lookupDBBlock chain cond
 
             case mres of
-                Nothing -> return Nothing
-                Just (height, BlockHeader block) -> do
-                    mhash <- lookupIO bucket_chain height
+                Just (height, BlockHeader block) ->
+                    return (Just (createSingleNode height block))
 
-                    -- print (isPartial (txns block))
-        
-                    -- the block is indeed in the chain
-                    if height < saved_height && mhash == Just hash then
-                        -- create a tmp node to store the result
-                        return $ Just (createSingleNode block height)
-                    else
-                        return Nothing -- not in the chain(probably due to data lost)
+                Nothing -> return Nothing
+
+lookupBlock chain branches cond = block_data <$$> lookupBlockNode chain branches cond
 
 toFullBlock :: Chain -> Block -> IO (Maybe Block)
 toFullBlock (Chain {
@@ -425,7 +446,8 @@ toFullBlockNodeFail chain node = do
 insertBlock :: Chain -> Block -> Maybe (Branch, Chain)
 insertBlock chain@(Chain {
     chain_conf = conf,
-    edge_branches = edge_branches
+    edge_branches = edge_branches,
+    mem_block_set = mem_block_set
 }) block@(Block {
     hash_target = hash_target,
     prev_hash = prev_hash
@@ -454,7 +476,9 @@ insertBlock chain@(Chain {
                 Just leaf_idx -> replace leaf_idx new_node edge_branches
                 Nothing -> edge_branches ++ [ new_node ]
  
-    return (new_node, chain { edge_branches = new_branches })
+    return (new_node, addMemBlock chain {
+        edge_branches = new_branches
+    } (block_hash block))
 
 -- difference between the max and the second max value
 minTopDiff :: Real t => [t] -> t
@@ -512,9 +536,9 @@ tryFixBranch chain@(Chain {
 }) = do
     let depth =
             if length branches > 1 then
-                minTopDiff $ map cur_height branches
+                minTopDiff (map cur_height branches)
             else if not (null branches) then
-                fi $ length (branchToBlockList (head branches))
+                fi (length (branchToBlockList (head branches)))
             else 0
 
         main@(BlockNode {
@@ -524,6 +548,7 @@ tryFixBranch chain@(Chain {
     -- print depth
 
     if fi depth >= tckr_max_tree_insert_depth conf then
+        -- main branch exceeds other branches by an enough depth
         case mprev of
             -- only one node in the branch -> keep the original chain
             Nothing -> return Nothing
@@ -535,7 +560,7 @@ tryFixBranch chain@(Chain {
                 -- the db, and utxo can be saved as well
                 saveBranch chain main
 
-                return $ Just $ chain {
+                return $ Just $ refreshMemBlockSet chain {
                     -- update saved_height
                     saved_height =
                         case buffer_chain of
@@ -549,8 +574,6 @@ tryFixBranch chain@(Chain {
                 }
 
     else return Nothing
-
-allBranches = edge_branches
 
 -- in DESCENDING order of heights
 takeBranch' :: Chain -> Int -> Maybe Branch -> [Branch]
@@ -580,7 +603,9 @@ takeBranch chain n node = takeBranch' chain n (Just node)
 -- in descending order of heights
 topNBlockHashes :: Chain -> Branch -> Int -> IO [Hash256]
 topNBlockHashes chain branch n' =
-    map block_hash <$> maybeCat <$> mapM (blockAtHeight chain branch) range
+    map (block_hash . block_data) <$>
+    maybeCat <$>
+    mapM (lookupBlockNode chain [branch] . AtHeight) range
     where
         n = fi n'
         height = branchHeight branch
@@ -603,7 +628,7 @@ bottomMemBlockHash chain =
 -- the branch node is on the edge and has non-zero height
 prevBlockNode :: Chain -> Branch -> IO (Maybe Branch)
 prevBlockNode chain branch =
-    branchAtHeight chain branch (cur_height branch - 1)
+    lookupBlockNode chain [branch] (AtHeight (cur_height branch - 1))
 
 addOrphan :: Chain -> Block -> Chain
 addOrphan chain block =
@@ -622,32 +647,12 @@ orphanList = map snd . OMAP.toList . orphan_pool
 
 hasBlockInBranch :: Chain -> Branch -> Hash256 -> IO Bool
 hasBlockInBranch chain branch hash =
-    isJust <$> branchWithHash chain branch hash
+    isJust <$> lookupBlockNode chain [branch] (WithHash hash)
 
 -- received before && is in a branch
 hasBlockInChain :: Chain -> Hash256 -> IO Bool
-hasBlockInChain chain@(Chain {
-    bucket_block = bucket_block,
-    bucket_chain = bucket_chain,
-    saved_height = saved_height,
-    edge_branches = branches
-}) hash = do
-    mres <- lookupAsIO bucket_block hash :: IO (Maybe (Height, Placeholder))
-    
-    case mres of
-        Nothing -> return False
-        Just (height, _) ->
-            if height >= saved_height then do
-                let found = maybeCat (map (searchBranchHash chain hash) branches)
-
-                if null found then return False
-                else return True
-            else do
-                mhash <- lookupIO bucket_chain height :: IO (Maybe Hash256)
-
-                return $ case mhash of
-                    Nothing -> False
-                    Just hash' -> hash == hash'
+hasBlockInChain chain hash =
+    isJust <$> lookupBlockNode chain (edge_branches chain) (WithHash hash)
 
 hasBlockInOrphan :: Chain -> Hash256 -> Bool
 hasBlockInOrphan chain hash =
