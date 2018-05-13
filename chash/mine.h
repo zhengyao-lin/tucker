@@ -34,7 +34,7 @@ typedef struct miner_state_t_tag {
 
 // append a 4-byte nonce to dat such that the hash of the appended string is
 // lower than the target in little-endian
-miner_state_t *start_miner(const byte_t *dat, size_t size, const hash256_t target, int njob);
+miner_state_t *init_miner(const byte_t *dat, size_t size, const hash256_t target, int njob);
 nonce_t join_miner(miner_state_t *state);
 void free_miner(miner_state_t *state);
 void kill_miner(miner_state_t *state);

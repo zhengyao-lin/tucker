@@ -114,6 +114,8 @@ data TxState u =
         tx_out_mask    :: Atom (SET.TSet OutPoint), -- outputs used by mem pool txns
         tx_out_new     :: Atom (UTXOArg MAP.TMap), -- new outputs enabled by the mem pool txns
         tx_mem_pool    :: Atom (MAP.TMap Hash256 PoolTx),
+
+        -- NOTE: make sure out_mask and out_new may overlap
         
         -- input not found but may be valid in the near future
         tx_orphan_pool :: Atom (MAP.TMap Hash256 PoolTx)
@@ -243,20 +245,20 @@ withCacheUTXO state proc = do
 -- only returns TxOuput because we can not guarantee more info(block height, etc.)
 lookupUTXOMemPool :: UTXOMap a => TxState a -> OutPoint -> IO (Maybe UTXOValue)
 lookupUTXOMemPool state outpoint = do
-    res <- lookupIO (utxo_map state) outpoint
+    masked <- SET.member outpoint <$> getA (tx_out_mask state)
 
-    case res of
-        Nothing -> do
-            -- look up out_new
-            res <- MAP.lookup outpoint <$> getA (tx_out_new state)
-            return res
+    -- make sure it's not masked by the mem pool txns
+    if masked then return Nothing
+    else do
+        res <- lookupIO (utxo_map state) outpoint
 
-        Just out -> do
-            -- make sure it's not masked by the mem pool txns
-            masked <- SET.member outpoint <$> getA (tx_out_mask state)
+        case res of
+            Nothing -> do
+                -- look up out_new
+                res <- MAP.lookup outpoint <$> getA (tx_out_new state)
+                return res
 
-            if masked then return Nothing
-            else return (Just out)
+            Just _ -> return res
 
 addMemPoolTx :: UTXOMap a => TxState a -> TxPayload -> IO ()
 addMemPoolTx (TxState {

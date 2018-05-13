@@ -32,8 +32,10 @@ data ScriptConf =
         script_enable_p2sh               :: Bool,
         script_enable_trace              :: Bool,
         script_enable_csv                :: Bool,
+        script_enable_cltv               :: Bool,
         script_enable_segwit             :: Bool,
         script_enable_v0_wit_sig         :: Bool, -- use version 0 witness program signature serialization
+        script_enable_strict_sig         :: Bool,
         script_max_pubkeys_per_multisig  :: Int
     } deriving (Show)
 
@@ -43,8 +45,10 @@ instance Default ScriptConf where
         script_enable_p2sh = True,
         script_enable_trace = False,
         script_enable_csv = False,
+        script_enable_cltv = False, -- BIP 65
         script_enable_segwit = False,
         script_enable_v0_wit_sig = False,
+        script_enable_strict_sig = False,
         script_max_pubkeys_per_multisig = 20
     }
 
@@ -73,35 +77,42 @@ instance StackItemValue Bool where
             is_null = BSR.null item
             is_zero = BSR.all (== 0) tail && (head == 0x00 || head == 0x80)
 
+encodeScriptInt :: Integral t => t -> ByteString
+encodeScriptInt int' =
+    if BSR.null raw then raw -- empty string
+    else if last_byte .&. 0x80 /= 0 then
+        -- sign bit already occupied, append one more byte
+        raw <> bchar sign_mask
+    else
+        -- set sign
+        BSR.init raw <> bchar (last_byte .|. sign_mask)
+    where
+        int = fi int'
+
+        sign_mask =
+            if int < 0 then 0x80
+            else 0x00
+
+        raw = vword2bsLE (abs int)
+        last_byte = BSR.last raw
+
+decodeScriptInt :: Integral t => ByteString -> t
+decodeScriptInt bs =
+    if BSR.null bs then 0
+    else fi ((if sign == 1 then negate else id) (bs2vwordLE unsigned))
+    where
+        last_byte = BSR.last bs
+        sign = last_byte `shiftR` 7 -- 1 or 0
+        -- clear the highest bit
+        unsigned = BSR.init bs <> bchar (last_byte .&. 0x7f)
+
 instance StackItemValue Integer where
     -- when an item is interpreted as an integer
     -- it's little-endian and the highest bit of the last byte is the sign
     -- (not 2's complement)
 
-    toItem int =
-        if BSR.null raw then raw -- empty string
-        else if last_byte .&. 0x80 /= 0 then
-            -- sign bit already occupied, append one more byte
-            raw <> bchar sign_mask
-        else
-            -- set sign
-            BSR.init raw <> bchar (last_byte .|. sign_mask)
-        where
-            sign_mask =
-                if int < 0 then 0x80
-                else 0x00
-    
-            raw = vword2bsLE (abs int)
-            last_byte = BSR.last raw
-
-    fromItem item =
-        if BSR.null item then 0
-        else (if sign == 1 then negate else id) (bs2vwordLE unsigned)
-        where
-            last_byte = BSR.last item
-            sign = last_byte `shiftR` 7 -- 1 or 0
-            -- clear the highest bit
-            unsigned = BSR.init item <> bchar (last_byte .&. 0x7f)
+    toItem = encodeScriptInt 
+    fromItem = decodeScriptInt
     
 data ScriptState =
     ScriptState {
@@ -331,12 +342,13 @@ eocS = do
     return (pc >= length code)
 
 -- checkSig public_key_encoded message signature_encoded
-checkSig :: ByteString -> ByteString -> ByteString -> Bool
-checkSig pub' msg sig =
+checkSig :: Bool -> ByteString -> ByteString -> ByteString -> Bool
+checkSig strict pub' msg sig =
     -- tLn ("CHECKSIG " ++ show (pub', msg, sig)) $
     -- NOTE: final hash is encoded in big-endian
     case decodeAllBE pub' of
-        Right pub -> verifyDER pub msg sig == Right True
+        Right pub ->
+            (if strict then verifyDER else verifyLaxDER) pub msg sig == Right True
         Left err -> False
 
 unaryOpS :: (StackItemValue a, StackItemValue b)
@@ -392,9 +404,10 @@ evalOpS OP_HASH256 = unaryOpS doubleSHA256
 evalOpS OP_CHECKSIG = do
     (pub', sig') <- pop2S
     msg <- txSigHashS [sig'] sig'
+    strict <- confS script_enable_strict_sig
 
     -- there is one byte(hash type) appended to the signature
-    pushS (checkSig pub' msg (BSR.init sig'))
+    pushS (checkSig strict pub' msg (BSR.init sig'))
 
 evalOpS OP_CHECKSIGVERIFY =
     evalOpS OP_CHECKSIG >>
@@ -418,6 +431,8 @@ evalOpS OP_CHECKMULTISIG = do
     -- messages for signing
     msgs <- mapM (txSigHashS sig's) sig's
 
+    strict <- confS script_enable_strict_sig
+
     let sigs = map BSR.init sig's
 
         match r@(idx, rest_pub's) =
@@ -425,7 +440,7 @@ evalOpS OP_CHECKMULTISIG = do
                 sig = sigs !! idx
                 nres =
                     -- tLn (show (hex sig, map hex rest_pub's)) $
-                    dropWhile (\pub' -> not (checkSig pub' msg sig)) rest_pub's
+                    dropWhile (\pub' -> not (checkSig strict pub' msg sig)) rest_pub's
 
             in if idx < length sigs then
                 if null nres then (idx, []) -- no matching, failed
@@ -580,9 +595,9 @@ evalOpS OP_CODESEPARATOR =
     })
 
 evalOpS OP_CHECKLOCKTIMEVERIFY = do
-    csv <- confS script_enable_csv
+    cltv <- confS script_enable_cltv
 
-    if csv then do
+    if cltv then do
         -- error "OP_CHECKLOCKTIMEVERIFY used"
         in_idx <- tx_in_idx <$> get
         cur_tx <- curTxS

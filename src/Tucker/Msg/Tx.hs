@@ -620,34 +620,6 @@ txSigHashLegacy tx in_idx subscript htype =
         -- tLn (show (prev, final_tx, hex final_str)) $
         -- bsToHash256 $ sha256 $ sha256 final_str
 
--- config, coinbase msg, receiver address, generated value
-stdCoinbase :: TCKRConf -> ByteString -> Address -> Value -> TxPayload
-stdCoinbase conf msg addr value =
-    updateIds $ TxPayload {
-        txid = undefined,
-        wtxid = undefined,
-
-        version = 0,
-        flag = 0,
-        tx_in = [
-            TxInput {
-                prev_out = OutPoint nullHash256 (-1),
-                sig_script = encodeLE ([ OP_RETURN, OP_PUSHDATA msg Nothing ]),
-                seqn = -1
-            }
-        ],
-
-        tx_out = [
-            TxOutput {
-                value = value,
-                pk_script = encodeLE (stdPkScriptP2PKH conf addr)
-            }
-        ],
-
-        tx_witness = [],
-        lock_time = 0
-    }
-
 encodeTxPayload :: TxPayload -> IO ByteString
 encodeTxPayload = return . encodeLE
 

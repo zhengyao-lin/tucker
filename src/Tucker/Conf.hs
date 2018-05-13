@@ -195,7 +195,11 @@ data TCKRConf =
         tckr_enable_miner :: Bool,
         tckr_miner_p2pkh_addr :: String,
         tckr_miner_msg :: String,
-        tckr_enable_mempool :: Bool
+        tckr_enable_mempool :: Bool,
+
+        tckr_bip34_height :: Word, -- block height in coinbase
+        tckr_bip66_height :: Word, -- strict signature DER encoding
+        tckr_bip65_height :: Word  -- OP_CHECKLOCKTIMEVERIFY
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -348,7 +352,11 @@ tucker_default_conf_mainnet mpath = do
         tckr_enable_miner = True,
         tckr_miner_p2pkh_addr = "mu2XoBFnT4RGqbLsFLoRuBHCqrXjbPkwBm",
         tckr_miner_msg = "/Tucker/Rody Rody Go",
-        tckr_enable_mempool = False
+        tckr_enable_mempool = False,
+
+        tckr_bip34_height = 227931,
+        tckr_bip66_height = 363725,
+        tckr_bip65_height = 388381
     }
 
     where
@@ -395,6 +403,10 @@ tucker_default_conf_testnet3 mpath = do
                 fork_status = FORK_STATUS_DEFINED
             }
         ],
+        
+        tckr_bip34_height = 21111,
+        tckr_bip66_height = 330776,
+        tckr_bip65_height = 581885,
 
         tckr_block_assumed_valid = Nothing
             -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")

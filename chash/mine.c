@@ -91,7 +91,7 @@ void *miner(void *arg)
 
 // append a nonce to dat until the double sha256 of it
 // is smaller(in little-endian) than the target
-miner_state_t *start_miner(const byte_t *dat, size_t size, const hash256_t target, int njob)
+miner_state_t *init_miner(const byte_t *dat, size_t size, const hash256_t target, int njob)
 {
     size_t nsize = size + 4;
 

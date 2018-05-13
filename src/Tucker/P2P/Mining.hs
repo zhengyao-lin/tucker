@@ -28,22 +28,22 @@ import Tucker.P2P.Action
 
 type MinerState = Ptr ()
 
-foreign import ccall "start_miner" c_start_miner :: Ptr Word8 -> Word64 -> Ptr Word8 -> Int -> IO MinerState
+foreign import ccall "init_miner" c_init_miner :: Ptr Word8 -> Word64 -> Ptr Word8 -> Int -> IO MinerState
 foreign import ccall "join_miner" c_join_miner :: MinerState -> IO Word32
 foreign import ccall "free_miner" c_free_miner :: MinerState -> IO ()
 foreign import ccall "kill_miner" c_kill_miner :: MinerState -> IO ()
 
-startMiner :: Int -> Block -> IO MinerState
-startMiner job block = do
+initMiner :: Int -> Block -> IO MinerState
+initMiner job block = do
     let fixed = blockFixedHeader block
         target = encodeLE (hash_target block)
 
     BA.withByteArray fixed $ \dat ->
         BA.withByteArray target $ \target ->
-            c_start_miner dat (fi (BSR.length fixed)) target job
+            c_init_miner dat (fi (BSR.length fixed)) target job
 
-joinMiner :: MinerState -> Block -> IO Block
-joinMiner state block = do
+joinMiner :: Block -> MinerState -> IO Block
+joinMiner block state = do
     nonce <- c_join_miner state
     return (updateBlockHashes block { nonce = fi nonce })
 
@@ -64,14 +64,14 @@ miner env =
             addr = envConf env tckr_miner_p2pkh_addr
             job = envConf env tckr_job_number
 
-        template <- envNextInitBlock env msg addr
+        template <- envNextBlock env msg addr
 
         let mine = do
-                state <- startMiner job template
+                state <- initMiner job template
 
                 setA state_var (Just state)
                 
-                final <- joinMiner state template
+                final <- joinMiner template state
 
                 envInfo env ("mined block: " ++ show final)
 

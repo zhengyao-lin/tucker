@@ -166,17 +166,52 @@ notes for BIP9
 
 -}
 
-nextInitBlock :: BlockChain -> ByteString -> Address -> IO Block
-nextInitBlock bc@(BlockChain {
+-- config, coinbase msg, receiver address, generated value
+coinbaseP2PKH :: TCKRConf -> Height -> ByteString -> Address -> Value -> TxPayload
+coinbaseP2PKH conf height msg addr fee =
+    updateIds $ TxPayload {
+        txid = undefined,
+        wtxid = undefined,
+
+        version = 0,
+        flag = 0,
+        tx_in = [
+            TxInput {
+                prev_out = OutPoint nullHash256 maxBound,
+                sig_script = encodeLE ([
+                    -- first item is the block height
+                    OP_PUSHDATA (encodeScriptInt height) Nothing,
+                    OP_PUSHDATA msg Nothing
+                ]),
+                seqn = maxBound
+            }
+        ],
+
+        tx_out = [
+            TxOutput {
+                value = fee,
+                pk_script = encodeLE (stdPkScriptP2PKH conf addr)
+            }
+        ],
+
+        tx_witness = [],
+        lock_time = 0
+    }
+
+nextBlock :: BlockChain -> ByteString -> Address -> IO Block
+nextBlock bc@(BlockChain {
     bc_conf = conf,
     bc_chain = chain
 }) msg addr =
     let main = mainBranch chain
         next_height = cur_height main + 1
         fee = feeAtHeight conf next_height
-        coinbase = stdCoinbase conf msg addr fee
-
+        coinbase = coinbaseP2PKH conf next_height msg addr fee
+    
     in appendTx coinbase <$> nextEmptyBlock bc
+
+    -- append all other txns
+    -- return (foldl (\block (tx, _) -> appendTx tx block) base txns)
 
 -- next empty block on the main branch
 -- NOTE that this block does not contain a coinbase
@@ -202,7 +237,7 @@ nextEmptyBlock bc@(BlockChain {
 
     return $ updateBlockHashes Block {
         block_hash = undefined,
-        vers = 0,
+        vers = minVersion bc next_height,
         prev_hash = block_hash tip,
         merkle_root = 0,
 
@@ -291,7 +326,7 @@ shouldRetarget conf height =
 
 feeAtHeight :: TCKRConf -> Height -> Value
 feeAtHeight conf height =
-    fi (tckr_initial_fee conf) `shift`
+    fi (tckr_initial_fee conf) `shiftR`
     (fi height `div` fi (tckr_fee_half_rate conf))
 
 updateForkDeploy :: BlockChain -> Branch -> IO ()
@@ -496,9 +531,13 @@ tryFlushChain bc@(BlockChain {
 
 genScriptConf :: BlockChain -> VerifyConf -> UTXOValue -> IO ScriptConf
 genScriptConf bc ver_conf utxo_value =
-    return $ def {
+    let conf = bc_conf bc
+        height = verify_cur_height ver_conf
+    in return def {
         script_enable_csv = verify_enable_csv ver_conf,
+        script_enable_cltv = fi height >= tckr_bip65_height conf,
         script_enable_segwit = verify_enable_segwit ver_conf,
+        script_enable_strict_sig = fi height >= tckr_bip66_height conf,
         script_enable_p2sh =
             parent_ts utxo_value >= tckr_p2sh_enable_time (bc_conf bc)
             -- NOTE: using the block timestamp here(not mtp)
@@ -694,10 +733,17 @@ verifyBlockTx bc branch block = do
                 
                 case mlocator of
                     Nothing -> return () -- no record
-                    Just locator ->
-                        expectTrue ("duplicated transaction " ++ show (txid tx)) $
-                            locatorToHash locator == block_hash block &&
-                            locatorToIdx locator == idx
+                    Just locator -> do
+                        let hash = locatorToHash locator
+                            match_record =
+                                locatorToHash locator == block_hash block &&
+                                locatorToIdx locator == idx
+
+                        -- it's a duplicated tx unless it was included in the same block
+                        -- OR the recorded block doesn't exist
+                        unless match_record $
+                            expectFalseIO ("duplicated transaction " ++ show (txid tx)) $
+                                bc_chain bc `hasBlockInChain` hash
 
         all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
             expectTrue "more than one coinbase txns" $
@@ -816,12 +862,22 @@ hasBlock (BlockChain { bc_chain = chain }) hash =
     else
         hasBlockInChain chain hash
 
+-- min version required
+minVersion :: Integral t => BlockChain -> Height -> t
+minVersion bc height =
+    let conf = bc_conf bc in
+    if fi height >= tckr_bip65_height conf then 4
+    else if fi height >= tckr_bip66_height conf then 3
+    else if fi height >= tckr_bip34_height conf then 2
+    else 0
+
 -- throws a TCKRError when rejecting the block
 addBlockFail :: BlockChain -> Block -> IO BlockChain
 addBlockFail bc@(BlockChain {
     bc_conf = conf,
     bc_tx_state = tx_state
 }) block@(Block {
+    vers = vers,
     block_hash = block_hash,
     hash_target = hash_target,
     btimestamp = timestamp,
@@ -871,11 +927,11 @@ addBlockFail bc@(BlockChain {
             tLnM "block orphaned"
             updateChain bc (addOrphan (bc_chain bc) block)
 
-        Just (branch, chain) -> do
+        Just (branch, chain') -> do
             -- block inserted, new branch leaf created
 
             -- update chain
-            bc <- updateChain bc chain
+            bc <- updateChain bc chain'
 
             -- tLnM (isPartial (txns (block_data branch)))
 
@@ -891,6 +947,12 @@ addBlockFail bc@(BlockChain {
             when (tckr_enable_difficulty_check conf) $
                 expectTrueIO "wrong difficulty" $
                     hashTargetValid bc branch
+
+            let height = branchHeight branch
+
+            -- versions for BIP 34, BIP 66, BIP 65
+            expectTrue "bad block version" $
+                vers >= minVersion bc height
 
             let main_branch = mainBranch (bc_chain bc)
 

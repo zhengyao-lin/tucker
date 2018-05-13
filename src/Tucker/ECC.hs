@@ -14,6 +14,8 @@ type ECCPrivateKey = SecKey
 data ECCPublicKey = ECCPublicKey Bool PubKey deriving (Eq, Show)
 type ECCSignature = Sig
 
+data ECCLaxSignature = ECCLaxSignature ECCSignature
+
 instance Encodable ECCPrivateKey where
     encode _ = getSecKey
 
@@ -42,12 +44,20 @@ instance Encodable ECCSignature where
 
 instance Decodable ECCSignature where
     decoder = do
-        -- using 'relaxed' rules
-        res <- laxImportSig <$> allD
+        -- using strict encoding
+        res <- importSig <$> allD
 
         case res of
             Just sig -> return sig
             Nothing -> fail "failed to decode signature"
+
+instance Decodable ECCLaxSignature where
+    decoder = do
+        res <- laxImportSig <$> allD
+
+        case res of
+            Just sig -> return (ECCLaxSignature sig)
+            Nothing -> fail "failed to decode non-strict signature"
 
 privToPub :: ECCPrivateKey -> ECCPublicKey
 privToPub priv = ECCPublicKey True (derivePubKey priv)
@@ -89,4 +99,9 @@ signDER priv msg = do
 verifyDER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Bool
 verifyDER pub msg sig_enc = do
     sig <- decodeAllBE sig_enc
+    return $ verify pub msg sig
+
+verifyLaxDER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Bool
+verifyLaxDER pub msg sig_enc = do
+    ECCLaxSignature sig <- decodeAllBE sig_enc
     return $ verify pub msg sig

@@ -630,6 +630,6 @@ envMainBranchTipHash :: MainLoopEnv -> IO Hash256
 envMainBranchTipHash env =
     envWithChain env (return . block_hash . mainBranchTip)
 
-envNextInitBlock :: MainLoopEnv -> ByteString -> Address -> IO Block
-envNextInitBlock env msg addr =
-    envWithChain env $ \bc -> nextInitBlock bc msg addr
+envNextBlock :: MainLoopEnv -> ByteString -> Address -> IO Block
+envNextBlock env msg addr =
+    envWithChain env $ \bc -> nextBlock bc msg addr
