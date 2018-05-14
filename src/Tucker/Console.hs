@@ -1,6 +1,11 @@
+{-# LANGUAGE GADTs, FlexibleInstances #-}
+
 module Tucker.Console where
 
 import Data.List
+import Data.Char
+
+import Text.Read
 
 import Control.Monad
 import Control.Applicative
@@ -40,10 +45,32 @@ three types of options:
 
 -}
 
+class ArgType t where
+    parseArg :: String -> Either String t
+
+instance ArgType String where
+    parseArg = Right
+
+instance ArgType Bool where
+    parseArg str =
+        case map toLower (trim str) of
+            "true" -> Right True
+            "false" -> Right False
+            _ -> Left ("unknown expression for bool type: " ++ str)
+
+instance ArgType Int where
+    parseArg str =
+        case readMaybe str of
+            Just v -> Right v
+            Nothing -> Left ("failed to parse the integer argument " ++ str)
+
 -- if the option name is single-char, we are expecting a single hyphen before it
-data Option f
-    = NoArg [String] f String
-    | WithArg [String] (String -> f) String
+-- data Option f
+--     = NoArg [String] f String
+--     | WithArg [String] (a -> f) String
+data Option f where
+    NoArg :: [String] -> f -> String -> Option f
+    WithArg :: ArgType a => [String] -> (a -> f) -> String -> Option f
 
 data MatchResult f
     = Match (f, [String])
@@ -115,23 +142,30 @@ matchOption arg rest (WithArg names flag_gen _) =
                     if length arg > 2 then
                         -- the argument is directly appended to the option
                         -- e.g. -fhi.h
-                        let flag_arg = drop 2 arg in
-                        Match (flag_gen flag_arg, rest)
+                        case parseArg (drop 2 arg) of
+                            Right arg -> Match (flag_gen arg, rest)
+                            Left err ->
+                                MatchError ("argument parsing error for option -" ++ name ++ ": " ++ err)
                     else
                         -- read the next argument
                         if null rest then
                             MatchError ("expecting one argument for option -" ++ name)
                         else
-                            Match (flag_gen (head rest), tail rest)
-
+                            case parseArg (head rest) of
+                                Right arg -> Match (flag_gen arg, tail rest)
+                                Left err ->
+                                    MatchError ("argument parsing error for option -" ++ name ++ ": " ++ err)
                 else NoMatch
 
             _ ->
                 let pref = "--" ++ name in
                 if pref `isPrefixOf` arg then
-                    let flag_arg = drop (length pref) arg in
-                    if "=" `isPrefixOf` flag_arg then
-                        Match (flag_gen (tail flag_arg), rest)
+                    let suf = drop (length pref) arg in
+                    if "=" `isPrefixOf` suf then
+                        case parseArg (tail suf) of
+                            Right arg -> Match (flag_gen arg, rest)
+                            Left err ->
+                                MatchError ("argument parsing error for long option --" ++ name ++ ": " ++ err)
                     else
                         MatchError ("expecting one argument for long option --" ++ name)
                 else

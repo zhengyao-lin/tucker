@@ -109,16 +109,18 @@ chainTest3 = TestCase $ do
         }
 
     withBlockChain conf Nothing $ \bc -> do
-        block <- nextBlock bc (BS.pack "sonia") "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX"
+        block <- nextBlock bc "sonia" "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX" 0
 
         -- addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]
 
         traceM (show (hash_target block))
 
-        result <- initMiner 4 block >>= joinMiner block
-        traceM (show (encodeLE result))
+        res <- initMiner 4 block >>= joinMiner block
+        traceM (show res)
 
-        addBlocks add_block_common_proc bc [result]
+        case res of
+            Just final -> void $ addBlocks add_block_common_proc bc [final]
+            Nothing -> traceM "not found"
 
         return ()
 

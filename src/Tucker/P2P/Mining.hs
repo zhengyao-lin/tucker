@@ -7,12 +7,13 @@ module Tucker.P2P.Mining where
 import Data.Word
 import qualified Data.ByteArray as BA
 import qualified Data.ByteString as BSR
-import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
 import Control.Concurrent
+import Control.Monad.Loops
 
 import Foreign.Ptr
+import Foreign.Storable
 
 import Debug.Trace
 
@@ -29,7 +30,7 @@ import Tucker.P2P.Action
 type MinerState = Ptr ()
 
 foreign import ccall "init_miner" c_init_miner :: Ptr Word8 -> Word64 -> Ptr Word8 -> Int -> IO MinerState
-foreign import ccall "join_miner" c_join_miner :: MinerState -> IO Word32
+foreign import ccall "join_miner" c_join_miner :: MinerState -> IO (Ptr Word32)
 foreign import ccall "free_miner" c_free_miner :: MinerState -> IO ()
 foreign import ccall "kill_miner" c_kill_miner :: MinerState -> IO ()
 
@@ -42,10 +43,14 @@ initMiner job block = do
         BA.withByteArray target $ \target ->
             c_init_miner dat (fi (BSR.length fixed)) target job
 
-joinMiner :: Block -> MinerState -> IO Block
+joinMiner :: Block -> MinerState -> IO (Maybe Block)
 joinMiner block state = do
-    nonce <- c_join_miner state
-    return (updateBlockHashes block { nonce = fi nonce })
+    pnonce <- c_join_miner state
+
+    if pnonce == nullPtr then return Nothing
+    else do
+        nonce <- peek pnonce
+        return (Just (updateBlockHashes block { nonce = fi nonce }))
 
 freeMiner :: MinerState -> IO ()
 freeMiner = c_free_miner
@@ -60,28 +65,35 @@ miner env =
         finished_var <- newA False
         state_var <- newA Nothing
 
-        let msg = BS.pack (envConf env tckr_miner_msg)
+        let msg = envConf env tckr_miner_msg
             addr = envConf env tckr_miner_p2pkh_addr
             job = envConf env tckr_job_number
 
-        template <- envNextBlock env msg addr
+        let mine = void $
+                flip firstM [0..] $ \nonce -> do
+                    template <- envNextBlock env msg addr nonce
+                    state <- initMiner job template
+                    setA state_var (Just state)
 
-        let mine = do
-                state <- initMiner job template
+                    res <- joinMiner template state
 
-                setA state_var (Just state)
-                
-                final <- joinMiner template state
+                    case res of
+                        Nothing -> do
+                            envInfo env "one round finished and nothing found"
+                            return False
 
-                envInfo env ("mined block: " ++ show final)
+                        Just final -> do
+                            envInfo env ("mined block: " ++ show final)
 
-                -- broadcast!!
-                envAddBlock env NullNode final
+                            -- broadcast!!
+                            envAddBlock env NullNode final
 
-                inv <- encodeMsg (global_conf env) BTC_CMD_INV $
-                       encodeInvPayload [InvVector INV_TYPE_BLOCK (block_hash final)]
+                            inv <- encodeMsg (global_conf env) BTC_CMD_INV $
+                                encodeInvPayload [InvVector INV_TYPE_BLOCK (block_hash final)]
 
-                envBroadcastAction env (sendMsgA inv)
+                            envBroadcastAction env (sendMsgA inv)
+
+                            return True
 
         tid <- envForkFinally env THREAD_BASE mine $ \res -> do
             case res of

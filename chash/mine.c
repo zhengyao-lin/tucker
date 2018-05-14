@@ -25,7 +25,8 @@ void *miner(void *arg)
     byte_t *ndat = malloc(job.state->nsize),
            *remain = ndat + job.state->osize - job.state->rsize;
 
-    nonce_t *hole = (nonce_t *)(ndat + job.state->osize), i, j = job.to - job.from;
+    nonce_t *hole = (nonce_t *)(ndat + job.state->osize),
+            i, j = job.to, a, b;
 
     hash256_t hash0, hash;
     size_t proc;
@@ -35,7 +36,7 @@ void *miner(void *arg)
     msec_t begin, span0, span1;
     double span;
 
-#define MEASURE_TIME 40960
+#define MEASURE_TIME (1 << 16)
 
     memcpy(ndat, job.state->dat, job.state->osize);
 
@@ -43,20 +44,22 @@ void *miner(void *arg)
 
     span0 = begin = get_cpu_ms();
 
-    for (i = 0; i <= j && !job.state->stop; i++) {
+    for (i = job.from; i <= j && !job.state->found; i++) {
         if (i && i % MEASURE_TIME == 0) {
             span1 = get_cpu_ms();
             span = (double)(span1 - span0) / 1000;
 
+            a = i - job.from;
+            b = j - job.from;
+
             printf("\rprogress(%d): %u/%u(%.2f%%) global rate: %.1f H/s",
-                   job.id, i, j, (double)i / j * 100,
+                   job.id, a, b, (double)a / b * 100,
                    MEASURE_TIME / span * job.state->njob);
 
             span0 = span1;
         }
 
-        *hole = i + job.from;
-
+        *hole = i;
         ctx = job.state->base_ctx; // copy context
         
         proc = sha256_update(&ctx, remain, job.state->rsize); // further update
@@ -78,8 +81,8 @@ void *miner(void *arg)
 
             free(ndat);
             
-            job.state->answer = i + job.from;
-            job.state->stop = true;
+            job.state->answer = i;
+            job.state->found = true;
 
             return NULL;
         }
@@ -117,7 +120,7 @@ miner_state_t *init_miner(const byte_t *dat, size_t size, const hash256_t target
         .threads = malloc(sizeof(*state->threads) * njob),
         .jobs = malloc(sizeof(*state->jobs) * njob),
         .njob = njob,
-        .stop = false
+        .found = false
     };
 
     memcpy(state->target, target, sizeof(hash256_t));
@@ -140,7 +143,7 @@ miner_state_t *init_miner(const byte_t *dat, size_t size, const hash256_t target
     return state;
 }
 
-nonce_t join_miner(miner_state_t *state)
+nonce_t *join_miner(miner_state_t *state)
 {
     int i;
 
@@ -148,9 +151,13 @@ nonce_t join_miner(miner_state_t *state)
         pthread_join(state->threads[i], NULL);
     }
 
-    printf("found: %u\n", state->answer);
-
-    return state->answer;
+    if (state->found) {
+        printf("found: %u\n", state->answer);
+        return &state->answer;
+    } else {
+        printf("not found\n");
+        return NULL;
+    }
 }
 
 void free_miner(miner_state_t *state)
@@ -161,5 +168,5 @@ void free_miner(miner_state_t *state)
 
 void kill_miner(miner_state_t *state)
 {
-    state->stop = true;
+    state->found = true;
 }

@@ -9,6 +9,7 @@ import Data.Word
 import Data.Bits
 import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
+import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
 import Control.Exception
@@ -166,9 +167,34 @@ notes for BIP9
 
 -}
 
+{-
+
+BitMiner coinbase
+03 92cc13
+09 4269744d696e746572
+2c fabe6d6d00000000000000000000000000000000000000000000000000000000000000000100000000000000
+09 6465765a1e00000001
+0000000603000000
+
+unknown coinbase
+03 91cc13: height
+04 cbdbf85a: time
+08 40000015147b0200: extra nonce?
+0d 2f6e6f64655374726174756d2f: "/nodeStratum/"
+
+-}
+
+data CoinbaseInfo =
+    CoinbaseInfo {
+        cb_height :: Height,
+        cb_time :: Timestamp,
+        cb_nonce :: Word64,
+        cb_msg :: String
+    }
+
 -- config, coinbase msg, receiver address, generated value
-coinbaseP2PKH :: TCKRConf -> Height -> ByteString -> Address -> Value -> TxPayload
-coinbaseP2PKH conf height msg addr fee =
+coinbaseP2PKH :: TCKRConf -> CoinbaseInfo -> Address -> Value -> TxPayload
+coinbaseP2PKH conf info addr fee =
     updateIds $ TxPayload {
         txid = undefined,
         wtxid = undefined,
@@ -180,8 +206,10 @@ coinbaseP2PKH conf height msg addr fee =
                 prev_out = OutPoint nullHash256 maxBound,
                 sig_script = encodeLE ([
                     -- first item is the block height
-                    OP_PUSHDATA (encodeScriptInt height) Nothing,
-                    OP_PUSHDATA msg Nothing
+                    OP_INT (fi (cb_height info)),
+                    OP_INT (fi (cb_time info)),
+                    OP_INT (fi (cb_nonce info)),
+                    OP_PUSHDATA (BS.pack (cb_msg info)) Nothing
                 ]),
                 seqn = maxBound
             }
@@ -198,17 +226,27 @@ coinbaseP2PKH conf height msg addr fee =
         lock_time = 0
     }
 
-nextBlock :: BlockChain -> ByteString -> Address -> IO Block
+nextBlock :: BlockChain -> String -> Address -> Word64 -> IO Block
 nextBlock bc@(BlockChain {
     bc_conf = conf,
     bc_chain = chain
-}) msg addr =
+}) msg addr extra_nonce = do
+    now <- unixTimestamp
+
     let main = mainBranch chain
         next_height = cur_height main + 1
         fee = feeAtHeight conf next_height
-        coinbase = coinbaseP2PKH conf next_height msg addr fee
+
+        info = CoinbaseInfo {
+                cb_height = next_height,
+                cb_time = now,
+                cb_nonce = extra_nonce,
+                cb_msg = msg
+            }
+
+        coinbase = coinbaseP2PKH conf info addr fee
     
-    in appendTx coinbase <$> nextEmptyBlock bc
+    appendTx coinbase <$> nextEmptyBlock bc
 
     -- append all other txns
     -- return (foldl (\block (tx, _) -> appendTx tx block) base txns)
@@ -740,10 +778,10 @@ verifyBlockTx bc branch block = do
                                 locatorToIdx locator == idx
 
                         -- it's a duplicated tx unless it was included in the same block
-                        -- OR the recorded block doesn't exist
+                        -- OR the recorded block doesn't exist in the current branch
                         unless match_record $
                             expectFalseIO ("duplicated transaction " ++ show (txid tx)) $
-                                bc_chain bc `hasBlockInChain` hash
+                                hasBlockInBranch (bc_chain bc) branch hash
 
         all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
             expectTrue "more than one coinbase txns" $
@@ -890,7 +928,7 @@ addBlockFail bc@(BlockChain {
     let all_txns = FD.toList txns'
 
     expectFalseIO "block already exists" $
-        (bc_chain bc) `hasBlockInChain` block_hash
+        bc_chain bc `hasBlockInChain` block_hash
 
     -- don't check if the block is in orphan pool
 
@@ -922,7 +960,7 @@ addBlockFail bc@(BlockChain {
     case insertBlock (bc_chain bc) block of
         Nothing -> do -- no previous hash found
             expectFalse "repeated orphan block" $
-                (bc_chain bc) `hasBlockInOrphan` block_hash
+                bc_chain bc `hasBlockInOrphan` block_hash
 
             tLnM "block orphaned"
             updateChain bc (addOrphan (bc_chain bc) block)

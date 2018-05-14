@@ -6,6 +6,7 @@ import qualified Text.Printf as TP
 
 import Data.Bits
 import Data.List
+import Data.Char
 import Data.Time.Clock.POSIX
 import qualified Data.Foldable as FD
 import qualified Data.ByteString.Char8 as BS
@@ -399,3 +400,9 @@ unless_ cond = unless cond . (>> return ())
 
 (<$$>) :: (Monad m1, Monad m2) => (a -> b) -> m1 (m2 a) -> m1 (m2 b)
 f <$$> m = (f <$>) <$> m
+
+for = flip map
+
+trim :: String -> String
+trim = f . f
+   where f = reverse . dropWhile isSpace

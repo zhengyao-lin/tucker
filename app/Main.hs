@@ -20,6 +20,9 @@ data Flag
     = TuckerPath String
     | UseMainNet
     | UseTestNet
+    | EnableMiner Bool
+    | EnableMinDiff Bool
+    | EnableMemPool Bool
     | ShowHelp
     | SetJob Int
     deriving (Eq, Show)
@@ -29,17 +32,29 @@ opts = [
         WithArg [ "p", "path" ] TuckerPath "set tucker path",
         
         NoArg ["mainnet"] UseMainNet "use mainnet",
-        NoArg ["testnet"] UseTestNet "use testnet",
+        NoArg ["testnet"] UseTestNet "use testnet(in default)",
 
-        WithArg [ "j", "job" ] (SetJob . read) "set the number of native threads to use",
+        WithArg ["enable-miner"] EnableMiner "enable miner[TRUE/false]",
+        WithArg ["enable-min-diff"] EnableMinDiff
+            "use min-diff rule to mine(only available when min-diff is enabled on the net)[true/false]",
+
+        WithArg ["enable-mempool"] EnableMemPool
+            "enable tx mem pool(usually for mining)[TRUE/false]",
+
+        WithArg [ "j", "job" ] SetJob "set the number of native threads to use",
 
         NoArg [ "h", "help" ] ShowHelp "show this help message"
     ]
 
+def_flags =
+    [ EnableMiner True, EnableMemPool True ]
+
 flagsToConf :: [Flag] -> IO TCKRConf
-flagsToConf flags = do
-    -- decide which network to use first
-    let net_flag = reverse $ filter (\f -> f == UseMainNet || f == UseTestNet) flags
+flagsToConf flags' = do
+    let flags = def_flags ++ flags'
+
+        -- decide which network to use first
+        net_flag = reverse $ filter (\f -> f == UseMainNet || f == UseTestNet) flags
         mpath = reverse $ filter (\f -> case f of TuckerPath _ -> True; _ -> False) flags
 
     net_flag <- case listToMaybe net_flag of
@@ -58,9 +73,18 @@ flagsToConf flags = do
 
     forM_ flags $ \flag ->
         case flag of
-            SetJob job -> do
+            SetJob job -> void $
                 appA (\conf -> conf { tckr_job_number = job }) conf_var
-                return ()
+
+            EnableMiner bool -> void $
+                appA (\conf -> conf { tckr_enable_miner = bool }) conf_var
+
+            EnableMinDiff bool ->
+                when_ (tckr_use_special_min_diff conf) $
+                    appA (\conf -> conf { tckr_use_special_min_diff_mine = bool }) conf_var
+
+            EnableMemPool bool -> void $
+                appA (\conf -> conf { tckr_enable_mempool = bool }) conf_var
 
             _ -> return ()
 
@@ -80,13 +104,12 @@ main = do
     args <- getArgs
 
     case parseFlags args opts of
-        Right (flags, _) -> do
+        Right (flags, _) ->
             if ShowHelp `elem` flags then
                 showHelp
-            else do
+            else void $ do
                 conf <- flagsToConf flags
                 mainLoop conf
-                return ()
 
         Left err -> do
             tLnM (show err)

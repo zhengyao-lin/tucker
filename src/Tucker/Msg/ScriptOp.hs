@@ -4,6 +4,7 @@ module Tucker.Msg.ScriptOp where
 
 import Data.Int
 import Data.Hex
+import Data.Bits
 import Data.Word
 import Data.List
 import Data.List.Split
@@ -25,6 +26,8 @@ data ScriptOp
     = OP_PUSHDATA ByteString (Maybe ByteString)
     -- the second bytestring is the original data
     | OP_CONST Int8
+
+    | OP_INT Integer -- encodable only
 
     -- flow-control
     | OP_NOP
@@ -256,6 +259,35 @@ disabled_ops = [
         OP_LSHIFT, OP_RSHIFT
     ]
 
+encodeScriptInt :: Integral t => t -> ByteString
+encodeScriptInt int' =
+    if BSR.null raw then raw -- empty string
+    else if last_byte .&. 0x80 /= 0 then
+        -- sign bit already occupied, append one more byte
+        raw <> bchar sign_mask
+    else
+        -- set sign
+        BSR.init raw <> bchar (last_byte .|. sign_mask)
+    where
+        int = fi int'
+
+        sign_mask =
+            if int < 0 then 0x80
+            else 0x00
+
+        raw = vword2bsLE (abs int)
+        last_byte = BSR.last raw
+
+decodeScriptInt :: Integral t => ByteString -> t
+decodeScriptInt bs =
+    if BSR.null bs then 0
+    else fi ((if sign == 1 then negate else id) (bs2vwordLE unsigned))
+    where
+        last_byte = BSR.last bs
+        sign = last_byte `shiftR` 7 -- 1 or 0
+        -- clear the highest bit
+        unsigned = BSR.init bs <> bchar (last_byte .&. 0x7f)
+
 instance Encodable ScriptOp where
     encodeB _ (OP_PUSHDATA _ (Just cache)) = encodeB LittleEndian cache
 
@@ -276,6 +308,9 @@ instance Encodable ScriptOp where
         | n >= 1 && n <= 16
                     = bcharB (0x50 + n)
         | otherwise = throw $ TCKRError "op constant value not in range 0-16"
+
+    encodeB end (OP_INT int) =
+        encodeB end (OP_PUSHDATA (encodeScriptInt int) Nothing)
 
     encodeB end (OP_IF exp _) =
         bcharB (if exp then 0x63 else 0x64) -- OP_IF or OP_NOTIF

@@ -77,35 +77,6 @@ instance StackItemValue Bool where
             is_null = BSR.null item
             is_zero = BSR.all (== 0) tail && (head == 0x00 || head == 0x80)
 
-encodeScriptInt :: Integral t => t -> ByteString
-encodeScriptInt int' =
-    if BSR.null raw then raw -- empty string
-    else if last_byte .&. 0x80 /= 0 then
-        -- sign bit already occupied, append one more byte
-        raw <> bchar sign_mask
-    else
-        -- set sign
-        BSR.init raw <> bchar (last_byte .|. sign_mask)
-    where
-        int = fi int'
-
-        sign_mask =
-            if int < 0 then 0x80
-            else 0x00
-
-        raw = vword2bsLE (abs int)
-        last_byte = BSR.last raw
-
-decodeScriptInt :: Integral t => ByteString -> t
-decodeScriptInt bs =
-    if BSR.null bs then 0
-    else fi ((if sign == 1 then negate else id) (bs2vwordLE unsigned))
-    where
-        last_byte = BSR.last bs
-        sign = last_byte `shiftR` 7 -- 1 or 0
-        -- clear the highest bit
-        unsigned = BSR.init bs <> bchar (last_byte .&. 0x7f)
-
 instance StackItemValue Integer where
     -- when an item is interpreted as an integer
     -- it's little-endian and the highest bit of the last byte is the sign
