@@ -25,7 +25,7 @@ encode_map_be = [
         (65280, hex2bs "00ff00", hex2bs "ff00")
     ]
 
-genCoinbase :: Value -> TxPayload
+genCoinbase :: Satoshi -> TxPayload
 genCoinbase value =
     updateIds $ TxPayload {
         txid = 0,
@@ -41,7 +41,7 @@ genCoinbase value =
         lock_time = 0
     }
 
-simpleBlock :: Hash256 -> Value -> Block
+simpleBlock :: Hash256 -> Satoshi -> Block
 simpleBlock prev_hash cb_val =
     -- nonce <- randomIO
     -- timestamp <- unixTimestamp

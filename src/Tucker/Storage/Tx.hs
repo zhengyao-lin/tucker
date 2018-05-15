@@ -90,7 +90,12 @@ instance Decodable UTXOValue where
 
 -- class (UTXOMap a, IsCacheMap a) => UTXOCacheN a where
 
-type PoolTx = (TxPayload, Timestamp)
+data PoolTx =
+    PoolTx {
+        tx_data  :: TxPayload,
+        inc_time :: Timestamp,
+        tx_fee   :: Satoshi
+    }
 
 -- a giant structure handling all transactions(orphans, mempool, ...)
 data TxState u =
@@ -103,7 +108,7 @@ data TxState u =
 
         -- a set of unspent tx output
         -- tx in this set must be included in blocks
-        -- bucket_utxo    :: DBBucket OutPoint Value,
+        -- bucket_utxo    :: DBBucket OutPoint Satoshi,
         utxo_map       :: u,
 
         -- for efficiency reason, mem pool and orphan pool
@@ -260,16 +265,20 @@ lookupUTXOMemPool state outpoint = do
 
             Just _ -> return res
 
-addMemPoolTx :: UTXOMap a => TxState a -> TxPayload -> IO ()
+addMemPoolTx :: UTXOMap a => TxState a -> Satoshi -> TxPayload -> IO ()
 addMemPoolTx (TxState {
     tx_out_mask = out_mask,
     tx_out_new = out_new,
     tx_mem_pool = mem_pool
-}) tx = do
+}) fee tx = do
     now <- unixTimestamp
 
     -- add the tx to the mem pool
-    appA (MAP.insert (txid tx) (tx, now)) mem_pool
+    appA (MAP.insert (txid tx) PoolTx {
+        tx_data = tx,
+        inc_time = now,
+        tx_fee = fee
+    }) mem_pool
 
     -- add all used output to out_mask
     forM_ (tx_in tx) $ \input ->
@@ -294,7 +303,7 @@ removeMemPoolTx (TxState {
 
     case mtx of
         Nothing -> return ()
-        Just (tx, _) -> do
+        Just (PoolTx { tx_data = tx }) -> do
             -- delete tx from the mem pool
             appA (MAP.delete txid) mem_pool
 
@@ -307,10 +316,13 @@ removeMemPoolTx (TxState {
                 appA (MAP.delete (OutPoint txid (fi i))) out_new
 
 addOrphanTx :: UTXOMap a => TxState a -> TxPayload -> IO ()
-addOrphanTx state tx = do
+addOrphanTx state tx = void $ do
     now <- unixTimestamp
-    appA (MAP.insert (txid tx) (tx, now)) (tx_orphan_pool state)
-    return ()
+    appA (MAP.insert (txid tx) PoolTx {
+        tx_data = tx,
+        inc_time = now,
+        tx_fee = error "no fee for orphan tx"
+    }) (tx_orphan_pool state)
 
 removeOrphanTx :: UTXOMap a => TxState a -> Hash256 -> IO ()
 removeOrphanTx state txid = do
@@ -324,13 +336,13 @@ removePoolTx state txid = do
 
 filterOrphanPoolTx :: UTXOMap a => TxState a -> (TxPayload -> Bool) -> IO [TxPayload]
 filterOrphanPoolTx state pred =
-    filter pred <$> map (fst . snd) <$> MAP.toList <$> getA (tx_orphan_pool state)
+    filter pred <$> map (tx_data . snd) <$> MAP.toList <$> getA (tx_orphan_pool state)
 
 -- remove timeout txns in the pool
 timeoutPoolTx :: UTXOMap a => TxState a -> Timestamp -> IO ()
 timeoutPoolTx state min = do
-    appA (MAP.filter ((>= min) . snd)) (tx_mem_pool state)
-    appA (MAP.filter ((>= min) . snd)) (tx_orphan_pool state)
+    appA (MAP.filter ((>= min) . inc_time)) (tx_mem_pool state)
+    appA (MAP.filter ((>= min) . inc_time)) (tx_orphan_pool state)
     return ()
 
 -- tx pool includes both the mem pool and orphan pool
@@ -351,11 +363,14 @@ hasTxInMemPool state hash =
 
 memPoolTxns :: UTXOMap a => TxState a -> IO [TxPayload]
 memPoolTxns state =
-    map (fst . snd) <$> MAP.toList <$> getA (tx_mem_pool state)
+    map (tx_data . snd) <$> MAP.toList <$> getA (tx_mem_pool state)
+
+orphanPoolTxns :: UTXOMap a => TxState a -> IO [TxPayload]
+orphanPoolTxns state = filterOrphanPoolTx state (const True)
 
 lookupMemPoolTx :: UTXOMap a => TxState a -> Hash256 -> IO (Maybe TxPayload)
 lookupMemPoolTx state txid =
-    (fst <$>) <$> MAP.lookup txid <$> getA (tx_mem_pool state)
+    (tx_data <$>) <$> MAP.lookup txid <$> getA (tx_mem_pool state)
 
 hasTxInOrphanPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
 hasTxInOrphanPool state hash =

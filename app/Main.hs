@@ -23,6 +23,7 @@ data Flag
     | EnableMiner Bool
     | EnableMinDiff Bool
     | EnableMemPool Bool
+    | MinFee Int
     | ShowHelp
     | SetJob Int
     deriving (Eq, Show)
@@ -40,6 +41,8 @@ opts = [
 
         WithArg ["enable-mempool"] EnableMemPool
             "enable tx mem pool(usually for mining)[TRUE/false]",
+
+        WithArg ["min-fee"] MinFee "min tx fee required for mem pool txns(in satoshi/kb)",
 
         WithArg [ "j", "job" ] SetJob "set the number of native threads to use",
 
@@ -85,6 +88,9 @@ flagsToConf flags' = do
 
             EnableMemPool bool -> void $
                 appA (\conf -> conf { tckr_enable_mempool = bool }) conf_var
+
+            MinFee fr -> void $
+                appA (\conf -> conf { tckr_min_tx_fee_rate = fi fr }) conf_var
 
             _ -> return ()
 

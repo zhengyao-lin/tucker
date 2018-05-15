@@ -3,7 +3,10 @@ module Tucker.Msg.Other where
 import Data.Word
 import qualified Data.ByteString as BSR
 
+import Control.Exception
+
 import Tucker.Enc
+import Tucker.DeepSeq
 import Tucker.Msg.Common
 
 newtype PingPongPayload = PingPongPayload Word64 deriving (Show, Eq)
@@ -88,9 +91,25 @@ instance Decodable RejectPayload where
             rdata = rdata
         }
 
+data Rejection = Rejection RejectType String deriving (Show)
+
+instance Exception Rejection
+
+instance NFData Rejection where
+    rnf (Rejection t m) = t `seq` rnf m
+
 newtype AlertPayload = AlertPayload ByteString deriving (Show, Eq)
 
 -- instance Encodable AlertPayload where
 
 instance Decodable AlertPayload where
     decoder = allD >>= return . AlertPayload
+
+encodeRejectPayload :: Command -> ByteString -> Rejection -> IO ByteString
+encodeRejectPayload cmd dat (Rejection rtype msg) =
+    return $ encodeLE RejectPayload {
+        message = commandToString cmd,
+        ccode = rtype,
+        reason = msg,
+        rdata = dat
+    }

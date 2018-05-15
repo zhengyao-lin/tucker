@@ -193,7 +193,7 @@ data CoinbaseInfo =
     }
 
 -- config, coinbase msg, receiver address, generated value
-coinbaseP2PKH :: TCKRConf -> CoinbaseInfo -> Address -> Value -> TxPayload
+coinbaseP2PKH :: TCKRConf -> CoinbaseInfo -> Address -> Satoshi -> TxPayload
 coinbaseP2PKH conf info addr fee =
     updateIds $ TxPayload {
         txid = undefined,
@@ -303,7 +303,7 @@ flagBlockHashes bc@(BlockChain { bc_chain = chain }) n = do
     latest <- latestBlockHashes bc n
     return (latest ++ [bottomMemBlockHash chain])
 
-corrupt = reject "corrupted database"
+corrupt = error "corrupted database"
 
 calNewTarget :: TCKRConf -> Hash256 -> Timestamp -> Hash256
 calNewTarget conf old_target actual_span =
@@ -362,7 +362,7 @@ shouldRetarget conf height =
     height /= 0 &&
     height `mod` fi (tckr_retarget_span conf) == 0
 
-feeAtHeight :: TCKRConf -> Height -> Value
+feeAtHeight :: TCKRConf -> Height -> Satoshi
 feeAtHeight conf height =
     fi (tckr_initial_fee conf) `shiftR`
     (fi height `div` fi (tckr_fee_half_rate conf))
@@ -521,11 +521,11 @@ collectOrphanBlock bc@(BlockChain {
 
     foldM fold_proc bc orphan_list
 
-addBlock :: BlockChain -> Block -> IO (Either TCKRError BlockChain)
+addBlock :: BlockChain -> Block -> IO (Either Rejection BlockChain)
 addBlock bc block =
-    force <$> tryT (addBlockFail bc block)
+    force <$> try (addBlockFail bc block)
 
-addBlocks :: (Block -> Either TCKRError BlockChain -> IO ())
+addBlocks :: (Block -> Either Rejection BlockChain -> IO ())
           -> BlockChain -> [Block]
           -> IO BlockChain
 addBlocks proc bc [] = return bc
@@ -614,11 +614,15 @@ parentBranchOfTx :: UTXOMap a => BlockChain -> TxState a -> Branch -> Hash256 ->
 parentBranchOfTx bc@(BlockChain {
     bc_chain = chain
 }) tx_state branch txid = do
-    locator <- expectMaybeIO "failed to locate tx(db corrupt)" $
+    locator <- expectMaybeIO
+        REJECT_INVALID
+        "failed to locate tx(db corrupt)" $
         findTxId tx_state txid
 
     -- should ONLY be used if you checking coinbase maturity or csv validity
-    bnode <- expectMaybeIO "cannot find corresponding block(db corrupt) or tx not in the current branch" $
+    bnode <- expectMaybeIO
+        REJECT_INVALID
+        "cannot find corresponding block(db corrupt) or tx not in the current branch" $
         lookupBlockNode chain [branch] (WithHash (locatorToHash locator))
 
     -- bnode <- expectMaybeIO ("failed to load full block for " ++ show bnode) $
@@ -640,10 +644,12 @@ verifyScript bc ver_conf tx in_idx uvalue = do
         state = initState script_conf prev_tx_out tx (fi in_idx)
         check_res = runEval state [ sig_sc, pk_sc ]
 
-    expectTrue (printf
-        "script validation failed: tx %s, %s to tx %s, %s: %s, scripts: %s"
-        (show prev_txid) (show out_idx) (show (txid tx)) (show in_idx) (show check_res)
-        (show (sig_sc, pk_sc))) (check_res == ValidTx)
+    expectTrue
+        REJECT_INVALID
+        (printf "script validation failed: tx %s, %s to tx %s, %s: %s, scripts: %s"
+         (show prev_txid) (show out_idx) (show (txid tx)) (show in_idx) (show check_res)
+         (show (sig_sc, pk_sc)))
+        (check_res == ValidTx)
 
 verifyRelLockTime :: BlockChain -> Branch -> VerifyConf -> TxInput -> UTXOValue -> IO ()
 verifyRelLockTime bc branch ver_conf input uvalue =
@@ -655,8 +661,10 @@ verifyRelLockTime bc branch ver_conf input uvalue =
                     let cur = verify_cur_height ver_conf
                         exp = parent_height uvalue + fi v
                     
-                    expectTrue ("relative lock-time(block height) not met(expecting " ++
-                                show exp ++ ", current " ++ show cur) $
+                    expectTrue
+                        REJECT_INVALID
+                        ("relative lock-time(block height) not met(expecting " ++
+                         show exp ++ ", current " ++ show cur) $
                         cur >= exp
 
                 RelLockTime512S v -> do
@@ -665,15 +673,17 @@ verifyRelLockTime bc branch ver_conf input uvalue =
                     let cur = verify_cur_mtp ver_conf
                         exp = fi v * 512 + prev_time
                     
-                    expectTrue ("relative lock-time(512s) not met(expecting " ++
-                                show exp ++ ", current " ++ show cur) $
+                    expectTrue
+                        REJECT_INVALID
+                        ("relative lock-time(512s) not met(expecting " ++
+                         show exp ++ ", current " ++ show cur) $
                         cur >= exp
 
         Nothing -> return () -- no requirement for lock time
 
 verifyInput :: UTXOMap a
             => BlockChain -> TxState a -> VerifyConf
-            -> Branch -> TxPayload -> Int -> IO Value
+            -> Branch -> TxPayload -> Int -> IO Satoshi
 verifyInput bc@(BlockChain {
     bc_conf = conf,
     bc_chain = chain,
@@ -684,14 +694,18 @@ verifyInput bc@(BlockChain {
         }) = tx_in tx !! in_idx
 
     -- :: UTXOValue
-    uvalue <- expectMaybeIO ("outpoint not in utxo " ++ show outp) $
+    uvalue <- expectMaybeIO
+        REJECT_INVALID
+        ("outpoint not in utxo " ++ show outp) $
         lookupUTXO tx_state outp
 
     when (verify_enable_csv ver_conf && version tx >= 2) $
         verifyRelLockTime bc branch ver_conf input uvalue
 
     -- if the funding tx is coinbase(idx == 0), check coinbase maturity
-    expectTrue ("coinbase maturity not met for outpoint tx " ++ show prev_txid) $
+    expectTrue
+        REJECT_INVALID
+        ("coinbase maturity not met for outpoint tx " ++ show prev_txid) $
         tx_index uvalue /= 0 ||
         cur_height branch - parent_height uvalue >= fi (tckr_coinbase_maturity conf)
 
@@ -732,7 +746,9 @@ verifyBlockTx bc branch block = do
     let all_txns = FD.toList (txns block)
         conf = bc_conf bc
 
-    bnode <- expectMaybeIO "the block being verified is not in the given branch" $
+    bnode <- expectMaybeIO
+        REJECT_INVALID
+        "the block being verified is not in the given branch" $
         lookupBlockNode (bc_chain bc) [branch] (WithHash (block_hash block))
 
     begin_time <- msMonoTime
@@ -755,12 +771,16 @@ verifyBlockTx bc branch block = do
             unless (isFinalTx tx) $
                 case txLockTime tx of
                     LockTimeStamp min_stamp ->
-                        expectTrue ("tx lock-time(timestamp) not met(expect " ++ show min_stamp ++
-                                    ", " ++ show mtp ++ " given") $
+                        expectTrue
+                            REJECT_INVALID 
+                            ("tx lock-time(timestamp) not met(expect " ++ show min_stamp ++
+                             ", " ++ show mtp ++ " given") $
                             block_timestamp >= min_stamp
 
                     LockTimeHeight min_height ->
-                        expectTrue "tx lock-time(height) not met" $
+                        expectTrue
+                            REJECT_INVALID
+                            "tx lock-time(height) not met" $
                             cur_height bnode >= min_height
             -- else lock-time is irrelevant
 
@@ -780,12 +800,20 @@ verifyBlockTx bc branch block = do
                         -- it's a duplicated tx unless it was included in the same block
                         -- OR the recorded block doesn't exist in the current branch
                         unless match_record $
-                            expectFalseIO ("duplicated transaction " ++ show (txid tx)) $
+                            expectFalseIO
+                                REJECT_DUPLICATE
+                                ("duplicated transaction " ++ show (txid tx)) $
                                 hasBlockInBranch (bc_chain bc) branch hash
 
         all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
-            expectTrue "more than one coinbase txns" $
+            expectTrue REJECT_INVALID "more than one coinbase txns" $
                 not (isCoinbase tx)
+
+            expectFalse REJECT_INVALID "empty input list" $
+                null (tx_in tx)
+        
+            expectFalse REJECT_INVALID "empty output list" $
+                null (tx_out tx)
 
             -- tLnM $ "checking tx " ++ show idx
 
@@ -822,7 +850,9 @@ verifyBlockTx bc branch block = do
                 fee = in_value - total_out_value
             
             -- validity of values
-            expectTrue "sum of inputs less than the sum of output" $
+            expectTrue
+                REJECT_INVALID
+                "sum of inputs less than the sum of output" $
                 fee >= 0
 
             addTx tx_state (cur_height bnode) block idx
@@ -835,7 +865,9 @@ verifyBlockTx bc branch block = do
             tx_fee = sum all_fees
             coinbase_out = getOutputValue coinbase
 
-        expectTrue "coinbase output greater than the sum of the block creation fee and tx fees" $
+        expectTrue
+            REJECT_INVALID
+            "coinbase output greater than the sum of the block creation fee and tx fees" $
             coinbase_out <= block_fee + tx_fee
 
         addTx tx_state (cur_height bnode) block 0
@@ -909,7 +941,7 @@ minVersion bc height =
     else if fi height >= tckr_bip34_height conf then 2
     else 0
 
--- throws a TCKRError when rejecting the block
+-- throws a Rejection when rejecting the block
 addBlockFail :: BlockChain -> Block -> IO BlockChain
 addBlockFail bc@(BlockChain {
     bc_conf = conf,
@@ -922,31 +954,31 @@ addBlockFail bc@(BlockChain {
     merkle_root = merkle_root,
     txns = txns'
 }) = do
-    expectTrue "require full block" $
+    expectTrue REJECT_INVALID "require full block" $
         isFullBlock block
 
     let all_txns = FD.toList txns'
 
-    expectFalseIO "block already exists" $
+    expectFalseIO REJECT_DUPLICATE "block already exists" $
         bc_chain bc `hasBlockInChain` block_hash
 
     -- don't check if the block is in orphan pool
 
-    expectTrue "block weight limit passed" $
+    expectTrue REJECT_INVALID "block weight limit passed" $
         blockWeight block <= tckr_block_weight_limit conf
 
-    expectTrue "empty tx list" $
+    expectTrue REJECT_INVALID "empty tx list" $
         not (null all_txns)
 
-    expectTrue "hash target not met" $
+    expectTrue REJECT_INVALID "hash target not met" $
         hash_target > block_hash
 
     cur_time <- unixTimestamp
 
-    expectTrue "timestamp exceeds furture timestamp limit" $
+    expectTrue REJECT_INVALID "timestamp exceeds furture timestamp limit" $
         timestamp <= cur_time + tckr_max_block_time_future_diff conf
 
-    expectTrue "first transaction is not coinbase" $
+    expectTrue REJECT_INVALID "first transaction is not coinbase" $
         isCoinbase (head all_txns)
 
     -- TODO:
@@ -954,12 +986,12 @@ addBlockFail bc@(BlockChain {
     -- for the coinbase (first) transaction, scriptSig length must be 2-100
     -- reject if sum of transaction sig opcounts > MAX_BLOCK_SIGOPS
 
-    expectTrue "merkle root claimed not correct" $
+    expectTrue REJECT_INVALID "merkle root claimed not correct" $
         merkleRoot block == merkle_root
 
     case insertBlock (bc_chain bc) block of
         Nothing -> do -- no previous hash found
-            expectFalse "repeated orphan block" $
+            expectFalse REJECT_INVALID "repeated orphan block" $
                 bc_chain bc `hasBlockInOrphan` block_hash
 
             tLnM "block orphaned"
@@ -979,17 +1011,17 @@ addBlockFail bc@(BlockChain {
             saveBlock (bc_chain bc) (cur_height branch) block
 
             when (tckr_enable_mtp_check conf) $
-                expectTrueIO "MTP rule not met" $
+                expectTrueIO REJECT_INVALID "MTP rule not met" $
                     (btimestamp block >=) <$> medianTimePastBranch bc branch
 
             when (tckr_enable_difficulty_check conf) $
-                expectTrueIO "wrong difficulty" $
+                expectTrueIO REJECT_INVALID "wrong difficulty" $
                     hashTargetValid bc branch
 
             let height = branchHeight branch
 
             -- versions for BIP 34, BIP 66, BIP 65
-            expectTrue "bad block version" $
+            expectTrue REJECT_INVALID "bad block version" $
                 vers >= minVersion bc height
 
             let main_branch = mainBranch (bc_chain bc)
@@ -1045,10 +1077,15 @@ addBlockFail bc@(BlockChain {
 
                     return bc
                 else
-                    -- still not main branch do nothing
+                    -- block added to a side branch
+                    -- leave it for now
                     return bc
 
             bc <- updateChain bc (removeOrphan (bc_chain bc) block)
+
+            -- retry verification on all orphaned txns
+            orphan_txns <- orphanPoolTxns (bc_tx_state bc)
+            forM_ orphan_txns (addPoolTx bc)
 
             -- remove accepted txns from mem pool
             forM_ (tail all_txns) $ \tx -> do
@@ -1058,10 +1095,10 @@ addBlockFail bc@(BlockChain {
             
             tryFlushChain bc
 
-addPoolTx :: BlockChain -> TxPayload -> IO (Maybe TCKRError)
+addPoolTx :: BlockChain -> TxPayload -> IO (Maybe Rejection)
 addPoolTx bc tx =
     either Just (const Nothing) <$>
-    force <$> tryT (addPoolTxFail bc tx)
+    force <$> try (addPoolTxFail bc tx)
 
 -- verify tx in the pool and either reject it or put it into the mem pool or orphan pool
 addPoolTxFail :: BlockChain -> TxPayload -> IO ()
@@ -1077,76 +1114,88 @@ addPoolTxFail bc@(BlockChain {
 
     timeoutPoolTx tx_state (now - tckr_pool_tx_timeout conf)
 
-    if ntx >= tckr_pool_tx_limit conf then
-        tLnM ("mem pool full")
-    else do
-        is_orphan <- hasTxInOrphanPool tx_state (txid tx)
+    expectTrue REJECT_INVALID "mem pool full" $
+        ntx < tckr_pool_tx_limit conf
+
+    is_orphan <- hasTxInOrphanPool tx_state (txid tx)
+    
+    when is_orphan $
+        removeOrphanTx tx_state (txid tx)
+
+    -- check for duplication(in chain, mem pool, and orphan pool)
+    expectFalseIO REJECT_DUPLICATE "duplicated tx in chain" $
+        hasTxInBranch bc main (txid tx)
+
+    expectFalseIO REJECT_DUPLICATE "duplicated tx in mem pool" $
+        hasTxInMemPool tx_state (txid tx)
+
+    expectFalse REJECT_INVALID "empty input list" $
+        null (tx_in tx)
+
+    expectFalse REJECT_INVALID "empty output list" $
+        null (tx_out tx)
+
+    expectFalse REJECT_INVALID "mem pool tx should not be coinbase" $
+        isCoinbase tx
+
+    ver_conf <- genVerifyConf bc main Nothing
+
+    values <- forM ([0..] `zip` tx_in tx) $
+        \(in_idx, TxInput { prev_out = prev_out }) -> do
+            muvalue <- lookupUTXOMemPool tx_state prev_out
+
+            case muvalue of
+                Nothing -> do
+                    addOrphanTx tx_state tx
+                    -- reject "orphaned tx due to the lack of outpoint in utxo/mem pool"
+
+                    return maxBound
+
+                Just uvalue -> do
+                    -- TODO: add coinbase maturity check?
+
+                    -- check script
+                    verifyScript bc ver_conf tx in_idx uvalue
+
+                    -- return input value
+                    return (value (u_tx_out uvalue))
+
+    unless (any (== maxBound) values) $ do
+        let total_out_value = getOutputValue tx
+            fee = sum values - total_out_value
         
-        when is_orphan $
-            removeOrphanTx tx_state (txid tx)
+        expectTrue REJECT_INVALID "sum of inputs less than the sum of output" $
+            fee >= 0
 
-        -- check for duplication(in chain, mem pool, and orphan pool)
-        expectFalseIO "duplicated tx in chain" $
-            hasTxInBranch bc main (txid tx)
+        expectTrue REJECT_INSUFFICIENTFEE "min tx fee not met" $
+            fee >= tckr_min_tx_fee_rate conf
 
-        expectFalseIO "duplicated tx in mem pool" $
-            hasTxInMemPool tx_state (txid tx)
+        addMemPoolTx tx_state fee tx
 
-        ver_conf <- genVerifyConf bc main Nothing
+        -- retry on any orphan txns with input pointing to the current tx
+        dep_orphan_txns <-
+            filterOrphanPoolTx tx_state $ \otx ->
+                flip any (tx_in otx) $ \(TxInput { prev_out = OutPoint prev_txid _ }) ->
+                    prev_txid == txid tx
 
-        values <- forM ([0..] `zip` tx_in tx) $
-            \(in_idx, TxInput { prev_out = prev_out }) -> do
-                muvalue <- lookupUTXOMemPool tx_state prev_out
+        -- there is unlikely infinite recursion because
+        -- we assume txns don't have cyclic dependence
+        mapM_ (addPoolTx bc) dep_orphan_txns
 
-                case muvalue of
-                    Nothing -> do
-                        addOrphanTx tx_state tx
-                        -- reject "orphaned tx due to the lack of outpoint in utxo/mem pool"
+reject :: RejectType -> String -> a
+reject rtype msg = throw $ Rejection rtype msg
 
-                        return maxBound
-
-                    Just uvalue -> do
-                        -- TODO: add coinbase maturity check?
-
-                        -- check script
-                        verifyScript bc ver_conf tx in_idx uvalue
-
-                        -- return input value
-                        return (value (u_tx_out uvalue))
-
-        unless (any (== maxBound) values) $ do
-            let total_out_value = getOutputValue tx
-                fee = sum values - total_out_value
-            
-            expectTrue "sum of inputs less than the sum of output" $
-                fee >= 0
-
-            addMemPoolTx tx_state tx
-
-            -- retry on any orphan txns with input pointing to the current tx
-            dep_orphan_txns <-
-                filterOrphanPoolTx tx_state $ \otx ->
-                    flip any (tx_in otx) $ \(TxInput { prev_out = OutPoint prev_txid _ }) ->
-                        prev_txid == txid tx
-
-            -- there is unlikely infinite recursion because
-            -- we assume txns don't have cyclic dependence
-            mapM_ (addPoolTx bc) dep_orphan_txns
-
-reject :: String -> a
-reject msg = throw $ TCKRError msg
-
-expect :: Eq a => String -> a -> IO a -> IO ()
-expect msg exp mobs = do
+expect :: Eq a => RejectType -> String -> a -> IO a -> IO ()
+expect rtype msg exp mobs = do
     obs <- mobs
-    unless (exp == obs) (reject msg)
+    unless (exp == obs) (reject rtype msg)
 
-expectTrueIO msg cond = expect msg True cond
-expectFalseIO msg cond = expect msg False cond
-expectTrue msg cond = expect msg True $ pure cond
-expectFalse msg cond = expect msg False $ pure cond
+expectTrueIO rtype msg cond = expect rtype msg True cond
+expectFalseIO rtype msg cond = expect rtype msg False cond
+expectTrue rtype msg cond = expect rtype msg True (return cond)
+expectFalse rtype msg cond = expect rtype msg False (return cond)
 
-expectMaybe msg (Just v) = return v
-expectMaybe msg Nothing = reject msg
+expectMaybe rtype msg (Just v) = return v
+expectMaybe rtype msg Nothing = reject rtype msg
 
-expectMaybeIO msg m = m >>= expectMaybe msg
+expectMaybeIO rtype msg m = m >>= expectMaybe rtype msg

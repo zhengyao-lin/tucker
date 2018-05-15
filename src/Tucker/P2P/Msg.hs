@@ -34,19 +34,23 @@ filterProbingList env new_list = do
 decodePayload :: MsgPayload t
               => MainLoopEnv
               -> Node
+              -> Command
               -> ByteString
               -> IO a
               -> (t -> IO a)
               -> IO a
 
-decodePayload env node payload fail proc = do
+decodePayload env node cmd payload fail proc = do
     case decodeAllLE payload of
         Left err -> do
-            nodeMsg env node $ "payload decoding error: " ++ (show err)
+            nodeWarn env node $ "payload decoding error: " ++ (show err)
+
+            -- send back rejection
+            nodeReject env node cmd BSR.empty (Rejection REJECT_MALFORMED (show err))
+            
             fail
 
         Right v -> proc v
-
 
 nodeRecvOneMsg :: MainLoopEnv
                -> Node

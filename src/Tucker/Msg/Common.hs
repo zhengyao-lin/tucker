@@ -43,6 +43,10 @@ cmd_map = [
 
 cmd_map_r = map (\(a, b) -> (b, a)) cmd_map
 
+commandToString :: Command -> String
+commandToString cmd = str
+    where Just str = lookup cmd cmd_map
+
 class (Encodable p, Decodable p) => MsgPayload p where
 
 newtype VInt = VInt Word64 deriving (Show, Eq, Ord, Num, Real, Enum, Integral)
@@ -317,7 +321,7 @@ payloadCheck = BS.take 4 . doubleSHA256
 
 padnull :: Int -> String -> ByteString
 padnull full str =
-    BS.pack str <> BSR.pack [ 0x00 | _ <- [ 1 .. (full - len) ] ]
+    BS.pack str <> BSR.replicate (full - len) 0
     where
         len = length str
 

@@ -545,6 +545,13 @@ envAddBlockIfNotExist env node block =
         else
             return False
 
+nodeReject :: MainLoopEnv -> Node -> Command -> ByteString -> Rejection -> IO ()
+nodeReject env node cmd dat rej = do
+    rej <- encodeMsg (global_conf env) BTC_CMD_REJECT $
+           encodeRejectPayload cmd dat rej
+
+    tSend (conn_trans node) rej
+
 -- removing explicit reference to the block list
 -- NOTE: may help reduce space leaks?
 envAddBlocks :: MainLoopEnv -> Node -> [Block] -> IO ()
@@ -558,8 +565,10 @@ envAddBlocks env node =
         after chain = setA (block_chain env) chain >> LK.release (chain_lock env)
         proc block res =
             case res of
-                Left err -> -- TODO: remove this on release
-                    error ("error when adding block " ++ show block ++ ": " ++ show err)
+                Left rej -> do
+                    -- error ("error when adding block " ++ show block ++ ": " ++ show err)
+                    nodeErr env node ("block rejected: " ++ show block ++ ": " ++ show rej)
+                    nodeReject env node BTC_CMD_BLOCK (encodeLE (block_hash block)) rej
                 
                 Right bc -> do
                     nodeMsg env node $
@@ -578,17 +587,19 @@ envAddPoolTxIfNotExist env node tx =
     envWithChain env $ \chain -> do
         has <- envHasTx env (txid tx)
 
-        unless has $ do
+        if not has then do
             res <- addPoolTx chain tx
             case res of
-                Nothing ->
+                Nothing -> do
                     nodeMsg env node ("added tx " ++ show (txid tx))
-                    
+                    return True
 
-                Just err -> -- TODO: remove this on release
-                    error ("failed to add pool tx " ++ show (txid tx) ++ ": " ++ show err)
-
-        return (not has)
+                Just rej -> do
+                    nodeErr env node ("tx verificaton failed: " ++ show (txid tx) ++ ": " ++ show rej)
+                    nodeReject env node BTC_CMD_TX (encodeLE (txid tx)) rej
+                    return False
+        else
+            return False
 
 -- check if a specific soft fork is enabled
 envForkEnabled :: MainLoopEnv -> String -> IO Bool

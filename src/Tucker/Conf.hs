@@ -35,8 +35,6 @@ instance Show NodeServiceType where
     show (NodeServiceType servs) =
         intercalate ", " (map show servs)
 
-type Timestamp = Word32
-
 type SoftForkId = Int32
 
 soft_fork_id_range = [ 0 .. 28 ] :: [SoftForkId] -- only the lowest 29 bits are used(see BIP 9)
@@ -72,75 +70,79 @@ tucker_default_socket_hints =
         addrSocketType = Stream -- using tcp
     }
 
+type Satoshi = Int64
+type FeeRate = Satoshi -- in sat/kb
+type Timestamp = Word32
+
 data TCKRConf =
     TCKRConf {
-        tckr_net_version     :: Integer,
-        tckr_node_service    :: NodeServiceType,
+        tckr_net_version                :: Integer,
+        tckr_node_service               :: NodeServiceType,
 
         -- keyspaces: block, tx, 
-        tckr_block_db_path   :: FilePath,
-        tckr_tx_db_path      :: FilePath,
-        tckr_bucket_block_name :: String,
-        tckr_bucket_chain_name :: String,
-        tckr_bucket_tx_name    :: String,
-        tckr_bucket_utxo_name  :: String,
-        tckr_bucket_fork_name  :: String,
-        tckr_bucket_stat_name  :: String,
+        tckr_block_db_path              :: FilePath,
+        tckr_tx_db_path                 :: FilePath,
+        tckr_bucket_block_name          :: String,
+        tckr_bucket_chain_name          :: String,
+        tckr_bucket_tx_name             :: String,
+        tckr_bucket_utxo_name           :: String,
+        tckr_bucket_fork_name           :: String,
+        tckr_bucket_stat_name           :: String,
 
-        tckr_block_db_max_file :: Int,
-        tckr_tx_db_max_file    :: Int,
-        tckr_max_socket        :: Int,
+        tckr_block_db_max_file          :: Int,
+        tckr_tx_db_max_file             :: Int,
+        tckr_max_socket                 :: Int,
 
-        tckr_user_agent      :: String,
+        tckr_user_agent                 :: String,
 
-        tckr_wif_pref        :: Word8,
-        tckr_addr_pref       :: Word8,
-        tckr_magic_no        :: BSR.ByteString,
-        tckr_listen_addr     :: String, 
-        tckr_listen_port     :: Word16,
+        tckr_wif_pref                   :: Word8,
+        tckr_addr_pref                  :: Word8,
+        tckr_magic_no                   :: BSR.ByteString,
+        tckr_listen_addr                :: String, 
+        tckr_listen_port                :: Word16,
 
-        tckr_local_server_addr :: String,
-        tckr_local_server_port :: Word16,
+        tckr_local_server_addr          :: String,
+        tckr_local_server_port          :: Word16,
 
-        tckr_max_incoming_conn :: Int,
+        tckr_max_incoming_conn          :: Int,
 
-        tckr_genesis_raw     :: BSR.ByteString, -- genesis hash
+        tckr_genesis_raw                :: BSR.ByteString, -- genesis hash
 
-        tckr_trans_timeout   :: Int, -- in sec
-        tckr_bootstrap_host  :: [String],
+        tckr_trans_timeout              :: Int, -- in sec
+        tckr_bootstrap_host             :: [String],
 
-        tckr_min_node        :: Int,
-        tckr_seek_min        :: Int,
-        tckr_seek_max        :: Int,
-        tckr_max_node        :: Int,
+        tckr_min_node                   :: Int,
+        tckr_seek_min                   :: Int,
+        tckr_seek_max                   :: Int,
+        tckr_max_node                   :: Int,
 
-        tckr_node_blacklist  :: [SockAddr],
+        tckr_node_blacklist             :: [SockAddr],
 
-        tckr_speed_test_span :: Word, -- time span of a download speed test in seconds
+        tckr_speed_test_span            :: Word, -- time span of a download speed test in seconds
 
-        tckr_gc_interval     :: Integer,
+        tckr_gc_interval                :: Integer,
 
-        tckr_max_block_task  :: Int,
+        tckr_max_block_task             :: Int,
 
         -- do the input checking in parrallel
         -- when nIn is greater or equal to this number
-        tckr_min_parallel_input_check :: Int,
+        tckr_min_parallel_input_check   :: Int,
 
-        tckr_node_alive_span :: Timestamp,
-        tckr_reping_time     :: Timestamp,
+        tckr_node_alive_span            :: Timestamp,
+        tckr_reping_time                :: Timestamp,
 
-        tckr_known_inv_count :: Int,
+        tckr_known_inv_count            :: Int,
         -- max number of hashes to send when trying to sync witht the network
         
-        tckr_initial_fee :: Integer,
-        tckr_fee_half_rate :: Integer,
+        tckr_initial_fee                :: Integer,
+        tckr_fee_half_rate              :: Integer,
 
-        tckr_max_tree_insert_depth :: Int, -- max search depth when inserting a block
-        tckr_mem_only :: Bool, -- no write operation to the db
+        tckr_max_tree_insert_depth      :: Int, -- max search depth when inserting a block
+        tckr_mem_only                   :: Bool, -- no write operation to the db
 
-        tckr_fetch_dup_node  :: Int,
+        tckr_fetch_dup_node             :: Int,
         -- number of duplicated nodes to fetch the same bunch of block
-        tckr_fetch_dup_max_task :: Int,
+        tckr_fetch_dup_max_task         :: Int,
         -- if the number of block fetch task is less than this number,
         -- use dup_node
 
@@ -148,58 +150,60 @@ data TCKRConf =
         tckr_max_block_time_future_diff :: Word32, -- in sec
 
         -- the difficulty changes every tckr_retarget_span blocks
-        tckr_retarget_span :: Word32,
-        tckr_expect_retarget_time :: Word32, -- expected difficulty change time in sec
-        tckr_soft_fork_lock_threshold :: Word32, -- roughly 95% of retarget span
+        tckr_retarget_span              :: Word32,
+        tckr_expect_retarget_time       :: Word32, -- expected difficulty change time in sec
+        tckr_soft_fork_lock_threshold   :: Word32, -- roughly 95% of retarget span
 
-        tckr_use_special_min_diff :: Bool, -- support special-min-difficulty or not(mainly on testnet)
-        tckr_use_special_min_diff_mine :: Bool, -- use special-min-difficulty rule for mining
-        tckr_target_spacing :: Timestamp,
+        tckr_use_special_min_diff       :: Bool, -- support special-min-difficulty or not(mainly on testnet)
+        tckr_use_special_min_diff_mine  :: Bool, -- use special-min-difficulty rule for mining
+        tckr_target_spacing             :: Timestamp,
 
-        tckr_block_fetch_timeout :: Int, -- in sec
-        tckr_node_max_blacklist_count :: Int,
+        tckr_block_fetch_timeout        :: Int, -- in sec
+        tckr_node_max_blacklist_count   :: Int,
 
-        tckr_max_getblocks_batch :: Int,
-        tckr_max_getheaders_batch :: Int,
+        tckr_max_getblocks_batch        :: Int,
+        tckr_max_getheaders_batch       :: Int,
 
-        tckr_sync_inv_timeout :: Int, -- in sec
+        tckr_sync_inv_timeout           :: Int, -- in sec
 
-        tckr_coinbase_maturity :: Int,
+        tckr_coinbase_maturity          :: Int,
 
-        tckr_p2sh_enable_time :: Timestamp,
-        tckr_dup_tx_disable_time :: Timestamp,
-        tckr_mtp_number :: Int,
+        tckr_p2sh_enable_time           :: Timestamp,
+        tckr_dup_tx_disable_time        :: Timestamp,
+        tckr_mtp_number                 :: Int,
 
-        tckr_node_max_task :: Int,
+        tckr_node_max_task              :: Int,
 
-        tckr_soft_forks :: [SoftFork],
+        tckr_soft_forks                 :: [SoftFork],
 
         -- different from the assumevalid in bitcoin core
         -- because currently tucker does not support header-first
         -- sync and can not check whether a block is the ancestor
         -- of the assumevalid block
-        tckr_block_assumed_valid :: Maybe (Word, String),
+        tckr_block_assumed_valid        :: Maybe (Word, String),
 
-        tckr_enable_difficulty_check :: Bool,
-        tckr_enable_mtp_check :: Bool,
+        tckr_enable_difficulty_check    :: Bool,
+        tckr_enable_mtp_check           :: Bool,
 
-        tckr_bdiff_diff1_target :: Integer,
+        tckr_bdiff_diff1_target         :: Integer,
 
-        tckr_block_weight_limit :: Int,
+        tckr_block_weight_limit         :: Int,
 
-        tckr_job_number :: Int,
+        tckr_job_number                 :: Int,
 
-        tckr_pool_tx_limit :: Int, -- when the number of pool tx reaches the limit, remove all timeout txns
-        tckr_pool_tx_timeout :: Timestamp,
+        tckr_pool_tx_limit              :: Int, -- when the number of pool tx reaches the limit, remove all timeout txns
+        tckr_pool_tx_timeout            :: Timestamp,
 
-        tckr_enable_miner :: Bool,
-        tckr_miner_p2pkh_addr :: String,
-        tckr_miner_msg :: String,
-        tckr_enable_mempool :: Bool,
+        tckr_enable_miner               :: Bool,
+        tckr_miner_p2pkh_addr           :: String,
+        tckr_miner_msg                  :: String,
+        tckr_enable_mempool             :: Bool,
 
-        tckr_bip34_height :: Word, -- block height in coinbase
-        tckr_bip66_height :: Word, -- strict signature DER encoding
-        tckr_bip65_height :: Word  -- OP_CHECKLOCKTIMEVERIFY
+        tckr_bip34_height               :: Word, -- block height in coinbase
+        tckr_bip66_height               :: Word, -- strict signature DER encoding
+        tckr_bip65_height               :: Word, -- OP_CHECKLOCKTIMEVERIFY
+
+        tckr_min_tx_fee_rate            :: FeeRate
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -363,7 +367,9 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_bip34_height = 227931,
         tckr_bip66_height = 363725,
-        tckr_bip65_height = 388381
+        tckr_bip65_height = 388381,
+
+        tckr_min_tx_fee_rate = 10
     }
 
     where

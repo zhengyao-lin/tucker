@@ -60,7 +60,7 @@ recv :: MsgPayload t
      -> [RouterAction] -> Command -> (t -> IO [RouterAction]) -> IO [RouterAction]
 recv env node r_act cmd proc =
     recv' env node r_act cmd $ \payload ->
-        decodePayload env node payload fail proc
+        decodePayload env node cmd payload fail proc
 
     where
         fail = do

@@ -41,12 +41,6 @@ instance Hashable OutPoint where
     hashWithSalt salt (OutPoint h idx) =
         hashWithSalt (salt + fi idx) h
 
--- note this has to be signed
--- given a positive value a
--- (complement a) means a spent value of a in UTXO
--- a means a is still valid
-type Value = Int64
-
 data TxInput =
     TxInput {
         prev_out        :: OutPoint,
@@ -117,7 +111,7 @@ instance NFData TxInput where
 
 data TxOutput =
     TxOutput {
-        value           :: Value, -- in Satoshis, 10^-8 BTC
+        value           :: Satoshi, -- in Satoshis, 10^-8 BTC
         pk_script       :: RawScript
     } deriving (Eq, Show)
 
@@ -402,7 +396,7 @@ updateIds tx =
     }
 
 -- get output value
-getOutputValue :: TxPayload -> Value
+getOutputValue :: TxPayload -> Satoshi
 getOutputValue tx =
     sum (map value (tx_out tx))
 

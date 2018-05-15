@@ -66,7 +66,7 @@ defaultHandler env node msg@(MsgHead {
                 return final
 
         d :: MsgPayload t => (t -> IO [RouterAction]) -> IO [RouterAction]
-        d = decodePayload env node payload (pure [])
+        d = decodePayload env node command payload (pure [])
 
         h BTC_CMD_PING = do
             d $ \ping@(PingPongPayload {}) -> do
@@ -114,7 +114,6 @@ defaultHandler env node msg@(MsgHead {
                 ready <- envIsSyncReady env
 
                 if ready then do
-                    envInfo env "adding new block"
                     added <- envAddBlockIfNotExist env node block
 
                     when added $ do
@@ -277,7 +276,6 @@ defaultHandler env node msg@(MsgHead {
 
                                 -- request for the block
                                 A.getFullDataMsg env INV_TYPE_BLOCK hashes >>= tSend trans
-                                nodeInfo env node "getdata sent"
                             else
                                 nodeMsg env node "ignoring new block(s) due to unfinished sync process"
 
@@ -399,7 +397,7 @@ nodeExec env unready_node = do
 nodeFinal :: MainLoopEnv -> Node -> Either SomeException () -> IO ()
 nodeFinal env node res = do
     case res of
-        Right _ -> nodeMsg env node "exiting normally"
+        Right _ -> nodeMsg env node "normal exit"
         Left err -> nodeMsg env node ("exiting in error: " ++ show err)
 
     setA (alive node) False
