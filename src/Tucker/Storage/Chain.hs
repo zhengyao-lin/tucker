@@ -226,6 +226,12 @@ coinbaseP2PKH conf info addr fee =
         lock_time = 0
     }
 
+nextVersion :: BlockChain -> IO BlockVersion
+nextVersion bc = do
+    -- set all "started" softfork bits to 1
+    forks <- lookupNonFinalForks (bc_fork_state bc)
+    return (genDeployVersion (map fork_bit forks))
+
 nextBlock :: BlockChain -> String -> Address -> Word64 -> IO Block
 nextBlock bc@(BlockChain {
     bc_conf = conf,
@@ -273,9 +279,11 @@ nextEmptyBlock bc@(BlockChain {
         else
             targetAtHeight bc main next_height last_time
 
+    v <- nextVersion bc
+
     return $ updateBlockHashes Block {
         block_hash = undefined,
-        vers = minVersion bc next_height,
+        vers = v,
         prev_hash = block_hash tip,
         merkle_root = 0,
 
@@ -1100,6 +1108,10 @@ addPoolTx bc tx =
     either Just (const Nothing) <$>
     force <$> try (addPoolTxFail bc tx)
 
+txPoolFull :: BlockChain -> IO Bool
+txPoolFull bc =
+    (>= tckr_pool_tx_limit (bc_conf bc)) <$> txPoolSize (bc_tx_state bc)
+
 -- verify tx in the pool and either reject it or put it into the mem pool or orphan pool
 addPoolTxFail :: BlockChain -> TxPayload -> IO ()
 addPoolTxFail bc@(BlockChain {
@@ -1109,13 +1121,11 @@ addPoolTxFail bc@(BlockChain {
     -- (no check for locktime)
     let main = mainBranch (bc_chain bc)
 
-    ntx <- txPoolSize tx_state
     now <- unixTimestamp
 
     timeoutPoolTx tx_state (now - tckr_pool_tx_timeout conf)
 
-    expectTrue REJECT_INVALID "mem pool full" $
-        ntx < tckr_pool_tx_limit conf
+    expectFalseIO REJECT_INVALID "mem pool full" (txPoolFull bc)
 
     is_orphan <- hasTxInOrphanPool tx_state (txid tx)
     

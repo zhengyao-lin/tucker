@@ -33,8 +33,12 @@ acquire lock = do
     -- d <- getA (current_tid lock)
     -- tLnM (show (d, do_lock, my_tid))
 
+    -- tLnM ("locking: " ++ show my_tid)
+
     when do_lock (putMVar (raw_lock lock) ()) -- held by different thread
-     
+    
+    -- tLnM ("locked: " ++ show my_tid)
+
     appA (\(_, cnt) -> (Just my_tid, cnt + 1)) (current_tid lock)
     return ()
 
@@ -46,6 +50,8 @@ release lock = do
     -- d <- getA (current_tid lock)
     -- tLnM (show (d, do_release, my_tid))
 
+    -- tLnM ("releasing: " ++ show my_tid)
+
     when do_release $ do
         (_, cnt) <-
             flip appA (current_tid lock) $ \(t, cnt) ->
@@ -55,6 +61,8 @@ release lock = do
         when (cnt == 0) $ do
             res <- tryTakeMVar (raw_lock lock)
             when (isNothing res) (error "releasing unlocked lock")
+
+        -- tLnM ("released: " ++ show my_tid)
 
 with :: Lock -> IO a -> IO a
 with lock action = do

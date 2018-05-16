@@ -130,6 +130,8 @@ instance Hashable Hash256 where
 nullHash256 = Hash256 nullHash256BS
 nullHash256BS = BSR.replicate 32 0
 
+isNullHash256 = (== nullHash256)
+
 intToHash256 :: (Bits t, Integral t) => t -> Hash256
 intToHash256 n =
     bsToHash256 $

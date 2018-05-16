@@ -1,4 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# OPTIONS_GHC -Wno-overflowed-literals #-}
 
 module Tucker.Msg.Block where
 
@@ -23,11 +24,14 @@ import Tucker.Msg.Hash256
 type Difficulty = Double
 -- height starts from 0(genesis)
 
+type BlockVersion = Int32
+-- use signed version because we should reject blocks with negative versions(after BIP34)
+
 data Block =
     Block {
         block_hash  :: Hash256,
 
-        vers        :: Word32,
+        vers        :: BlockVersion,
         
         prev_hash   :: Hash256,
         merkle_root :: Hash256,
@@ -331,8 +335,13 @@ instance Decodable SoftFork where
 getSoftForkIds :: Block -> [SoftForkId]
 getSoftForkIds (Block { vers = vers }) =
     if vers .&. 0xE0000000 == 0x20000000 then
+        -- top 3 bits are 001
         filter (\n -> (vers `shiftR` fi n) .&. 1 == 1) [ 0 .. 28 ]
     else []
+
+genDeployVersion :: [SoftForkId] -> BlockVersion
+genDeployVersion forks =
+    foldl (\v id -> v .|. (1 `shift` fi id)) 0x20000000 forks
 
 merkleParents :: [Hash256] -> [Hash256]
 merkleParents [] = []

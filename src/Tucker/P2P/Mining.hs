@@ -85,11 +85,12 @@ miner env =
                         Just final -> do
                             envInfo env ("mined block: " ++ show final)
 
-                            -- broadcast!!
                             envAddBlock env NullNode final
 
                             inv <- encodeMsg (global_conf env) BTC_CMD_INV $
-                                encodeInvPayload [InvVector INV_TYPE_BLOCK (block_hash final)]
+                                   encodeInvPayload [InvVector INV_TYPE_BLOCK (block_hash final)]
+
+                            envInfo env "broadcasting mined block"
 
                             envBroadcastAction env (sendMsgA inv)
 

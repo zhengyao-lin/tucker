@@ -171,7 +171,7 @@ instance Hashable Node where
 
 instance Show Node where
     show NullNode = "(null node)"
-    show node = "node on " ++ show (sock_addr node)
+    show node = "node on " ++ show (sock_addr node) -- ++ "(" ++ show (thread_id node) ++ ")"
 
 -- used in spreading actions
 -- a task can be anything specified for a action
@@ -209,16 +209,16 @@ envInfo env msg =
     tLnM (wss (Color Green False) ("env: " ++ msg))
 
 nodeMsg :: MainLoopEnv -> Node -> String -> IO ()
-nodeMsg env node msg = envMsg env $ (show node) ++ ": " ++ msg
+nodeMsg env node msg = envMsg env $ show node ++ ": " ++ msg
 
 nodeWarn :: MainLoopEnv -> Node -> String -> IO ()
-nodeWarn env node msg = envWarn env $ (show node) ++ ": " ++ msg
+nodeWarn env node msg = envWarn env $ show node ++ ": " ++ msg
 
 nodeErr :: MainLoopEnv -> Node -> String -> IO ()
-nodeErr env node msg = envErr env $ (show node) ++ ": " ++ msg
+nodeErr env node msg = envErr env $ show node ++ ": " ++ msg
 
 nodeInfo :: MainLoopEnv -> Node -> String -> IO ()
-nodeInfo env node msg = envInfo env $ (show node) ++ ": " ++ msg
+nodeInfo env node msg = envInfo env $ show node ++ ": " ++ msg
 
 envSetSyncReady :: MainLoopEnv -> Bool -> IO ()
 envSetSyncReady env = setA (sync_ready env)
@@ -297,10 +297,10 @@ initNode sock_addr trans = do
         conn_trans      = trans,
         incoming        = isIncoming trans,
 
-        thread_id       = undefined,
+        thread_id       = error "node tid not ready",
         sock_addr       = sock_addr,
-        net_addr        = undefined,
-        vers_payload    = undefined,
+        net_addr        = error "node net addr not ready",
+        vers_payload    = error "version not ready",
 
         -- recv_buf       = recv_buf,
         -- msg_list     = msg_list,
@@ -644,3 +644,6 @@ envMainBranchTipHash env =
 envNextBlock :: MainLoopEnv -> String -> Address -> Word64 -> IO Block
 envNextBlock env msg addr enonce =
     envWithChain env $ \bc -> nextBlock bc msg addr enonce
+
+envTxPoolFull :: MainLoopEnv -> IO Bool
+envTxPoolFull env = envWithChain env txPoolFull

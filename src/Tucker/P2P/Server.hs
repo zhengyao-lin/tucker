@@ -1,5 +1,6 @@
 module Tucker.P2P.Server where
 
+import Data.List
 import qualified Data.ByteString as BSR
 
 import Control.Monad
@@ -45,15 +46,21 @@ defaultHandler env node msg@(MsgHead {
         trans = conn_trans node
         conf = global_conf env
 
-        nBlocksFrom :: Int -> [Hash256] -> Hash256 -> IO [Block]
-        nBlocksFrom n locators stop_hash =
+        -- NOTE: The semantics of getblocks and getheaders
+        -- are slightly different. In getblocks, we don't
+        -- include the stop_hash block but in getheaders we do
+        -- see reference client's implementation at
+        -- getblocks: https://github.com/bitcoin/bitcoin/blob/a174702bad1c7f09830df592346e55cab676dbb2/src/net_processing.cpp#L1979
+        -- getheaders: https://github.com/bitcoin/bitcoin/blob/a174702bad1c7f09830df592346e55cab676dbb2/src/net_processing.cpp#L2092
+        nBlocksFrom :: Int -> [Hash256] -> Hash256 -> Bool -> IO [Block]
+        nBlocksFrom n locators stop_hash include_last =
             envWithChain env $ \bc -> do
                 res <- mapM (lookupMainBranchBlock bc . WithHash) locators
                 
                 let cur_height = mainBranchHeight bc
                     begin_height =
-                        case first isJust res of
-                            Just (Just (height, _)) -> height + 1
+                        case firstMaybe res of
+                            Just (height, _) -> height + 1
                             Nothing -> 1 -- start right after the genesis
 
                     range = take n [ begin_height .. cur_height ]
@@ -61,7 +68,14 @@ defaultHandler env node msg@(MsgHead {
                 res <- mapM (lookupMainBranchBlock bc . AtHeight) range
 
                 let hashes = map snd (maybeCat res)
-                    final = takeWhile ((/= stop_hash) . block_hash) hashes
+                    stop_idx = findIndex ((/= stop_hash) . block_hash) hashes
+                    final =
+                        case stop_idx of
+                            Just idx ->
+                                if include_last then take (idx + 1) hashes
+                                else take idx hashes
+                    
+                            Nothing -> hashes
 
                 return final
 
@@ -114,6 +128,8 @@ defaultHandler env node msg@(MsgHead {
                 ready <- envIsSyncReady env
 
                 if ready then do
+                    -- nodeMsg env node ("block " ++ show block ++ " received")
+
                     added <- envAddBlockIfNotExist env node block
 
                     when added $ do
@@ -130,17 +146,20 @@ defaultHandler env node msg@(MsgHead {
         h BTC_CMD_TX =
             d $ \tx -> do
                 envWhenSyncReady env $ do
-                    added <- envAddPoolTxIfNotExist env node tx
+                    full <- envTxPoolFull env
 
-                    -- broadcast tx
-                    when added $ do
-                        nodeInfo env node ("broadcasting tx " ++ show (txid tx))
+                    when (not full) $ do
+                        added <- envAddPoolTxIfNotExist env node tx
 
-                        inv <- encodeMsg conf BTC_CMD_INV $
-                               encodeInvPayload [InvVector INV_TYPE_TX (txid tx)]
+                        -- broadcast tx
+                        when added $ do
+                            nodeInfo env node ("broadcasting tx " ++ show (txid tx))
 
-                        -- propagate inv to nodes other than the current one
-                        envBroadcastActionExcept (/= node) env (A.sendMsgA inv)
+                            inv <- encodeMsg conf BTC_CMD_INV $
+                                encodeInvPayload [InvVector INV_TYPE_TX (txid tx)]
+
+                            -- propagate inv to nodes other than the current one
+                            envBroadcastActionExcept (/= node) env (A.sendMsgA inv)
 
                 return []
 
@@ -148,37 +167,47 @@ defaultHandler env node msg@(MsgHead {
             d $ \(InvPayload invs) -> do
                 let -- return Just hash for blocks that have not been found
                     lookupBlockAndSend :: (Block -> Block) -> Hash256 -> IO (Maybe Hash256)
-                    lookupBlockAndSend preproc hash =
-                        envWithChain env $ \bc -> do
+                    lookupBlockAndSend preproc hash = do
+                        res <- envWithChain env $ \bc -> do
                             res <- lookupMainBranchBlock bc (WithHash hash)
                             case res of
                                 Just (_, block) -> do
                                     res <- getFullBlock bc block
                                     case res of
-                                        Nothing -> return (Just hash)
-                                        Just block -> do
-                                            -- send back the block
-                                            msg <- encodeMsg conf BTC_CMD_BLOCK $
-                                                   encodeBlockPayload (preproc block)
-                                            tSend trans msg
+                                        Nothing -> return (Left hash)
+                                        Just block -> return (Right block)
 
-                                            return Nothing
+                                Nothing -> return (Left hash)
 
-                                Nothing -> return (Just hash)
+                        case res of
+                            Right block -> do
+                                -- send back the block
+                                msg <- encodeMsg conf BTC_CMD_BLOCK $
+                                        encodeBlockPayload (preproc block)
+                                tSend trans msg
+
+                                return Nothing
+
+                            Left hash -> return (Just hash)
 
                     lookupTxAndSend :: (TxPayload -> TxPayload) -> Hash256 -> IO (Maybe Hash256)
-                    lookupTxAndSend preproc txid =
-                        envWithChain env $ \bc -> do
+                    lookupTxAndSend preproc txid = do
+                        res <- envWithChain env $ \bc -> do
                             res <- lookupMemPool bc txid
 
                             case res of
-                                Nothing -> return (Just txid)
-                                Just tx -> do
-                                    msg <- encodeMsg conf BTC_CMD_TX $
-                                           encodeTxPayload tx
-                                    tSend trans msg
+                                Nothing -> return (Left txid)
+                                Just tx -> return (Right tx)
 
-                                    return Nothing
+                        case res of
+                            Right tx -> do
+                                msg <- encodeMsg conf BTC_CMD_TX $
+                                        encodeTxPayload tx
+                                tSend trans msg
+
+                                return Nothing
+                            
+                            Left txid -> return (Just txid)
 
                 notfounds' <-
                     forM invs $ \(InvVector htype hash) -> do
@@ -191,6 +220,8 @@ defaultHandler env node msg@(MsgHead {
                         return (InvVector htype <$> res)
 
                 let notfounds = maybeCat notfounds'
+
+                -- nodeMsg env node ("getdata for " ++ show invs)
 
                 unless (null notfounds) $ do
                     -- inform node about not-found objects
@@ -212,7 +243,7 @@ defaultHandler env node msg@(MsgHead {
 
                         hashes <-
                             map block_hash <$>
-                            nBlocksFrom (tckr_max_getblocks_batch conf) locators stop_hash
+                            nBlocksFrom (tckr_max_getblocks_batch conf) locators stop_hash False
 
                         -- reply with hashes
                         unless (null hashes) $ do
@@ -228,32 +259,34 @@ defaultHandler env node msg@(MsgHead {
                 stop_hash = stop_hash
             }) -> do
                 -- nodeInfo env node ("node requested getheaders with locators: " ++ show locators)
-                envWhenSyncReady_ env $ do
+                envWhenSyncReady_ env $
                     envFork env THREAD_OTHER $ do
                         headers <-
                             map BlockHeader <$>
-                            nBlocksFrom (tckr_max_getheaders_batch conf) locators stop_hash
+                            nBlocksFrom (tckr_max_getheaders_batch conf) locators stop_hash True
 
+                        -- nodeMsg env node ("getheaders: " ++ show locators ++ ", " ++ show stop_hash)
                         nodeInfo env node ("returning headers of size " ++ show (length headers))
 
-                        headers <- encodeMsg conf BTC_CMD_HEADERS $
-                                   encodeHeadersPayload headers
-                        tSend trans headers
+                        unless (null headers) $ do
+                            headers <- encodeMsg conf BTC_CMD_HEADERS $
+                                    encodeHeadersPayload headers
+                            tSend trans headers
 
                 return []
 
         -- h BTC_CMD_HEADERS =
 
-        h BTC_CMD_MEMPOOL =
-            envWithChain env $ \bc -> do
-                txids <- map txid <$> allMemPoolTxns bc
+        h BTC_CMD_MEMPOOL = do
+            txids <- envWithChain env $ \bc ->
+                map txid <$> allMemPoolTxns bc
 
-                inv <- encodeMsg conf BTC_CMD_INV $
-                       encodeInvPayload (map (InvVector INV_TYPE_TX) txids)
+            inv <- encodeMsg conf BTC_CMD_INV $
+                    encodeInvPayload (map (InvVector INV_TYPE_TX) txids)
 
-                tSend trans inv
+            tSend trans inv
 
-                return []
+            return []
 
         h BTC_CMD_INV =
             d $ \(InvPayload inv_vect) -> do
@@ -276,6 +309,8 @@ defaultHandler env node msg@(MsgHead {
 
                                 -- request for the block
                                 A.getFullDataMsg env INV_TYPE_BLOCK hashes >>= tSend trans
+
+                                -- nodeMsg env node "getdata sent"
                             else
                                 nodeMsg env node "ignoring new block(s) due to unfinished sync process"
 
