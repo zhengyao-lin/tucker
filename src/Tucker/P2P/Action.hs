@@ -30,7 +30,7 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 import Tucker.P2P.Scheduler
 
-import Tucker.Storage.Chain
+import Tucker.State.Chain
 
 -- data CoroAction msg = CoroAction { doAction :: MainLoopEnv -> Node -> msg -> IO [RouterAction] }
 

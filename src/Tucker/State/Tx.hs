@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts, ConstraintKinds #-}
 
-module Tucker.Storage.Tx where
+module Tucker.State.Tx where
 
 import Data.Word
 import Data.Bits

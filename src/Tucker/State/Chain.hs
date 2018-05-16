@@ -2,7 +2,7 @@
 
 -- block chain implementation
 
-module Tucker.Storage.Chain where
+module Tucker.State.Chain where
 
 import Data.Int -- hiding (map, findIndex, null)
 import Data.Word
@@ -31,9 +31,9 @@ import Tucker.DeepSeq
 
 import Tucker.Container.IOMap
 
-import Tucker.Storage.Tx
-import Tucker.Storage.Block
-import Tucker.Storage.SoftFork
+import Tucker.State.Tx
+import Tucker.State.Block
+import Tucker.State.SoftFork
 
 data BlockChain =
     BlockChain {

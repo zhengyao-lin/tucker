@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 
-module Tucker.Storage.SoftFork where
+module Tucker.State.SoftFork where
 
 import Data.Word
 import Data.List

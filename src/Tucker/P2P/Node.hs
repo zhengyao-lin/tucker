@@ -28,7 +28,7 @@ import Tucker.Thread
 import Tucker.Transport
 import qualified Tucker.Lock as LK
 
-import Tucker.Storage.Chain
+import Tucker.State.Chain
 
 import Tucker.P2P.Util
 

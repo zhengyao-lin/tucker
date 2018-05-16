@@ -21,7 +21,7 @@ import Tucker.P2P.Action
 import Tucker.P2P.Server
 import Tucker.P2P.Mining
 
-import Tucker.Storage.Chain
+import Tucker.State.Chain
 
 import System.Mem
 

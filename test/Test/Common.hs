@@ -35,9 +35,9 @@ module Test.Common (
     module Tucker.P2P.Node,
     module Tucker.P2P.Action,
 
-    module Tucker.Storage.Util,
-    module Tucker.Storage.Chain,
-    module Tucker.Storage.Block,
+    module Tucker.State.Util,
+    module Tucker.State.Chain,
+    module Tucker.State.Block,
     module Tucker.Container.IOMap
 ) where
 
@@ -75,8 +75,8 @@ import Tucker.P2P.Util
 import Tucker.P2P.Node
 import Tucker.P2P.Action
 
-import Tucker.Storage.Util
-import Tucker.Storage.Chain
-import Tucker.Storage.Block
+import Tucker.State.Util
+import Tucker.State.Chain
+import Tucker.State.Block
 
 import Tucker.Container.IOMap

@@ -14,7 +14,7 @@ import Tucker.Atom
 import Tucker.Signal
 import Tucker.Console
 import Tucker.P2P.Init
-import Tucker.Storage.Util
+import Tucker.State.Util
 
 data Flag
     = TuckerPath String

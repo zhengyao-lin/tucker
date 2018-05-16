@@ -1,7 +1,7 @@
 -- this module is in charge of the storage of block chain
 -- without any validation
 
-module Tucker.Storage.Block (
+module Tucker.State.Block (
     Height,
     Branch(..),
     Chain,

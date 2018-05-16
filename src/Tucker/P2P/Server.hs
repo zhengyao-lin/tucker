@@ -24,8 +24,8 @@ import Tucker.P2P.Node
 import Tucker.P2P.Util
 import qualified Tucker.P2P.Action as A
 
-import Tucker.Storage.Chain
-import Tucker.Storage.Block
+import Tucker.State.Chain
+import Tucker.State.Block
 
 -- NOTE:
 -- when trying to sync block chain,

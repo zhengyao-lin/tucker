@@ -1,4 +1,4 @@
-module Tucker.Storage.Util where
+module Tucker.State.Util where
 
 import Control.Monad
 import Control.Monad.Morph
@@ -9,10 +9,10 @@ import Tucker.Util
 import Tucker.Conf
 import Tucker.Thread
 
-import Tucker.Storage.Tx
-import Tucker.Storage.Block
-import Tucker.Storage.Chain
-import Tucker.Storage.SoftFork
+import Tucker.State.Tx
+import Tucker.State.Block
+import Tucker.State.Chain
+import Tucker.State.SoftFork
 
 -- this is a temporary fix for missing outpoints due to db corruption
 addOutPoint :: BlockChain -> OutPoint -> IO ()
