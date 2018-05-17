@@ -27,6 +27,9 @@ import Tucker.Thread
 import Tucker.P2P.Node
 import Tucker.P2P.Action
 
+import Tucker.State.Chain
+import Tucker.State.Mining
+
 type MinerState = Ptr ()
 
 foreign import ccall "init_miner" c_init_miner :: Ptr Word8 -> Word64 -> Ptr Word8 -> Int -> IO MinerState
@@ -58,10 +61,12 @@ freeMiner = c_free_miner
 killMiner :: MinerState -> IO ()
 killMiner = c_kill_miner
 
+getTip env = envWithChain env (return . block_hash . mainBranchTip)
+
 miner :: MainLoopEnv -> IO ()
 miner env =
     forever $ do
-        tip <- envMainBranchTipHash env
+        tip <- getTip env
         finished_var <- newA False
         state_var <- newA Nothing
 
@@ -71,7 +76,9 @@ miner env =
 
         let mine = void $
                 flip firstM [0..] $ \nonce -> do
-                    template <- envNextBlock env msg addr nonce
+                    template <- envWithChain env $ \bc ->
+                        nextBlock bc msg addr nonce
+
                     state <- initMiner job template
                     setA state_var (Just state)
 
@@ -106,7 +113,7 @@ miner env =
 
         -- branch tip changed
         waitUntilIO $ do
-            cur_tip <- envMainBranchTipHash env
+            cur_tip <- getTip env
             finished <- getA finished_var
             return (cur_tip /= tip || finished)
 

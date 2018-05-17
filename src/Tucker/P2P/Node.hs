@@ -637,13 +637,5 @@ envMainBranchHeight :: MainLoopEnv -> IO Height
 envMainBranchHeight env =
     mainBranchHeight <$> getA (block_chain env)
 
-envMainBranchTipHash :: MainLoopEnv -> IO Hash256
-envMainBranchTipHash env =
-    envWithChain env (return . block_hash . mainBranchTip)
-
-envNextBlock :: MainLoopEnv -> String -> Address -> Word64 -> IO Block
-envNextBlock env msg addr enonce =
-    envWithChain env $ \bc -> nextBlock bc msg addr enonce
-
 envTxPoolFull :: MainLoopEnv -> IO Bool
 envTxPoolFull env = envWithChain env txPoolFull

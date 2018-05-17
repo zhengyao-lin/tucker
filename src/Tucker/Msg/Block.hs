@@ -360,7 +360,7 @@ merkleRoot' leaves = merkleRoot' $ merkleParents leaves
 merkleRoot :: Block -> Hash256
 merkleRoot (Block {
     txns = txns
-}) = head $ merkleRoot' (map txid (FD.toList txns))
+}) = head (merkleRoot' (map txid (FD.toList txns)))
 
 updateBlockHashes :: Block -> Block
 updateBlockHashes block =
@@ -376,9 +376,18 @@ updateBlockHashes block =
 appendTx :: TxPayload -> Block -> Block
 appendTx tx block =
     let new_txns = (FD.toList (txns block) ++ [ tx ]) in
-    updateBlockHashes $ block {
+    updateBlockHashes block {
         txns = FullList new_txns
     }
+
+updateCoinbase :: TxPayload -> Block -> Block
+updateCoinbase coinbase block =
+    let all_txns = FD.toList (txns block) in
+    if null all_txns then appendTx coinbase block
+    else
+        updateBlockHashes block {
+            txns = FullList (coinbase : tail all_txns)
+        }
 
 clearEncCache :: Block -> Block
 clearEncCache block =

@@ -38,6 +38,8 @@ module Test.Common (
     module Tucker.State.Util,
     module Tucker.State.Chain,
     module Tucker.State.Block,
+    module Tucker.State.Mining,
+
     module Tucker.Container.IOMap
 ) where
 
@@ -78,5 +80,6 @@ import Tucker.P2P.Action
 import Tucker.State.Util
 import Tucker.State.Chain
 import Tucker.State.Block
+import Tucker.State.Mining
 
 import Tucker.Container.IOMap

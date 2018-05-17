@@ -827,7 +827,12 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
 
 -- sig_script is empty and pk_script is a witness program
 specialScript s@(shouldEnableWitness -> True)
-              ([ [], parseWitnessProgram -> Just wit ]) = do
+              (getScriptType -> SCRIPT_P2WPKH wit) = do
+    (_, ns) <- popM' s -- pop out result first
+    verifyWitness ns wit
+
+specialScript s@(shouldEnableWitness -> True)
+              (getScriptType -> SCRIPT_P2SH wit) = do
     (_, ns) <- popM' s -- pop out result first
     verifyWitness ns wit
     

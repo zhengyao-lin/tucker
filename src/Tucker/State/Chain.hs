@@ -30,6 +30,7 @@ import Tucker.Thread
 import Tucker.DeepSeq
 
 import Tucker.Container.IOMap
+import qualified Tucker.Container.Set as SET
 
 import Tucker.State.Tx
 import Tucker.State.Block
@@ -52,8 +53,10 @@ data VerifyConf =
     VerifyConf {
         verify_enable_csv    :: Bool,
         verify_enable_segwit :: Bool,
-        verify_cur_mtp       :: Timestamp,
+        verify_cur_time      :: Timestamp,
         verify_cur_height    :: Height,
+        verify_cur_branch    :: Branch,
+        verify_block_hash    :: Maybe Hash256,
         verify_check_dup_tx  :: Bool
     }
 
@@ -166,138 +169,6 @@ notes for BIP9
    switch the state of the next retarget period to LOCKED_IN
 
 -}
-
-{-
-
-BitMiner coinbase
-03 92cc13
-09 4269744d696e746572
-2c fabe6d6d00000000000000000000000000000000000000000000000000000000000000000100000000000000
-09 6465765a1e00000001
-0000000603000000
-
-unknown coinbase
-03 91cc13: height
-04 cbdbf85a: time
-08 40000015147b0200: extra nonce?
-0d 2f6e6f64655374726174756d2f: "/nodeStratum/"
-
--}
-
-data CoinbaseInfo =
-    CoinbaseInfo {
-        cb_height :: Height,
-        cb_time :: Timestamp,
-        cb_nonce :: Word64,
-        cb_msg :: String
-    }
-
--- config, coinbase msg, receiver address, generated value
-coinbaseP2PKH :: TCKRConf -> CoinbaseInfo -> Address -> Satoshi -> TxPayload
-coinbaseP2PKH conf info addr fee =
-    updateIds $ TxPayload {
-        txid = undefined,
-        wtxid = undefined,
-
-        version = 0,
-        flag = 0,
-        tx_in = [
-            TxInput {
-                prev_out = OutPoint nullHash256 maxBound,
-                sig_script = encodeLE ([
-                    -- first item is the block height
-                    OP_INT (fi (cb_height info)),
-                    OP_INT (fi (cb_time info)),
-                    OP_INT (fi (cb_nonce info)),
-                    OP_PUSHDATA (BS.pack (cb_msg info)) Nothing
-                ]),
-                seqn = maxBound
-            }
-        ],
-
-        tx_out = [
-            TxOutput {
-                value = fee,
-                pk_script = encodeLE (stdPkScriptP2PKH conf addr)
-            }
-        ],
-
-        tx_witness = [],
-        lock_time = 0
-    }
-
-nextVersion :: BlockChain -> IO BlockVersion
-nextVersion bc = do
-    -- set all "started" softfork bits to 1
-    forks <- lookupNonFinalForks (bc_fork_state bc)
-    return (genDeployVersion (map fork_bit forks))
-
-nextBlock :: BlockChain -> String -> Address -> Word64 -> IO Block
-nextBlock bc@(BlockChain {
-    bc_conf = conf,
-    bc_chain = chain
-}) msg addr extra_nonce = do
-    now <- unixTimestamp
-
-    let main = mainBranch chain
-        next_height = cur_height main + 1
-        fee = feeAtHeight conf next_height
-
-        info = CoinbaseInfo {
-                cb_height = next_height,
-                cb_time = now,
-                cb_nonce = extra_nonce,
-                cb_msg = msg
-            }
-
-        coinbase = coinbaseP2PKH conf info addr fee
-    
-    appendTx coinbase <$> nextEmptyBlock bc
-
-    -- append all other txns
-    -- return (foldl (\block (tx, _) -> appendTx tx block) base txns)
-
--- next empty block on the main branch
--- NOTE that this block does not contain a coinbase
-nextEmptyBlock :: BlockChain -> IO Block
-nextEmptyBlock bc@(BlockChain {
-    bc_conf = conf,
-    bc_chain = chain
-}) = do
-    let main = mainBranch chain
-        next_height = cur_height main + 1
-        use_min_diff = tckr_use_special_min_diff_mine conf
-        tip = mainBranchTip bc
-        last_time = btimestamp tip
-    
-    now <- unixTimestamp
-    mtp <- medianTimePast bc main next_height
-
-    target <-
-        if use_min_diff then
-            return (fi (tckr_bdiff_diff1_target conf))
-        else
-            targetAtHeight bc main next_height last_time
-
-    v <- nextVersion bc
-
-    return $ updateBlockHashes Block {
-        block_hash = undefined,
-        vers = v,
-        prev_hash = block_hash tip,
-        merkle_root = 0,
-
-        btimestamp =
-            if use_min_diff then
-                last_time + 2 * tckr_target_spacing conf + 1
-            else
-                max mtp now,
-
-        hash_target = target,
-        nonce = 0,
-        txns = FullList [],
-        enc_cache = Nothing
-    }
 
 latestBlockHashes :: BlockChain -> Int -> IO [Hash256]
 latestBlockHashes (BlockChain { bc_chain = chain }) n =
@@ -595,26 +466,36 @@ shouldEnableFork (BlockChain {
 }) name =
     isActiveStatus <$> getForkStatus fork_state name
 
-genVerifyConf :: BlockChain -> Branch -> Maybe Branch -> IO VerifyConf
+genVerifyConf :: BlockChain -> Branch -> Height -> Maybe Block -> IO VerifyConf
 genVerifyConf bc@(BlockChain {
     bc_conf = conf,
     bc_chain = bc_chain,
     bc_fork_state = fork_state
-}) branch mnode = do
+}) branch height mblock = do
     csv <- shouldEnableFork bc "csv"
     segwit <- shouldEnableFork bc "segwit"
 
-    let height = case mnode of
-            Nothing -> mainBranchHeight bc
-            Just node -> cur_height node
+    -- let height =
+    --     case mnode of
+    --         Nothing -> mainBranchHeight bc
+    --         Just node -> cur_height node
 
     mtp <- medianTimePast bc branch height
+    now <- unixTimestamp
 
     return $ VerifyConf {
         verify_enable_csv = csv,
         verify_enable_segwit = segwit,
-        verify_cur_mtp = mtp,
         verify_cur_height = height,
+        verify_cur_time =
+            if csv then mtp -- use mtp
+            else case mblock of
+                Just block -> btimestamp block -- use block timestamp before activation of csv
+                Nothing -> now, -- use cur time
+
+        verify_cur_branch = branch,
+
+        verify_block_hash = block_hash <$> mblock,
         verify_check_dup_tx = mtp >= tckr_dup_tx_disable_time conf
     }
 
@@ -637,90 +518,6 @@ parentBranchOfTx bc@(BlockChain {
     --     toFullBlockNode chain bnode
 
     return (bnode, locatorToIdx locator)
-
-verifyScript :: BlockChain -> VerifyConf -> TxPayload -> Int -> UTXOValue -> IO ()
-verifyScript bc ver_conf tx in_idx uvalue = do
-    let prev_tx_idx = tx_index uvalue
-        prev_tx_out = u_tx_out uvalue
-        input = tx_in tx !! in_idx
-        OutPoint prev_txid out_idx = prev_out input
-
-    script_conf <- genScriptConf bc ver_conf uvalue
-
-    let pk_sc = decodeFailLE (pk_script prev_tx_out)
-        sig_sc = decodeFailLE (sig_script input)
-        state = initState script_conf prev_tx_out tx (fi in_idx)
-        check_res = runEval state [ sig_sc, pk_sc ]
-
-    expectTrue
-        REJECT_INVALID
-        (printf "script validation failed: tx %s, %s to tx %s, %s: %s, scripts: %s"
-         (show prev_txid) (show out_idx) (show (txid tx)) (show in_idx) (show check_res)
-         (show (sig_sc, pk_sc)))
-        (check_res == ValidTx)
-
-verifyRelLockTime :: BlockChain -> Branch -> VerifyConf -> TxInput -> UTXOValue -> IO ()
-verifyRelLockTime bc branch ver_conf input uvalue =
-    -- check BIP 68
-    case inputRelLockTime input of
-        Just rlock_time ->
-            case rlock_time of
-                RelLockTimeHeight v -> do
-                    let cur = verify_cur_height ver_conf
-                        exp = parent_height uvalue + fi v
-                    
-                    expectTrue
-                        REJECT_INVALID
-                        ("relative lock-time(block height) not met(expecting " ++
-                         show exp ++ ", current " ++ show cur) $
-                        cur >= exp
-
-                RelLockTime512S v -> do
-                    prev_time <- medianTimePast bc branch (parent_height uvalue)
-
-                    let cur = verify_cur_mtp ver_conf
-                        exp = fi v * 512 + prev_time
-                    
-                    expectTrue
-                        REJECT_INVALID
-                        ("relative lock-time(512s) not met(expecting " ++
-                         show exp ++ ", current " ++ show cur) $
-                        cur >= exp
-
-        Nothing -> return () -- no requirement for lock time
-
-verifyInput :: UTXOMap a
-            => BlockChain -> TxState a -> VerifyConf
-            -> Branch -> TxPayload -> Int -> IO Satoshi
-verifyInput bc@(BlockChain {
-    bc_conf = conf,
-    bc_chain = chain,
-    bc_fork_state = fork_state
-}) tx_state ver_conf branch tx in_idx = do
-    let input@(TxInput {
-            prev_out = outp@(OutPoint prev_txid out_idx)
-        }) = tx_in tx !! in_idx
-
-    -- :: UTXOValue
-    uvalue <- expectMaybeIO
-        REJECT_INVALID
-        ("outpoint not in utxo " ++ show outp) $
-        lookupUTXO tx_state outp
-
-    when (verify_enable_csv ver_conf && version tx >= 2) $
-        verifyRelLockTime bc branch ver_conf input uvalue
-
-    -- if the funding tx is coinbase(idx == 0), check coinbase maturity
-    expectTrue
-        REJECT_INVALID
-        ("coinbase maturity not met for outpoint tx " ++ show prev_txid) $
-        tx_index uvalue /= 0 ||
-        cur_height branch - parent_height uvalue >= fi (tckr_coinbase_maturity conf)
-
-    verifyScript bc ver_conf tx in_idx uvalue
-
-    -- all test passed, return value
-    return (value (u_tx_out uvalue))
 
 updateChain :: BlockChain -> Chain -> IO BlockChain
 updateChain bc chain =
@@ -748,123 +545,222 @@ hasTx bc txid =
         hasTxInBranch bc (mainBranch (bc_chain bc))
     ]
 
+
+verifyScript :: BlockChain -> VerifyConf -> TxPayload -> Int -> UTXOValue -> IO ()
+verifyScript bc ver_conf tx in_idx uvalue = do
+    let prev_tx_idx = tx_index uvalue
+        prev_tx_out = u_tx_out uvalue
+        input = tx_in tx !! in_idx
+        OutPoint prev_txid out_idx = prev_out input
+
+    script_conf <- genScriptConf bc ver_conf uvalue
+
+    let pk_sc = decodeFailLE (pk_script prev_tx_out)
+        sig_sc = decodeFailLE (sig_script input)
+        state = initState script_conf prev_tx_out tx (fi in_idx)
+        check_res = runEval state [ sig_sc, pk_sc ]
+
+    expectTrue
+        REJECT_INVALID
+        (printf "script validation failed: tx %s, %s to tx %s, %s: %s, scripts: %s"
+         (show prev_txid) (show out_idx) (show (txid tx)) (show in_idx) (show check_res)
+         (show (sig_sc, pk_sc)))
+        (check_res == ValidTx)
+
+verifyRelLockTime :: BlockChain -> VerifyConf -> TxInput -> UTXOValue -> IO ()
+verifyRelLockTime bc ver_conf input uvalue =
+    -- check BIP 68
+    case inputRelLockTime input of
+        Just rlock_time ->
+            case rlock_time of
+                RelLockTimeHeight v -> do
+                    let cur = verify_cur_height ver_conf
+                        exp = parent_height uvalue + fi v
+                    
+                    expectTrue
+                        REJECT_INVALID
+                        ("relative lock-time(block height) not met(expecting " ++
+                         show exp ++ ", current " ++ show cur) $
+                        cur >= exp
+
+                RelLockTime512S v -> do
+                    prev_time <-
+                        medianTimePast bc (verify_cur_branch ver_conf)
+                                       (parent_height uvalue)
+
+                    let cur = verify_cur_time ver_conf
+                        exp = fi v * 512 + prev_time
+                    
+                    expectTrue
+                        REJECT_INVALID
+                        ("relative lock-time(512s) not met(expecting " ++
+                         show exp ++ ", current " ++ show cur) $
+                        cur >= exp
+
+        Nothing -> return () -- no requirement for lock time
+
+verifyInput :: UTXOMap a
+            => BlockChain -> TxState a -> VerifyConf
+            -> TxPayload -> Int -> IO Satoshi
+verifyInput bc@(BlockChain {
+    bc_conf = conf,
+    bc_chain = chain,
+    bc_fork_state = fork_state
+}) tx_state ver_conf tx in_idx = do
+    let input@(TxInput {
+            prev_out = outp@(OutPoint prev_txid out_idx)
+        }) = tx_in tx !! in_idx
+
+    -- :: UTXOValue
+    uvalue <- expectMaybeIO
+        REJECT_INVALID
+        ("outpoint not in utxo " ++ show outp) $
+        lookupUTXO tx_state outp
+
+    when (verify_enable_csv ver_conf && version tx >= 2) $
+        verifyRelLockTime bc ver_conf input uvalue
+
+    -- if the funding tx is coinbase(idx == 0), check coinbase maturity
+    expectTrue
+        REJECT_INVALID
+        ("coinbase maturity not met for outpoint tx " ++ show prev_txid) $
+        tx_index uvalue /= 0 ||
+        verify_cur_height ver_conf - parent_height uvalue >= fi (tckr_coinbase_maturity conf)
+
+    verifyScript bc ver_conf tx in_idx uvalue
+
+    -- all test passed, return value
+    return (value (u_tx_out uvalue))
+
+-- verify (absolute)lock time
+verifyLockTime :: BlockChain -> VerifyConf -> TxPayload -> IO ()
+verifyLockTime bc ver_conf tx =
+    let time = verify_cur_time ver_conf
+        height = verify_cur_height ver_conf
+    in unless (isFinalTx tx) $
+        case txLockTime tx of
+            LockTimeStamp min_stamp ->
+                expectTrue
+                    REJECT_INVALID 
+                    ("tx lock-time(timestamp) not met(expect " ++ show min_stamp ++
+                        ", " ++ show time ++ " given") $
+                    time >= min_stamp
+
+            LockTimeHeight min_height ->
+                expectTrue
+                    REJECT_INVALID
+                    "tx lock-time(height) not met" $
+                    height >= min_height
+
+-- check for duplicated txns
+verifyDupTx :: BlockChain -> VerifyConf -> TxPayload -> IO ()
+verifyDupTx bc ver_conf tx = do
+    mlocator <- findTxId (bc_tx_state bc) (txid tx)
+                
+    case mlocator of
+        Nothing -> return () -- no record
+        Just locator -> do
+            let hash = locatorToHash locator
+                match_record =
+                    case verify_block_hash ver_conf of
+                        Just block_hash -> hash == block_hash
+                        Nothing -> False
+
+            -- it's a duplicated tx unless it was included in the same block
+            -- OR the recorded block doesn't exist in the current branch
+            unless match_record $
+                expectFalseIO
+                    REJECT_DUPLICATE
+                    ("duplicated transaction " ++ show (txid tx)) $
+                    hasBlockInBranch (bc_chain bc) (verify_cur_branch ver_conf) hash
+
+-- basic checks for tx
+verifyBasicTx :: BlockChain -> TxPayload -> IO ()
+verifyBasicTx bc tx = do
+    expectTrue REJECT_INVALID "more than one coinbase txns" $
+        not (isCoinbase tx)
+
+    expectFalse REJECT_INVALID "empty input list" $
+        null (tx_in tx)
+
+    expectFalse REJECT_INVALID "empty output list" $
+        null (tx_out tx)    
+
+-- verify bitcoin flow
+-- NOTE: this function cannot be used to verify coinbases
+-- returns tx fee
+verifyFlow :: UTXOMap a
+            => BlockChain -> TxState a
+            -> VerifyConf -> TxPayload -> IO Satoshi
+verifyFlow bc tx_state ver_conf tx = do
+    let len = fi (length (tx_in tx))
+        idxs = [ 0 .. len - 1 ]
+        job = tckr_job_number (bc_conf bc)
+        sep_idxs = foldList job idxs
+
+        verify in_idx =
+            verifyInput bc tx_state ver_conf tx in_idx
+
+        parVerify tstate = do
+            -- tLnM "checking input in parallel"
+
+            res <- forkMap tstate THREAD_VALIDATION (mapM verify) sep_idxs
+    
+            return (sum (concat res))
+
+        seqVerify = foldM (\val idx -> (val +) <$> verify idx) 0 idxs
+
+    in_value <-
+        if length idxs >= tckr_min_parallel_input_check (bc_conf bc) then do
+            case bc_thread_state bc of
+                Just tstate -> parVerify tstate
+                Nothing -> seqVerify -- threading is not supported
+        else
+            seqVerify
+
+    let total_out_value = getOutputValue tx
+        fee = in_value - total_out_value
+    
+    -- validity of values
+    expectTrue
+        REJECT_INVALID
+        "sum of inputs less than the sum of output" $
+        fee >= 0
+
+    return fee
+
+-- verify all txns in a block
 -- NOTE: the block given is not necessarily the top block
-verifyBlockTx :: BlockChain -> Branch -> Block -> IO ()
-verifyBlockTx bc branch block = do
+verifyBlockTxns :: BlockChain -> Branch -> Height -> Block -> IO ()
+verifyBlockTxns bc branch height block = do
     let all_txns = FD.toList (txns block)
         conf = bc_conf bc
-
-    bnode <- expectMaybeIO
-        REJECT_INVALID
-        "the block being verified is not in the given branch" $
-        lookupBlockNode (bc_chain bc) [branch] (WithHash (block_hash block))
-
+        
     begin_time <- msMonoTime
-    ver_conf <- genVerifyConf bc branch (Just bnode)
-
-    let mtp = verify_cur_mtp ver_conf
-        block_timestamp =
-            if verify_enable_csv ver_conf then mtp
-            else btimestamp block
+    ver_conf <- genVerifyConf bc branch height (Just block)
 
     -- using cached utxo because any error
     -- in the tx will cause the tx state to roll back
     withCacheUTXO (bc_tx_state bc) $ \tx_state -> do
         let coinbase = head all_txns
-            normal_tx = tail all_txns
+            normal_txns = tail all_txns
             ntxns = length all_txns
 
         -- check lock-time
-        forM_ all_txns $ \tx ->
-            unless (isFinalTx tx) $
-                case txLockTime tx of
-                    LockTimeStamp min_stamp ->
-                        expectTrue
-                            REJECT_INVALID 
-                            ("tx lock-time(timestamp) not met(expect " ++ show min_stamp ++
-                             ", " ++ show mtp ++ " given") $
-                            block_timestamp >= min_stamp
+        forM_ all_txns (verifyLockTime bc ver_conf)
 
-                    LockTimeHeight min_height ->
-                        expectTrue
-                            REJECT_INVALID
-                            "tx lock-time(height) not met" $
-                            cur_height bnode >= min_height
-            -- else lock-time is irrelevant
-
+        -- check for duplicated tx if enabled
         when (verify_check_dup_tx ver_conf) $
-            forM_ (zip [0..] all_txns) $ \(idx, tx) -> do
-                -- check duplicated tx
-                mlocator <- findTxId tx_state (txid tx)
-                
-                case mlocator of
-                    Nothing -> return () -- no record
-                    Just locator -> do
-                        let hash = locatorToHash locator
-                            match_record =
-                                locatorToHash locator == block_hash block &&
-                                locatorToIdx locator == idx
+            forM_ all_txns (verifyDupTx bc ver_conf)
 
-                        -- it's a duplicated tx unless it was included in the same block
-                        -- OR the recorded block doesn't exist in the current branch
-                        unless match_record $
-                            expectFalseIO
-                                REJECT_DUPLICATE
-                                ("duplicated transaction " ++ show (txid tx)) $
-                                hasBlockInBranch (bc_chain bc) branch hash
+        -- normal tx check
+        all_fees <- forM (zip [1..] normal_txns) $ \(idx, tx) -> do
+            tM $ wss (Color Blue False)
+               $ "[tx " ++ show idx ++ "/" ++ show ntxns ++ " " ++ take 8 (show (txid tx)) ++ "...]"
 
-        all_fees <- forM (zip [1..] normal_tx) $ \(idx, tx) -> do
-            expectTrue REJECT_INVALID "more than one coinbase txns" $
-                not (isCoinbase tx)
-
-            expectFalse REJECT_INVALID "empty input list" $
-                null (tx_in tx)
-        
-            expectFalse REJECT_INVALID "empty output list" $
-                null (tx_out tx)
-
-            -- tLnM $ "checking tx " ++ show idx
-
-            let len = fi (length (tx_in tx))
-                idxs = [ 0 .. len - 1 ]
-                job = tckr_job_number (bc_conf bc)
-                sep_idxs = foldList job idxs
-
-                verify in_idx = do
-                    tM $ wss (Color Blue False)
-                       $ "[tx " ++ show idx ++ "/" ++ show ntxns ++ " " ++ take 8 (show (txid tx)) ++ "..., " ++
-                         show in_idx ++ "/" ++ show len ++ "]"
-
-                    verifyInput bc tx_state ver_conf branch tx in_idx
-
-                parVerify tstate = do
-                    -- tLnM "checking input in parallel"
-
-                    res <- forkMap tstate THREAD_VALIDATION (mapM verify) sep_idxs
-            
-                    return (sum (concat res))
-
-                seqVerify = foldM (\val idx -> (val +) <$> verify idx) 0 idxs
-
-            in_value <-
-                if length idxs >= tckr_min_parallel_input_check conf then do
-                    case bc_thread_state bc of
-                        Just tstate -> parVerify tstate
-                        Nothing -> seqVerify -- threading is not supported
-                else
-                    seqVerify
-
-            let total_out_value = getOutputValue tx
-                fee = in_value - total_out_value
-            
-            -- validity of values
-            expectTrue
-                REJECT_INVALID
-                "sum of inputs less than the sum of output" $
-                fee >= 0
-
-            addTx tx_state (cur_height bnode) block idx
-
+            verifyBasicTx bc tx
+            fee <- verifyFlow bc tx_state ver_conf tx
+            addTx tx_state height block idx
             return fee
 
         -- checking coinbase
@@ -878,7 +774,7 @@ verifyBlockTx bc branch block = do
             "coinbase output greater than the sum of the block creation fee and tx fees" $
             coinbase_out <= block_fee + tx_fee
 
-        addTx tx_state (cur_height bnode) block 0
+        addTx tx_state height block 0
 
     end_time <- msMonoTime :: IO Integer
 
@@ -1044,7 +940,7 @@ addBlockFail bc@(BlockChain {
                             return (cur_height branch < fi height)
 
                     if not skip_tx_check then
-                        verifyBlockTx bc branch block
+                        verifyBlockTxns bc branch (cur_height branch) block
                     else do
                         -- trust all txns
                         tLnM "txns assumed valid"
@@ -1058,7 +954,7 @@ addBlockFail bc@(BlockChain {
                 else if branch > main_branch then do
                     -- branch becoming the main branch
                     
-                    tLnM "!!! main branch change"
+                    tLnM "main branch change"
 
                     -- set main branch
                     bc <- updateChain bc (setMainBranch (bc_chain bc) branch)
@@ -1081,7 +977,7 @@ addBlockFail bc@(BlockChain {
                         forM_ (reverse fp2) $ \bnode -> do
                             bnode <- toFullBlockNodeFail (bc_chain bc) bnode
                             -- verify all blocks in the new main branch
-                            verifyBlockTx bc branch (block_data bnode)
+                            verifyBlockTxns bc branch (cur_height bnode) (block_data bnode)
 
                     return bc
                 else
@@ -1122,15 +1018,13 @@ addPoolTxFail bc@(BlockChain {
     let main = mainBranch (bc_chain bc)
 
     now <- unixTimestamp
+    ver_conf <- genVerifyConf bc main (mainBranchHeight bc) Nothing
 
     timeoutPoolTx tx_state (now - tckr_pool_tx_timeout conf)
 
     expectFalseIO REJECT_INVALID "mem pool full" (txPoolFull bc)
 
-    is_orphan <- hasTxInOrphanPool tx_state (txid tx)
-    
-    when is_orphan $
-        removeOrphanTx tx_state (txid tx)
+    removeOrphanTx tx_state (txid tx)
 
     -- check for duplication(in chain, mem pool, and orphan pool)
     expectFalseIO REJECT_DUPLICATE "duplicated tx in chain" $
@@ -1139,16 +1033,7 @@ addPoolTxFail bc@(BlockChain {
     expectFalseIO REJECT_DUPLICATE "duplicated tx in mem pool" $
         hasTxInMemPool tx_state (txid tx)
 
-    expectFalse REJECT_INVALID "empty input list" $
-        null (tx_in tx)
-
-    expectFalse REJECT_INVALID "empty output list" $
-        null (tx_out tx)
-
-    expectFalse REJECT_INVALID "mem pool tx should not be coinbase" $
-        isCoinbase tx
-
-    ver_conf <- genVerifyConf bc main Nothing
+    verifyBasicTx bc tx
 
     values <- forM ([0..] `zip` tx_in tx) $
         \(in_idx, TxInput { prev_out = prev_out }) -> do

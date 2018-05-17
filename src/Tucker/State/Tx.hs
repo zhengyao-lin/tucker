@@ -4,6 +4,7 @@ module Tucker.State.Tx where
 
 import Data.Word
 import Data.Bits
+import Data.List
 import qualified Data.Foldable as FD
 
 import Control.Monad
@@ -375,3 +376,12 @@ lookupMemPoolTx state txid =
 hasTxInOrphanPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
 hasTxInOrphanPool state hash =
     MAP.member hash <$> getA (tx_orphan_pool state)
+
+memPoolTxnsSortedByFeeRate :: UTXOMap a => TxState a -> IO [TxPayload]
+memPoolTxnsSortedByFeeRate state =
+    reverse <$> map tx_data <$>
+    sortBy (\a b -> compare (feeRate a) (feeRate b)) <$>
+    map snd <$>
+    MAP.toList <$> getA (tx_mem_pool state)
+
+    where feeRate ptx = tx_fee ptx `div` fi (sizeOf (tx_data ptx))

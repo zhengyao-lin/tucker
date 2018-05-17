@@ -443,8 +443,8 @@ data ScriptType
     | SCRIPT_P2PK
     | SCRIPT_P2SH ByteString -- redeem script
     | SCRIPT_P2MULTISIG
-    | SCRIPT_P2WPKH
-    | SCRIPT_P2WSH
+    | SCRIPT_P2WPKH ByteString -- witness program
+    | SCRIPT_P2WSH ByteString -- witness program
     | SCRIPT_NONSTD deriving (Show)
 
 instance Eq ScriptType where
@@ -452,8 +452,8 @@ instance Eq ScriptType where
     SCRIPT_P2PK == SCRIPT_P2PK = True
     (SCRIPT_P2SH _) == (SCRIPT_P2SH _) = True
     SCRIPT_P2MULTISIG == SCRIPT_P2MULTISIG = True
-    SCRIPT_P2WPKH == SCRIPT_P2WPKH = True
-    SCRIPT_P2WSH == SCRIPT_P2WSH = True
+    (SCRIPT_P2WPKH _) == (SCRIPT_P2WPKH _) = True
+    (SCRIPT_P2WSH _) == (SCRIPT_P2WSH _) = True
     SCRIPT_NONSTD == SCRIPT_NONSTD = True
     _ == _ = False
 
@@ -513,8 +513,8 @@ getScriptType
 
 getScriptType [ [], parseWitnessProgram -> Just wit ] =
     case BSR.length wit of
-        20 -> SCRIPT_P2WPKH
-        32 -> SCRIPT_P2WSH
+        20 -> SCRIPT_P2WPKH wit
+        32 -> SCRIPT_P2WSH wit
         _ -> SCRIPT_NONSTD
 
 getScriptType _ = SCRIPT_NONSTD
