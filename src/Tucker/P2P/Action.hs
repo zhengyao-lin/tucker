@@ -376,17 +376,25 @@ scheduleFetch env init_hashes callback = do
                     readNClear >>= envAddBlocks env node
                     nodeMsg env node (show new_added ++ " new block(s) added")
 
-                    when (new_added == total) $ do
-                        nodeMsg env node "all fetching finished"
-                        cancel sched
-                        callback
+                    when_ (new_added == total) $
+                        envFork env THREAD_OTHER $ do
+                            nodeMsg env node "all fetching finished"
+                            cancel sched
+                            callback
 
                 return ()
 
     newScheduler env (tckr_block_fetch_timeout conf)
         (\sched -> doFetch sched init_hashes []) -- init assign
         reassign -- reassign
-        (\sched tasks -> clearBlacklist sched >> reassign sched tasks []) -- fail
+        $ \sched tasks -> do
+            envFork env THREAD_OTHER $ do
+                envMsg env "failed to fetch the batch, retrying"
+                cancel sched
+                callback -- fail
+
+            return []
+
 
     return ()
 

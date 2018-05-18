@@ -44,7 +44,7 @@ void *miner(void *arg)
 
     span0 = begin = get_cpu_ms();
 
-    for (i = job.from; i <= j && !job.state->found; i++) {
+    for (i = job.from; i <= j && !job.state->stop; i++) {
         if (i && i % MEASURE_TIME == 0) {
             span1 = get_cpu_ms();
             span = (double)(span1 - span0) / 1000;
@@ -75,14 +75,14 @@ void *miner(void *arg)
         // double_sha256(ndat, job.state->nsize, hash);
 
         if (less_or_equal_to_hash_le(hash, job.state->target)) {
-            printf("\nfound after %.1f seconds\n", (double)(get_cpu_ms() - begin) / 1000);
+            printf("\nstop after %.1f seconds\n", (double)(get_cpu_ms() - begin) / 1000);
             // print_hash256(hash);
             // print_hash256(job.state->target);
 
             free(ndat);
             
             job.state->answer = i;
-            job.state->found = true;
+            job.state->stop = true;
 
             return NULL;
         }
@@ -120,7 +120,7 @@ miner_state_t *init_miner(const byte_t *dat, size_t size, const hash256_t target
         .threads = malloc(sizeof(*state->threads) * njob),
         .jobs = malloc(sizeof(*state->jobs) * njob),
         .njob = njob,
-        .found = false
+        .stop = false
     };
 
     memcpy(state->target, target, sizeof(hash256_t));
@@ -151,7 +151,7 @@ nonce_t *join_miner(miner_state_t *state)
         pthread_join(state->threads[i], NULL);
     }
 
-    if (state->found) {
+    if (state->stop == STOP_FOUND) {
         printf("found: %u\n", state->answer);
         return &state->answer;
     } else {
@@ -168,5 +168,6 @@ void free_miner(miner_state_t *state)
 
 void kill_miner(miner_state_t *state)
 {
-    state->found = true;
+    state->stop = true;
+    join_miner(state);
 }

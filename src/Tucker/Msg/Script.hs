@@ -731,7 +731,7 @@ runEval s scripts =
          
         if isValidStack state then
             -- special cases e.g. P2SH
-            isValidStack <$> specialScript state scripts
+            isValidStack <$> specialScript state scripts -- pass in pk_script
         else
             return False
 
@@ -802,9 +802,18 @@ verifyWitness _ _ = fail "illegal witness program length"
 
 specialScript :: ScriptState -> [[ScriptOp]] -> Either TCKRError ScriptState
 
+-- sig_script is empty and pk_script is a witness program
+specialScript s@(shouldEnableWitness -> True)
+              [ _, getScriptType -> SCRIPT_P2WPKH ] = do
+    (wit, ns) <- popM' s -- pop out result first
+    verifyWitness ns wit
+
 -- P2SH
-specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
+specialScript s [ reverse -> (OP_PUSHDATA redeem _ : _),
+                  getScriptType -> SCRIPT_P2SH ] =
     if script_enable_p2sh (script_conf s) then do
+        (_, ns) <- popM' s -- pop out result first
+
         redeem_script <- decodeAllLE redeem
 
         (use_wit, wit) <-
@@ -815,8 +824,6 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
             else
                 return (False, undefined)
 
-        (_, ns) <- popM' s -- pop out result first
-
         if use_wit then
             verifyWitness ns wit
         else
@@ -824,17 +831,6 @@ specialScript s (getScriptType -> SCRIPT_P2SH redeem) =
     else
         -- p2sh not enabled
         return s
-
--- sig_script is empty and pk_script is a witness program
-specialScript s@(shouldEnableWitness -> True)
-              (getScriptType -> SCRIPT_P2WPKH wit) = do
-    (_, ns) <- popM' s -- pop out result first
-    verifyWitness ns wit
-
-specialScript s@(shouldEnableWitness -> True)
-              (getScriptType -> SCRIPT_P2SH wit) = do
-    (_, ns) <- popM' s -- pop out result first
-    verifyWitness ns wit
     
 -- no change in state
 specialScript s _ = return s

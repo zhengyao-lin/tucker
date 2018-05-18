@@ -560,6 +560,10 @@ verifyScript bc ver_conf tx in_idx uvalue = do
         state = initState script_conf prev_tx_out tx (fi in_idx)
         check_res = runEval state [ sig_sc, pk_sc ]
 
+    when (tckr_reject_non_std_tx (bc_conf bc)) $
+        expectTrue REJECT_NONSTANDARD "non-standard public key script" $
+            getScriptType pk_sc /= SCRIPT_NONSTD
+
     expectTrue
         REJECT_INVALID
         (printf "script validation failed: tx %s, %s to tx %s, %s: %s, scripts: %s"

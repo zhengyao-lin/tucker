@@ -14,14 +14,18 @@ typedef struct {
     int id;
 } job_t;
 
+#define STOP_FOUND 1
+#define STOP_KILL 2
+
 typedef struct miner_state_t_tag {
+    ctx_sha256_t base_ctx;
+
     const byte_t *dat;
     hash256_t target;
 
     size_t rsize; // remaining part besides the nonce
     size_t nsize;
     size_t osize;
-    ctx_sha256_t base_ctx;
 
     nonce_t answer;
 
@@ -29,7 +33,7 @@ typedef struct miner_state_t_tag {
     job_t *jobs;
 
     int njob;
-    bool found;
+    int stop;
 } miner_state_t;
 
 // append a 4-byte nonce to dat such that the hash of the appended string is

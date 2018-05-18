@@ -203,7 +203,9 @@ data TCKRConf =
         tckr_bip66_height               :: Word, -- strict signature DER encoding
         tckr_bip65_height               :: Word, -- OP_CHECKLOCKTIMEVERIFY
 
-        tckr_min_tx_fee_rate            :: FeeRate
+        tckr_min_tx_fee_rate            :: FeeRate,
+
+        tckr_reject_non_std_tx          :: Bool
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -368,12 +370,15 @@ tucker_default_conf_mainnet mpath = do
         -- 00000000139462face7d944066b698d0ac5373979cfa096945bfcbc17736dbd0
         -- 0000000022e141e619155c2cc86c6e919a27505079b661ba8fd886bb3490165e
         -- 000000000a8edd5dd2998eddc6945fcfd96b1b12b65f685ded4445c8e6e29bee
+        -- 000000007460ba87018897e61f14faf0d5f880b8d8f196b46a394928ea5f5a46
 
         tckr_bip34_height = 227931,
         tckr_bip66_height = 363725,
         tckr_bip65_height = 388381,
 
-        tckr_min_tx_fee_rate = 10
+        tckr_min_tx_fee_rate = 10,
+
+        tckr_reject_non_std_tx = True
     }
 
     where
