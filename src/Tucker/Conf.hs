@@ -193,11 +193,13 @@ data TCKRConf =
 
         tckr_pool_tx_limit              :: Int, -- when the number of pool tx reaches the limit, remove all timeout txns
         tckr_pool_tx_timeout            :: Timestamp,
+        tckr_enable_mempool             :: Bool,
+        tckr_min_init_mempool_size      :: Int, -- the miner will wait until this size is reached
+        tckr_mempool_wait_timeout       :: Int,
 
         tckr_enable_miner               :: Bool,
         tckr_miner_p2pkh_addr           :: String,
         tckr_miner_msg                  :: String,
-        tckr_enable_mempool             :: Bool,
 
         tckr_bip34_height               :: Word, -- block height in coinbase
         tckr_bip66_height               :: Word, -- strict signature DER encoding
@@ -352,13 +354,15 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_job_number = 1,
 
-        tckr_pool_tx_limit = 256,
+        tckr_pool_tx_limit = 512,
         tckr_pool_tx_timeout = 7 * 60 * 60, -- 7 hours
+        tckr_enable_mempool = True,
+        tckr_min_init_mempool_size = 50,
+        tckr_mempool_wait_timeout = 20000, -- 20 sec
 
         tckr_enable_miner = True,
         tckr_miner_p2pkh_addr = "mu2XoBFnT4RGqbLsFLoRuBHCqrXjbPkwBm",
         tckr_miner_msg = "github.com/rod-lin/tucker",
-        tckr_enable_mempool = False,
 
         -- mined blocks
         -- 00000000ac3198db46ed45f5f7f775d403122a3f16f8d89c935c50e2fea82c6b
@@ -371,12 +375,14 @@ tucker_default_conf_mainnet mpath = do
         -- 0000000022e141e619155c2cc86c6e919a27505079b661ba8fd886bb3490165e
         -- 000000000a8edd5dd2998eddc6945fcfd96b1b12b65f685ded4445c8e6e29bee
         -- 000000007460ba87018897e61f14faf0d5f880b8d8f196b46a394928ea5f5a46
+        -- 0000000083e25078b2951c592a86e2e72cf02c938c8b09ec31a07f19ba579ace
+        -- 0000000007fc8158654cd9d62c659dfcb05adf28bf9d10c861cfb300dd23406d
 
         tckr_bip34_height = 227931,
         tckr_bip66_height = 363725,
         tckr_bip65_height = 388381,
 
-        tckr_min_tx_fee_rate = 10,
+        tckr_min_tx_fee_rate = 1,
 
         tckr_reject_non_std_tx = True
     }
@@ -429,6 +435,8 @@ tucker_default_conf_testnet3 mpath = do
         tckr_bip34_height = 21111,
         tckr_bip66_height = 330776,
         tckr_bip65_height = 581885,
+
+        tckr_reject_non_std_tx = False,
 
         tckr_block_assumed_valid = Nothing
             -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")

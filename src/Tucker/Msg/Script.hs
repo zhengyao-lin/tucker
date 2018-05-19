@@ -819,8 +819,9 @@ specialScript s [ reverse -> (OP_PUSHDATA redeem _ : _),
         (use_wit, wit) <-
             if shouldEnableWitness s then
                 case parseWitnessProgram redeem_script of
-                    Just wit -> return (True, wit)
-                    Nothing -> return (False, undefined)
+                    -- only accept version 0 witness for now
+                    Just (0, wit) -> return (True, wit)
+                    _ -> return (False, undefined)
             else
                 return (False, undefined)
 

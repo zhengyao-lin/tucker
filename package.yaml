@@ -66,6 +66,7 @@ executables:
       - -rtsopts
       - -with-rtsopts=-N
       - -optc-O3
+      - -O2
     dependencies:
       - tucker
 

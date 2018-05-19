@@ -163,7 +163,7 @@ nextEmptyBlock bc@(BlockChain {
 
     v <- nextVersion bc
 
-    return $ updateBlockHashes Block {
+    return $ updateBlock Block {
         block_hash = undefined,
         vers = v,
         prev_hash = block_hash tip,

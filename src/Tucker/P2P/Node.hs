@@ -569,6 +569,9 @@ envAddBlocks env node =
                     -- error ("error when adding block " ++ show block ++ ": " ++ show err)
                     nodeErr env node ("block rejected: " ++ show block ++ ": " ++ show rej)
                     nodeReject env node BTC_CMD_BLOCK (encodeLE (block_hash block)) rej
+
+                    -- TODO: this is for test only
+                    error (show rej)
                 
                 Right bc -> do
                     nodeMsg env node $

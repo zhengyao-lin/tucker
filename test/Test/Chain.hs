@@ -111,7 +111,7 @@ chainTest3 = TestCase $ do
     withBlockChain conf Nothing $ \bc -> do
         block <- nextBlock bc "sonia" "18uvEiTKWcTAzqUVhm7eS6RYKBZ5zq5hBX" 0
 
-        -- addBlocks add_block_common_proc bc [updateBlockHashes $ block { nonce = 1042958299 }]
+        -- addBlocks add_block_common_proc bc [updateBlock block { nonce = 1042958299 }]
 
         traceM (show (hash_target block))
 

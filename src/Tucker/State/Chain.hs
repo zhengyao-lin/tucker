@@ -555,14 +555,14 @@ verifyScript bc ver_conf tx in_idx uvalue = do
 
     script_conf <- genScriptConf bc ver_conf uvalue
 
-    let pk_sc = decodeFailLE (pk_script prev_tx_out)
-        sig_sc = decodeFailLE (sig_script input)
-        state = initState script_conf prev_tx_out tx (fi in_idx)
-        check_res = runEval state [ sig_sc, pk_sc ]
+    pk_sc <- expectEither REJECT_MALFORMED "public key script decode error" $
+        decodeAllLE (pk_script prev_tx_out)
 
-    when (tckr_reject_non_std_tx (bc_conf bc)) $
-        expectTrue REJECT_NONSTANDARD "non-standard public key script" $
-            getScriptType pk_sc /= SCRIPT_NONSTD
+    sig_sc <- expectEither REJECT_MALFORMED "signature script decode error" $
+        decodeAllLE (sig_script input)
+
+    let state = initState script_conf prev_tx_out tx (fi in_idx)
+        check_res = runEval state [ sig_sc, pk_sc ]
 
     expectTrue
         REJECT_INVALID
@@ -724,6 +724,16 @@ verifyFlow bc tx_state ver_conf tx = do
 
     let total_out_value = getOutputValue tx
         fee = in_value - total_out_value
+
+    forM_ ([0..] `zip` tx_out tx) $ \(out_idx, out) ->
+        when (tckr_reject_non_std_tx (bc_conf bc)) $ do
+            pk_script <- expectEither REJECT_MALFORMED "public key script decode error" $
+                decodeAllLE (pk_script out)
+
+            expectTrue
+                REJECT_NONSTANDARD
+                ("non-standard public key script for tx " ++ show (txid tx) ++ " " ++ show out_idx) $
+                getScriptType pk_script /= SCRIPT_NONSTD
     
     -- validity of values
     expectTrue
@@ -1098,3 +1108,6 @@ expectMaybe rtype msg (Just v) = return v
 expectMaybe rtype msg Nothing = reject rtype msg
 
 expectMaybeIO rtype msg m = m >>= expectMaybe rtype msg
+
+expectEither rtype msg (Right v) = return v
+expectEither rtype msg (Left err) = reject rtype (msg ++ ": " ++ show err)

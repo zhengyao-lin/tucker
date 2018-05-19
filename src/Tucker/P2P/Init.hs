@@ -130,6 +130,19 @@ collector env@(MainLoopEnv {
 --     envSpreadSimpleAction env (NormalAction (syncChain (pure ()))) n
 --     return ()
 
+waitForMemPool env = do
+    start <- msMonoTime :: IO Int
+
+    waitUntilIO $ do
+        reached <- (>= envConf env tckr_min_init_mempool_size) <$> fst <$>
+                   envWithChain env txPoolStatus
+
+        now <- msMonoTime
+
+        let timeout = now - start > envConf env tckr_mempool_wait_timeout
+
+        return (timeout || reached)
+
 mainLoop :: TCKRConf -> IO MainLoopEnv
 mainLoop conf = runResourceT $ do
     env <- initEnv conf
@@ -149,7 +162,9 @@ mainLoop conf = runResourceT $ do
         envFork env THREAD_BASE (server env)
 
         envFork env THREAD_OTHER $ sync env 3 $
-            when_ (envConf env tckr_enable_miner) $
+            when_ (envConf env tckr_enable_miner) $ do
+                waitForMemPool env
+                envMsg env "min mem pool size reached"
                 envFork env THREAD_BASE (miner env)
 
         forever yieldWait

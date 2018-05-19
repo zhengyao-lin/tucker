@@ -53,7 +53,7 @@ joinMiner block state = do
     if pnonce == nullPtr then return Nothing
     else do
         nonce <- peek pnonce
-        return (Just (updateBlockHashes block { nonce = fi nonce }))
+        return (Just (updateBlock block { nonce = fi nonce }))
 
 freeMiner :: MinerState -> IO ()
 freeMiner = c_free_miner

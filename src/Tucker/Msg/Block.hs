@@ -362,8 +362,14 @@ merkleRoot (Block {
     txns = txns
 }) = head (merkleRoot' (map txid (FD.toList txns)))
 
-updateBlockHashes :: Block -> Block
-updateBlockHashes block =
+clearEncCache :: Block -> Block
+clearEncCache block =
+    block {
+        enc_cache = Nothing
+    }
+
+updateBlock :: Block -> Block
+updateBlock block =
     let block1 = block {
                 merkle_root = merkleRoot block
             }
@@ -371,12 +377,12 @@ updateBlockHashes block =
         block2 = block1 {
                 block_hash = hashBlock block1
             }
-    in block2
+    in clearEncCache block2
 
 appendTx :: TxPayload -> Block -> Block
 appendTx tx block =
     let new_txns = (FD.toList (txns block) ++ [ tx ]) in
-    updateBlockHashes block {
+    updateBlock block {
         txns = FullList new_txns
     }
 
@@ -385,21 +391,15 @@ updateCoinbase coinbase block =
     let all_txns = FD.toList (txns block) in
     if null all_txns then appendTx coinbase block
     else
-        updateBlockHashes block {
+        updateBlock block {
             txns = FullList (coinbase : tail all_txns)
         }
-
-clearEncCache :: Block -> Block
-clearEncCache block =
-    block {
-        enc_cache = Nothing
-    }
 
 stripBlockWitness :: Block -> Block
 stripBlockWitness block@(Block {
     txns = txns
 }) =
-    block {
+    updateBlock block {
         txns = FullList (map stripWitness (FD.toList txns))
     }
 

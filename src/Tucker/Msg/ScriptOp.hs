@@ -445,17 +445,9 @@ data ScriptType
     | SCRIPT_P2MULTISIG
     | SCRIPT_P2WPKH -- witness program
     | SCRIPT_P2WSH -- witness program
-    | SCRIPT_NONSTD deriving (Show)
-
-instance Eq ScriptType where
-    SCRIPT_P2PKH == SCRIPT_P2PKH = True
-    SCRIPT_P2PK == SCRIPT_P2PK = True
-    SCRIPT_P2SH == SCRIPT_P2SH = True
-    SCRIPT_P2MULTISIG == SCRIPT_P2MULTISIG = True
-    SCRIPT_P2WPKH == SCRIPT_P2WPKH = True
-    SCRIPT_P2WSH == SCRIPT_P2WSH = True
-    SCRIPT_NONSTD == SCRIPT_NONSTD = True
-    _ == _ = False
+    | SCRIPT_DATA
+    | SCRIPT_UNKNOWN_WIT
+    | SCRIPT_NONSTD deriving (Eq, Show)
 
 allPush :: [ScriptOp] -> Bool
 allPush [] = True
@@ -467,14 +459,8 @@ parseVersionByte (OP_CONST n) = if n >= 0 then Just (fi n) else Nothing -- 1 - 1
 parseVersionByte (OP_PUSHDATA dat _) = if BSR.null dat then Just 0 else Nothing -- 0
 parseVersionByte _ = Nothing
 
-parseWitnessProgram :: [ScriptOp] -> Maybe (ByteString)
-parseWitnessProgram [ parseVersionByte -> Just 0, OP_PUSHDATA wit _ ] =
-    if BSR.length wit == 20 ||
-       BSR.length wit == 32 then
-        Just wit
-    else
-        Nothing
-
+parseWitnessProgram :: [ScriptOp] -> Maybe (Word8, ByteString)
+parseWitnessProgram [ parseVersionByte -> Just ver, OP_PUSHDATA wit _ ] = Just (ver, wit)
 parseWitnessProgram _ = Nothing
 
 -- pub key script
@@ -505,14 +491,18 @@ getScriptType
 -- sig_script: OP_0 <signature 1> <signature 2>
 --  pk_script: M <public key 1> <public key 2> ... <public key N> N OP_CHECKMULTISIG
 getScriptType
-    (OP_CONST _ : (reverse -> OP_CHECKMULTISIG:OP_CONST _:(allPush -> True)))
+    (OP_CONST _ : (reverse -> OP_CHECKMULTISIG : OP_CONST _ : (allPush -> True)))
     = SCRIPT_P2MULTISIG
 
-getScriptType (parseWitnessProgram -> Just wit) =
-    case BSR.length wit of
-        20 -> SCRIPT_P2WPKH
-        32 -> SCRIPT_P2WSH
-        _ -> SCRIPT_NONSTD
+getScriptType (parseWitnessProgram -> Just (v, wit)) =
+    if v /= 0 then SCRIPT_UNKNOWN_WIT
+    else
+        case BSR.length wit of
+            20 -> SCRIPT_P2WPKH
+            32 -> SCRIPT_P2WSH
+            _ -> SCRIPT_NONSTD
+
+getScriptType (OP_RETURN : (allPush -> True)) = SCRIPT_DATA
 
 getScriptType _ = SCRIPT_NONSTD
 

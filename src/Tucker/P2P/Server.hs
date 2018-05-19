@@ -138,6 +138,11 @@ defaultHandler env node msg@(MsgHead {
 
                         -- propagate inv to nodes other than the current one
                         envBroadcastActionExcept (/= node) env (A.sendMsgA inv)
+
+                        -- request for more mem pool
+                        when (envConf env tckr_enable_mempool) $ do
+                            envInfo env "broadcasting request for mem pool"
+                            envBroadcastAction env (NormalAction A.requestMemPool)
                 else
                     nodeInfo env node "an unsolicited block received"
 
@@ -183,7 +188,7 @@ defaultHandler env node msg@(MsgHead {
                             Right block -> do
                                 -- send back the block
                                 msg <- encodeMsg conf BTC_CMD_BLOCK $
-                                        encodeBlockPayload (preproc block)
+                                       encodeBlockPayload (preproc block)
                                 tSend trans msg
 
                                 return Nothing
