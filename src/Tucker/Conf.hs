@@ -74,6 +74,9 @@ type Satoshi = Int64
 type FeeRate = Satoshi -- in sat/kb
 type Timestamp = Word32
 
+feeRate :: Integral t => Satoshi -> t -> FeeRate
+feeRate fee bytes = fee * 1000 `div` fromIntegral bytes
+
 data TCKRConf =
     TCKRConf {
         tckr_net_version                :: Integer,
@@ -104,8 +107,6 @@ data TCKRConf =
         tckr_local_server_addr          :: String,
         tckr_local_server_port          :: Word16,
 
-        tckr_max_incoming_conn          :: Int,
-
         tckr_genesis_raw                :: BSR.ByteString, -- genesis hash
 
         tckr_trans_timeout              :: Int, -- in sec
@@ -113,8 +114,9 @@ data TCKRConf =
 
         tckr_min_node                   :: Int,
         tckr_seek_min                   :: Int,
-        tckr_seek_max                   :: Int,
-        tckr_max_node                   :: Int,
+
+        tckr_max_outbound_node          :: Int,
+        tckr_max_inbound_node           :: Int,
 
         tckr_node_blacklist             :: [SockAddr],
 
@@ -165,6 +167,7 @@ data TCKRConf =
         tckr_max_getheaders_batch       :: Int,
 
         tckr_sync_inv_timeout           :: Int, -- in sec
+        tckr_sync_inv_node              :: Double, -- percentage of all nodes to sync from
 
         tckr_coinbase_maturity          :: Int,
 
@@ -205,7 +208,7 @@ data TCKRConf =
         tckr_bip66_height               :: Word, -- strict signature DER encoding
         tckr_bip65_height               :: Word, -- OP_CHECKLOCKTIMEVERIFY
 
-        tckr_min_tx_fee_rate            :: FeeRate,
+        tckr_min_tx_fee_rate            :: FeeRate, -- in sat/kb
 
         tckr_reject_non_std_tx          :: Bool
     } deriving (Show)
@@ -252,7 +255,6 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_listen_addr = "127.0.0.1",
         tckr_listen_port = 8333,
-        tckr_max_incoming_conn = 32,
 
         tckr_local_server_addr = "127.0.0.1", -- only open up to local connections
         tckr_local_server_port = 3150,
@@ -264,9 +266,9 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_min_node = 8, -- minimum number of nodes to function
         tckr_seek_min = 16, -- if node_count < min_seek then seek for more nodes
-        tckr_seek_max = 32, -- if node_count >= max_seek then stop seeking
-
-        tckr_max_node = 48, -- max number of nodes in total
+        
+        tckr_max_outbound_node = 32,
+        tckr_max_inbound_node = 32,
         
         tckr_node_blacklist = [
                 ip4 (127, 0, 0, 1),
@@ -314,6 +316,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_node_max_blacklist_count = 5,
 
         tckr_sync_inv_timeout = 3,
+        tckr_sync_inv_node = 0.2,
 
         tckr_coinbase_maturity = 100,
 
@@ -382,7 +385,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_bip66_height = 363725,
         tckr_bip65_height = 388381,
 
-        tckr_min_tx_fee_rate = 1,
+        tckr_min_tx_fee_rate = 10,
 
         tckr_reject_non_std_tx = True
     }

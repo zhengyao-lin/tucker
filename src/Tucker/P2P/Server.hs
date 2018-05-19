@@ -109,7 +109,7 @@ defaultHandler env node msg@(MsgHead {
                 addrs = net_addrs
             }) -> do
                 nodes <- getA $ node_list env
-                full  <- envNodeFull env
+                full  <- envOutNodeFull env
 
                 new_list <- forM net_addrs netAddrToAddrInfo
                 filted   <- filterProbingList env new_list
@@ -423,7 +423,7 @@ nodeExec env unready_node = do
     -- set default action
     nodePrependActions node nodeDefaultActionList
 
-    full <- envNodeFull env
+    full <- envOutNodeFull env
 
     unless full $ do
         -- officially inserting the node
@@ -528,14 +528,13 @@ server env = do
     let -- main server loop
         loop sock = do
             -- wait until there are spare places for incoming nodes
-            waitUntilIO $
-                (< tckr_max_incoming_conn conf) <$> envCountIncomingNodes env
+            waitUntilIO (not <$> envInNodeFull env)
 
             (conn, addr) <- accept sock
             trans <- tFromSocket conn True
             node <- initNode addr trans
 
-            envInfo env ("incoming node: " ++ show addr)
+            envInfo env ("inbound node: " ++ show addr)
 
             envForkFinally env THREAD_NODE (nodeExec env node) (nodeFinal env node)
 

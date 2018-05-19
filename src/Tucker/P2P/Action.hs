@@ -458,7 +458,7 @@ fetchBlock task env node _ = do
 
 seekNode :: MainLoopEnv -> Node -> MsgHead -> IO [RouterAction]
 seekNode env node _ = do
-    full <- envNodeFull env
+    full <- envOutNodeFull env
 
     unless full $ do
         getaddr <- encodeMsg (global_conf env) BTC_CMD_GETADDR encodeGetaddrPayload

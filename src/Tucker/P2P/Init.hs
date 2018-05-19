@@ -161,7 +161,11 @@ mainLoop conf = runResourceT $ do
         envFork env THREAD_BASE (collector env)
         envFork env THREAD_BASE (server env)
 
-        envFork env THREAD_OTHER $ sync env 3 $
+        all <- length <$> envAliveNodes env
+
+        let sync_n = round (envConf env tckr_sync_inv_node * fi all)
+
+        envFork env THREAD_OTHER $ sync env (max sync_n 1) $
             when_ (envConf env tckr_enable_miner) $ do
                 waitForMemPool env
                 envMsg env "min mem pool size reached"

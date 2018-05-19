@@ -134,7 +134,7 @@ instance Default TransferState where
 data Node =
     Node {
         conn_trans      :: Transport,
-        incoming        :: Bool,
+        inbound         :: Bool,
 
         thread_id       :: ThreadId,
         sock_addr       :: SockAddr,
@@ -295,7 +295,7 @@ initNode sock_addr trans = do
 
     return $ Node {
         conn_trans      = trans,
-        incoming        = isIncoming trans,
+        inbound         = isInbound trans,
 
         thread_id       = error "node tid not ready",
         sock_addr       = sock_addr,
@@ -318,16 +318,8 @@ initNode sock_addr trans = do
         alive           = alive
     }
 
-envCountIncomingNodes :: MainLoopEnv -> IO Int
-envCountIncomingNodes env = do
-    nodes <- getA (node_list env)
-    return (length (filter incoming nodes))
-
 envConf :: MainLoopEnv -> (TCKRConf -> t) -> t
 envConf env field = field $ global_conf env
-
-envAllNode :: MainLoopEnv -> IO [Node]
-envAllNode = getA . node_list
 
 envFork = forkCap . thread_state
 envForkFinally = forkCapFinally . thread_state
@@ -357,7 +349,7 @@ envConnect env addr = do
         -- wait until an empty place is available and retry
         waitUntilIO ((< limit) <$> getA (cur_socket env))
 
-        full <- envNodeFull env
+        full <- envOutNodeFull env
 
         if not full then
             envConnect env addr
@@ -422,9 +414,17 @@ envAliveNodes :: MainLoopEnv -> IO [Node]
 envAliveNodes env =
     getA (node_list env) >>= filterM (getA . alive)
 
-envNodeFull :: MainLoopEnv -> IO Bool
-envNodeFull env =
-    (envConf env tckr_seek_max <=) <$> length <$> envAliveNodes env
+envOutNodeFull :: MainLoopEnv -> IO Bool
+envOutNodeFull env =
+    (envConf env tckr_max_outbound_node <=) <$>
+    length <$> filter (not . inbound) <$>
+    envAliveNodes env
+
+envInNodeFull :: MainLoopEnv -> IO Bool
+envInNodeFull env =
+    (envConf env tckr_max_inbound_node <=) <$>
+    length <$> filter inbound <$>
+    envAliveNodes env
 
 nodeService :: Node -> NodeServiceType
 nodeService = vers_serv . vers_payload

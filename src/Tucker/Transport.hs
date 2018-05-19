@@ -19,10 +19,10 @@ import Tucker.Enc
 data Transport = Transport Bool Handle
 
 getHandle (Transport _ handle) = handle
-isIncoming (Transport incoming _) = incoming
+isInbound (Transport inbound _) = inbound
 
 tFromSocket :: Socket -> Bool -> IO Transport
-tFromSocket sock incoming = Transport incoming <$> socketToHandle sock ReadWriteMode
+tFromSocket sock inbound = Transport inbound <$> socketToHandle sock ReadWriteMode
 
 tSend :: Transport -> ByteString -> IO ()
 tSend = BSR.hPut . getHandle

@@ -1077,7 +1077,7 @@ addPoolTxFail bc@(BlockChain {
             fee >= 0
 
         expectTrue REJECT_INSUFFICIENTFEE "min tx fee not met" $
-            fee >= tckr_min_tx_fee_rate conf
+            feeRate fee (sizeOf tx) >= tckr_min_tx_fee_rate conf
 
         addMemPoolTx tx_state fee tx
 
