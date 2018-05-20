@@ -418,7 +418,7 @@ nodeExec env unready_node = do
     let node = unready_node { thread_id = tid }
     
     -- update after handshake
-    node <- timeoutFailS (timeout_s env) $ handshake env node
+    node <- timeoutFailS (timeout_s env) (handshake env node)
 
     -- set default action
     nodePrependActions node nodeDefaultActionList

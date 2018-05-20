@@ -753,6 +753,25 @@ verifyBlockTxns bc branch height block = do
     begin_time <- msMonoTime
     ver_conf <- genVerifyConf bc branch height (Just block)
 
+    has_wit <-
+        if verify_enable_segwit ver_conf then
+            case getWitnessCommitment conf block of
+                Nothing -> return False
+                Just (com_hash, wit_resv) -> do
+                    let merk = hash256ToBS (witnessMerkleRoot block)
+
+                    expectTrue REJECT_INVALID "witness merkle hash not match" $
+                        doubleSHA256 (merk <> wit_resv) == hash256ToBS com_hash
+                    
+                    return True
+        else
+            return False
+
+    unless has_wit $
+        -- reject blocks having unexpected witness data
+        expectFalse REJECT_INVALID "unexpected witness" $
+            any hasWitness all_txns
+
     -- using cached utxo because any error
     -- in the tx will cause the tx state to roll back
     withCacheUTXO (bc_tx_state bc) $ \tx_state -> do

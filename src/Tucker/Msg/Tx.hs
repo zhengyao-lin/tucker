@@ -121,8 +121,7 @@ instance NFData TxOutput where
 nullTxOutput = TxOutput { value = -1, pk_script = BSR.empty }
 
 -- TxWitness is a list of stack items
-newtype TxWitness =
-    TxWitness [ByteString] deriving (Eq, Show)
+newtype TxWitness = TxWitness [ByteString] deriving (Eq, Show)
 
 instance NFData TxWitness where
     rnf (TxWitness items) = rnf items
@@ -133,7 +132,7 @@ data TxPayload =
         wtxid       :: Hash256,
 
         version     :: Word32,
-        flag        :: Word8, -- currently only 1(contains witness) or 0(nothing)
+        -- flag        :: Word8, -- currently only 1(contains witness) or 0(nothing)
         
         tx_in       :: [TxInput],
         tx_out      :: [TxOutput],
@@ -152,11 +151,10 @@ instance Hashable TxPayload where
     hashWithSalt s t = hashWithSalt s (txid t)
 
 instance NFData TxPayload where
-    rnf (TxPayload txid wtxid version flag tx_in tx_out tx_witness lock_time) =
+    rnf (TxPayload txid wtxid version tx_in tx_out tx_witness lock_time) =
         rnf txid `seq`
         rnf wtxid `seq`
         rnf version `seq`
-        rnf flag `seq`
         rnf tx_in `seq`
         rnf tx_out `seq`
         rnf tx_witness `seq`
@@ -268,7 +266,7 @@ instance Encodable TxPayload where
 
     encodeB end (TxPayload {
         version = version,
-        flag = flag, -- currently only 1 or 0
+        -- flag = flag, -- currently only 1 or 0
         
         tx_in = tx_in,
         tx_out = tx_out,
@@ -279,14 +277,15 @@ instance Encodable TxPayload where
         mconcat [
             e version,
             
-            if flag == 0 then mempty else
-                e (0x00 :: Word8) <>
-                e flag,
+            if null tx_witness then
+                mempty
+            else
+                bcharB 0 <> bcharB 1,
 
             encodeVListB end tx_in,
             encodeVListB end tx_out,
 
-            if flag == 0 then mempty
+            if null tx_witness then mempty
             else encodeB end tx_witness, -- just an ordinary list, not vlist
             
             e lock_time
@@ -303,7 +302,6 @@ instance Decodable TxPayload where
         version <- decoder
 
         mark <- peekByteD
-        
         flag <-
             if mark == 0 then
                 byteD >> byteD
@@ -328,7 +326,6 @@ instance Decodable TxPayload where
             wtxid = nullHash256,
 
             version = version,
-            flag = flag,
 
             tx_in = tx_in,
             tx_out = tx_out,
@@ -342,7 +339,7 @@ instance Decodable TxPayload where
 instance Sizeable TxPayload where
     sizeOf (TxPayload {
         version = version,
-        flag = flag, -- currently only 1 or 0
+        -- flag = flag, -- currently only 1 or 0
         
         tx_in = tx_in,
         tx_out = tx_out,
@@ -351,12 +348,12 @@ instance Sizeable TxPayload where
         lock_time = lock_time
     }) =
         sizeOf version +
-        (if flag == 1 then 2 else 0) +
+        (if null tx_witness then 0 else 2) +
         sizeOf (VInt (fi (length tx_in))) +
         sizeOf tx_in +
         sizeOf (VInt (fi (length tx_out))) +
         sizeOf tx_out +
-        (if flag == 1 then sizeOf tx_witness else 0) +
+        sizeOf tx_witness +
         sizeOf lock_time
 
 -- tx with only 1 input with block hash 0 and n -1
@@ -406,6 +403,9 @@ getWitness tx in_idx =
         Just (tx_witness tx !! in_idx)
     else
         Nothing
+
+hasWitness :: TxPayload -> Bool
+hasWitness = not . null . tx_witness
 
 -- update on Jan 14, 2018
 -- there are(maybe) 5 standard transactions
@@ -468,7 +468,6 @@ stripWitness :: TxPayload -> TxPayload
 stripWitness tx =
     tx {
         -- wtxid = txid tx,
-        flag = 0,
         tx_witness = []
     }
 

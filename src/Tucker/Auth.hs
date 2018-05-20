@@ -136,9 +136,6 @@ base58decCheck enc = do
     else
         Left $ TCKRError "base58dec check failed"
 
-type WIF = String
-type Address = String
-
 -- enc/dec of pub/sig
 -- priv -> pub
 -- priv -> wif
@@ -163,6 +160,8 @@ type Address = String
 -- exportPub Pub -> ByteString
 -- importPub ByteString -> Maybe Pub
 
+type WIF = String
+
 privToWIF :: TCKRConf -> ECCPrivateKey -> WIF
 privToWIF conf priv =
     let priv_raw = encodeBE priv
@@ -182,24 +181,7 @@ wifToPriv conf wif = do
         --     Just priv -> Right priv
         --     Nothing -> Left "illegal private key format"
 
-pubToAddr :: TCKRConf -> ECCPublicKey -> Address
-pubToAddr conf pub =
-    BS.unpack $ base58encCheck pub_hash
-    where
-        pub_raw = encodeBE pub
-                            -- main TCKRConf byte
-        pub_hash = BSR.cons (tckr_addr_pref conf) $ ripemd160 $ sha256 pub_raw
-
-addrToPubHash :: TCKRConf -> Address -> Either TCKRError ByteString
-addrToPubHash conf addr = do
-    pub_hash_raw <- base58decCheck $ BS.pack addr
-
-    if BSR.head pub_hash_raw /= tckr_addr_pref conf then
-        Left $ TCKRError "illegal address"
-    else
-        return (BSR.drop 1 pub_hash_raw)
-
--- gen :: TCKRConf -> IO (WIF, Address)
+-- gen :: TCKRConf -> IO (WIF, String)
 -- gen conf = do
 --     (pub, priv) <- genRaw
 

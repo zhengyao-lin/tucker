@@ -1,6 +1,7 @@
 module Tucker.State.Mining where
 
 import Data.Word
+import qualified Data.Foldable as FD
 import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
@@ -16,6 +17,8 @@ import Tucker.State.Tx
 import Tucker.State.Block
 import Tucker.State.Chain
 import Tucker.State.SoftFork
+
+import Tucker.Wallet.Address
 
 {-
 
@@ -42,25 +45,44 @@ data CoinbaseInfo =
         cb_msg :: String
     }
 
+witnessReserved :: TCKRConf -> ByteString    
+witnessReserved conf = nullHash256BS
+
+witnessCommitment :: TCKRConf -> Block -> TxOutput
+witnessCommitment conf block =
+    TxOutput {
+        value = 0,
+        pk_script = encodeLE [
+            OP_RETURN,
+            OP_PUSHDATA (com_header <> com_hash) Nothing
+        ]
+    }
+    where
+        com_header = tckr_wit_commit_header conf
+        com_hash =
+            doubleSHA256 (hash256ToBS (witnessMerkleRoot block) <> witnessReserved conf)
+
 -- config, coinbase msg, receiver address, generated value
-coinbaseP2PKH :: TCKRConf -> CoinbaseInfo -> Address -> Satoshi -> TxPayload
-coinbaseP2PKH conf info addr fee =
-    updateIds $ TxPayload {
+coinbaseP2PKH :: TCKRConf -> Block -> CoinbaseInfo -> String -> Satoshi -> TxPayload
+coinbaseP2PKH conf block info addr fee =
+    let segwit = any hasWitness (FD.toList (txns block)) in
+
+    updateIds TxPayload {
         txid = undefined,
         wtxid = undefined,
 
         version = 0,
-        flag = 0,
+        
         tx_in = [
             TxInput {
                 prev_out = OutPoint nullHash256 maxBound,
-                sig_script = encodeLE ([
+                sig_script = encodeLE [
                     -- first item is the block height
                     OP_INT (fi (cb_height info)),
                     OP_INT (fi (cb_time info)),
                     OP_INT (fi (cb_nonce info)),
                     OP_PUSHDATA (BS.pack (cb_msg info)) Nothing
-                ]),
+                ],
                 seqn = maxBound
             }
         ],
@@ -68,11 +90,16 @@ coinbaseP2PKH conf info addr fee =
         tx_out = [
             TxOutput {
                 value = fee,
-                pk_script = encodeLE (stdPkScriptP2PKH conf addr)
+                pk_script = encodeLE (genPubKeyScript (decodeAddressFail conf addr))
             }
-        ],
+        ] ++ if segwit then [witnessCommitment conf block] else [],
 
-        tx_witness = [],
+        tx_witness =
+            if segwit then
+                [ TxWitness [ witnessReserved conf ] ]
+            else
+                [],
+
         lock_time = 0
     }
 
@@ -82,13 +109,15 @@ nextVersion bc = do
     forks <- lookupNonFinalForks (bc_fork_state bc)
     return (genDeployVersion (map fork_bit forks))
 
-nextBlock :: BlockChain -> String -> Address -> Word64 -> IO Block
+nextBlock :: BlockChain -> String -> String -> Word64 -> IO Block
 nextBlock bc@(BlockChain {
     bc_conf = conf,
     bc_tx_state = tx_state,
     bc_chain = chain
 }) msg addr extra_nonce = do
     now <- unixTimestamp
+
+    base <- nextEmptyBlock bc
 
     let main = mainBranch chain
         next_height = cur_height main + 1
@@ -101,9 +130,9 @@ nextBlock bc@(BlockChain {
                 cb_msg = msg
             }
 
-        tmp_coinbase = coinbaseP2PKH conf info addr 0
+        tmp_coinbase = coinbaseP2PKH conf base info addr 0
     
-    base <- appendTx tmp_coinbase <$> nextEmptyBlock bc
+    base <- return (appendTx tmp_coinbase base)
 
     -- adding txns
     -- sort txns by fees first
@@ -130,7 +159,7 @@ nextBlock bc@(BlockChain {
     (block, tx_fee) <- foldM fold_proc (base, 0) sorted
 
     let tot_fee = gen_fee + tx_fee
-        coinbase = coinbaseP2PKH conf info addr tot_fee
+        coinbase = coinbaseP2PKH conf block info addr tot_fee -- update new tx info
 
     tLnM (show (length (txns block)) ++ " txns included")
 

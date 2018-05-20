@@ -443,8 +443,8 @@ data ScriptType
     | SCRIPT_P2PK
     | SCRIPT_P2SH
     | SCRIPT_P2MULTISIG
-    | SCRIPT_P2WPKH -- witness program
-    | SCRIPT_P2WSH -- witness program
+    | SCRIPT_P2WPKH -- naive P2WPKH
+    | SCRIPT_P2WSH -- naive P2WSH
     | SCRIPT_DATA
     | SCRIPT_UNKNOWN_WIT
     | SCRIPT_NONSTD deriving (Eq, Show)
@@ -505,11 +505,3 @@ getScriptType (parseWitnessProgram -> Just (v, wit)) =
 getScriptType (OP_RETURN : (allPush -> True)) = SCRIPT_DATA
 
 getScriptType _ = SCRIPT_NONSTD
-
-stdPkScriptP2PKH :: TCKRConf -> Address -> [ScriptOp]
-stdPkScriptP2PKH conf addr =
-    [
-        OP_DUP, OP_HASH160,
-        OP_PUSHDATA (either (error . show) id (addrToPubHash conf addr)) Nothing,
-        OP_EQUALVERIFY, OP_CHECKSIG
-    ]

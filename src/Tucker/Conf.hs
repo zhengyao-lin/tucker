@@ -99,7 +99,8 @@ data TCKRConf =
         tckr_user_agent                 :: String,
 
         tckr_wif_pref                   :: Word8,
-        tckr_addr_pref                  :: Word8,
+        tckr_p2pkh_addr_pref            :: Word8,
+        tckr_p2sh_addr_pref             :: Word8,
         tckr_magic_no                   :: BSR.ByteString,
         tckr_listen_addr                :: String, 
         tckr_listen_port                :: Word16,
@@ -210,7 +211,8 @@ data TCKRConf =
 
         tckr_min_tx_fee_rate            :: FeeRate, -- in sat/kb
 
-        tckr_reject_non_std_tx          :: Bool
+        tckr_reject_non_std_tx          :: Bool,
+        tckr_wit_commit_header          :: BSR.ByteString
     } deriving (Show)
 
 tucker_version = "0.0.1"
@@ -250,7 +252,8 @@ tucker_default_conf_mainnet mpath = do
         tckr_user_agent = "/Tucker:" ++ tucker_version ++ "/",
 
         tckr_wif_pref = 0x80,
-        tckr_addr_pref = 0x00,
+        tckr_p2pkh_addr_pref = 0x00,
+        tckr_p2sh_addr_pref = 0x05,
         tckr_magic_no = BSR.pack [ 0xf9, 0xbe, 0xb4, 0xd9 ],
 
         tckr_listen_addr = "127.0.0.1",
@@ -387,7 +390,8 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_min_tx_fee_rate = 10,
 
-        tckr_reject_non_std_tx = True
+        tckr_reject_non_std_tx = True,
+        tckr_wit_commit_header = BSR.pack [ 0xaa, 0x21, 0xa9, 0xed ]
     }
 
     where
@@ -397,7 +401,8 @@ tucker_default_conf_testnet3 mpath = do
     conf <- tucker_default_conf_mainnet mpath
     return $ conf {
         tckr_wif_pref = 0xef,
-        tckr_addr_pref = 0x6f,
+        tckr_p2pkh_addr_pref = 0x6f,
+        tckr_p2sh_addr_pref = 0xc4,
         tckr_magic_no = BSR.pack [ 0x0b, 0x11, 0x09, 0x07 ],
         tckr_listen_port = 18333,
 
@@ -440,6 +445,8 @@ tucker_default_conf_testnet3 mpath = do
         tckr_bip65_height = 581885,
 
         tckr_reject_non_std_tx = False,
+
+        tckr_min_tx_fee_rate = 0,
 
         tckr_block_assumed_valid = Nothing
             -- Just (300000, "000000000000226f7618566e70a2b5e020e29579b46743f05348427239bf41a1")

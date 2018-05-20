@@ -32,7 +32,7 @@ instance Encodable ECCPublicKey where
 
 instance Decodable ECCPublicKey where
     decoder = do
-        compressed <- (not . (`elem` [ 0x04, 0x06, 0x07 ])) <$> peekByteD
+        compressed <- (`notElem` [ 0x04, 0x06, 0x07 ]) <$> peekByteD
         res <- importPubKey <$> allD
 
         case res of

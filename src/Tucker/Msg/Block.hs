@@ -10,6 +10,8 @@ import qualified Data.Foldable as FD
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Builder as BSB
 
+import Control.Monad
+
 import Tucker.Enc
 import Tucker.Auth
 import Tucker.Conf
@@ -20,6 +22,7 @@ import Tucker.Msg.Tx
 import Tucker.Msg.Inv
 import Tucker.Msg.Common
 import Tucker.Msg.Hash256
+import Tucker.Msg.ScriptOp
 
 type Difficulty = Double
 -- height starts from 0(genesis)
@@ -362,6 +365,16 @@ merkleRoot (Block {
     txns = txns
 }) = head (merkleRoot' (map txid (FD.toList txns)))
 
+witnessMerkleRoot :: Block -> Hash256
+witnessMerkleRoot (Block {
+    txns = txns'
+}) = head (merkleRoot' wtxids)
+    where txns = FD.toList txns'
+          wtxids =
+            if null txns then []
+            else
+                nullHash256 : map wtxid (tail txns)
+
 clearEncCache :: Block -> Block
 clearEncCache block =
     block {
@@ -412,3 +425,30 @@ blockWeight block =
 
 encodeBlockPayload :: Block -> IO ByteString
 encodeBlockPayload = return . encodeLE
+
+-- (commitment hash, reserved value)
+getWitnessCommitment :: TCKRConf -> Block -> Maybe (Hash256, ByteString)
+getWitnessCommitment conf block =
+    if null all_txns || null outputs then Nothing
+    else do
+        wit_resv <- (\(TxWitness (w:_)) -> w) <$> getWitness coinbase 0
+        com_hash <- firstMaybe (map extract (reverse outputs))
+
+        return (com_hash, wit_resv)
+
+    where
+        all_txns = FD.toList (txns block)
+        coinbase = head all_txns
+        outputs = tx_out coinbase
+        header = tckr_wit_commit_header conf
+
+        extract out =
+            case decodeAllLE (pk_script out) of
+                Right [ OP_RETURN, OP_PUSHDATA dat _ ] ->
+                    if header `BSR.isPrefixOf` dat then
+                        case decodeAllLE (BSR.drop (BSR.length header) dat) of
+                            Right hash -> Just hash
+                            _ -> Nothing
+                    else
+                        Nothing
+                _ -> Nothing

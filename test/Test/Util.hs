@@ -32,7 +32,6 @@ genCoinbase value =
         wtxid = 0,
 
         version = 0,
-        flag = 0,
         
         tx_in = [ TxInput (OutPoint 0 (-1)) BSR.empty (-1) ],
         tx_out = [], -- no output
