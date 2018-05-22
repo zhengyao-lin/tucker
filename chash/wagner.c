@@ -1,261 +1,254 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common.h"
 #include "wagner.h"
 
-// generalized wagner's algorithm using buckets
-// n - number of bits in each string
-// k - we want to find 2^k strings that xor to zero, also the number of round - 1
-// L - N strings each n bit long
-// b - bucket index size(8 bit in default), must be less than n / (k + 1)
+// #define FINAL_STAGE (WAGNER_TOTAL_STAGE - 1) // the last collection stage
+#define FINAL_STAGE WAGNER_TOTAL_STAGE
 
-// on each round, we only focus on n / (k + 1) bits in a subset A
-// 1. put all strings in A to a bucket with last b bits of the string as the index
-// 2. in each bucket, sort the string by the first 12 bits
-// 3. in each bucket produce a list of pairs (i, j) such that Ai == Aj in the current range
-// 4. combine pairs produced in each bucket
-// 5. write the final result of xor of each pair to a new subset A'
-// 6. repeat the steps in the next round with A'
-
-#define STR_AT(list, i) ((list) + (i) * (WAGNER_N / 8))
-#define FINAL_STAGE WAGNER_K
-
-// ONLY bits in the range [i, j) in dst are VALID
-void xor_bits(const byte_t *a, const byte_t *b, byte_t *dst, int i, int j)
+void bucket_add(wagner_bucket_t *bucket, index_t idx)
 {
-    int m = i / 8, // first byte
-        n = j / 8; // last byte
-
-    for (; m <= n; m++) {
-        dst[m] = a[m] ^ b[m];
-    }
+    bucket->buck[bucket->size++] = idx;
 }
 
-// [i, j)
-int compare_bits(const byte_t *a, const byte_t *b, int i, int j)
+// mask bits from i to j in a string
+// precond j - i <= 32
+uint32_t mask_bits(byte_t *str, int i, int j)
 {
-    int k, ei = i % 8, ej = j % 8;
-    int m = k = i / 8, // first byte
-        n = j / 8; // last byte
+    int ei = i % 8,
+        ej = j % 8;
 
-    byte_t ca, cb;
+    int k, base = 0;
+    int m = k = i / 8,
+        n = (j + 7) / 8 - 1;
+
+    uint32_t ret = 0;
 
     for (; m <= n; m++) {
         if (m == k) {
-            ca = a[m] >> ei;
-            cb = b[m] >> ei;
-        } else if (m == n) {
-            // trim useless bits in the last byte
-            ca = a[m] << (8 - ej);
-            cb = b[m] << (8 - ej);
+            // first byte
+            if (m == n) {
+                ret |= (str[m] >> ei) & ~(~0 << (j - i));
+            } else {
+                ret |= str[m] >> ei;
+                base += 8 - ei;
+            }
+        } else if (m == n && ej) {
+            // last byte
+            ret |= ((uint32_t)str[m] & (~(~0 << ej))) << base;
         } else {
-            // no trim in a middle byte
-            ca = a[m];
-            cb = b[m];
+            ret |= (uint32_t)str[m] << base;
+            base += 8;
         }
-
-        // printf("comparing %d %d %d %d byte\n", m, n, ca, cb);
-
-        if (ca > cb) return 1;
-        if (ca < cb) return -1;
     }
 
-    return 0;
+    return ret;
 }
 
-void swap(index_t *result, int m, int n)
+uint32_t mask_bucket_bits(byte_t *str, int i, int j)
 {
-    int tmp = result[m];
-    result[m] = result[n];
-    result[n] = tmp;
+    return mask_bits(str, j - WAGNER_BUCKET_BITS, j);
 }
 
-int partition(byte_t *list, index_t *index, index_t size, int i, int j)
+uint32_t mask_sort_bits(byte_t *str, int i, int j)
 {
-    byte_t *pivot = STR_AT(list, index[0]);
-    int m = -1, n = size;
-
-    while (1) {
-        do m++;
-        while (compare_bits(STR_AT(list, index[m]), pivot, i, j) < 0);
-
-        do n--;
-        while (compare_bits(STR_AT(list, index[n]), pivot, i, j) > 0);
-
-        if (m >= n) return n;
-
-        swap(index, m, n);
-    }
+    return mask_bits(str, i, j - WAGNER_BUCKET_BITS);
 }
 
-void sort_list_c(byte_t *list, index_t *result, index_t size, int i, int j)
+// add a new pair to pair set
+index_t append_pair(wagner_state_t *state, wagner_pair_set_t *set, index_t a, index_t b)
 {
-    int p;
+    index_t idx = set->size;
 
-    // printf("size: %d\n", size);
-
-    if (size <= 1) return;
-
-    p = partition(list, result, size, i, j);
-
-    // printf("size: %d %d %d %d\n", size, p, p + 1, size - p - 1);
-
-    if ((int)size < 0)
-        *((int *)0) = 1;
-
-    sort_list_c(list, result, p + 1, i, j);
-    sort_list_c(list, result + p + 1, size - (p + 1), i, j);
-}
-
-// sort list by the bits in range[i, j]
-void sort_list(byte_t *list, index_t *index, index_t size, int i, int j)
-{
-    int k;
-
-    // printf("size: %u %d %d\n", size, i, j);
-
-    // init result list
-    for (k = 0; k < size; k++) {
-        index[k] = k;
-    }
-
-    sort_list_c(list, index, size, i, j);
-}
-
-size_t mem_pair_set(int nstr)
-{
-    return nstr * sizeof(wagner_pair_t) + sizeof(index_t) /* size field */;
-}
-
-// storage for one list
-size_t mem_list(int nstr)
-{
-    return nstr * (WAGNER_N / 8);
-}
-
-size_t mem_total(int nstr)
-{
-    return
-        mem_pair_set(nstr) * WAGNER_K +
-        mem_list(nstr) * 2 + // storage for the list
-        nstr * sizeof(index_t); // index list
-}
-
-wagner_pair_set_t *pair_set_at_stage(wagner_state_t *state, int stage)
-{
-    return state->ctx + stage * mem_pair_set(state->init_nstr);
-}
-
-byte_t *list_at_stage(wagner_state_t *state, int stage)
-{
-    byte_t *base = state->ctx + WAGNER_K * mem_pair_set(state->init_nstr);
-
-    if (stage & 1) {
-        return base + mem_list(state->init_nstr);
-    } else {
-        return base;
-    }
-}
-
-index_t *index_list(wagner_state_t *state)
-{
-    return state->ctx +
-           mem_pair_set(state->init_nstr) * WAGNER_K +
-           mem_list(state->init_nstr) * 2;
-}
-
-bool append_pair(wagner_state_t *state, wagner_pair_set_t *set, index_t a, index_t b)
-{
     if (set->size < state->init_nstr) {
-        set->pair[set->size] = (wagner_pair_t){ a, b };
-        set->size++;
+        set->pairs[set->size++] = (wagner_pair_t){ a, b };
+    }
 
-        return true;
-    } else {
-        return false;
+    return idx;
+}
+
+// ONLY bits in the range [i, j) in dst are VALID
+void xor_all(const byte_t *a, const byte_t *b, byte_t *dst, int size)
+{
+    int i;
+
+    for (i = 0; i < size; i++) {
+        dst[i] = a[i] ^ b[i];
     }
 }
 
 bool has_dup(wagner_pair_t a, wagner_pair_t b)
 {
     // return false;
-    return a.i == b.i || a.j == b.j; // || a.i == b.j || a.j == b.i;
+    return a.i == b.i || a.j == b.j || a.i == b.j || a.j == b.i;
 }
 
-void wagner_transform(wagner_state_t *state)
+// append a new pair to the pair set,
+// then xor a, b in the current list and put the result to the next list
+index_t collide(wagner_state_t *state, index_t ai, index_t bi)
 {
-    // sort list
-    // linear scan and find common interesting bits(first WAGNER_BITS bits in each string in the list)
-    
     int stage = state->stage;
 
     wagner_pair_set_t *pair_set = pair_set_at_stage(state, stage);
     wagner_pair_set_t *prev_set;
-
     byte_t *cur_list = list_at_stage(state, stage);
     byte_t *next_list = list_at_stage(state, stage + 1);
-    index_t *index = index_list(state);
 
-    int i = WAGNER_BITS * stage,
-        j = i + WAGNER_BITS;
+    index_t idx;
 
-    int m, n, k, t;
+    byte_t *a = string_at(cur_list, stage, ai),
+           *b = string_at(cur_list, stage, bi),
+           *dst;
 
-    byte_t *tmp, *dst;
+    byte_t c[WAGNER_LEN_AT_STAGE(stage)];
 
-    index_t cur_nstr = state->cur_nstr;
+    int j = WAGNER_J_AT_STAGE(stage);
 
-    printf("stage: %d\n", stage);
+    int diff;
 
-    // sort the previous list
-    // final index remappings are stored in index
-    sort_list(cur_list, index, cur_nstr, i, j);
+    // check duplication
+    if (stage != 0) {
+        prev_set = pair_set_at_stage(state, stage - 1);
 
-    printf("sorted\n");
+        if (has_dup(prev_set->pairs[ai], prev_set->pairs[bi])) {
+            return -1;
+        }
+    }
 
-    pair_set->size = 0;
-    
-    // find collisions
-    for (m = 0; m < cur_nstr; m = n) {
-        tmp = STR_AT(cur_list, index[m]);
+    // only accept pairs with 2 * WAGNER_BITS bits equal
+    // in the last stage
+    idx = append_pair(state, pair_set, ai, bi);
 
-        for (n = m + 1;
-             n < cur_nstr &&
-             compare_bits(tmp, STR_AT(cur_list, index[n]), i, j) == 0;
-             n++)
-            if (stage == FINAL_STAGE) {
-                // FINAL STAGE: if found, directly return
-                append_pair(state, pair_set, index[m], index[n]);
-                return;
-            }
+    if (idx < state->init_nstr) {
+        xor_all(a, b, c, WAGNER_LEN_AT_STAGE(stage));
+
+        diff = WAGNER_LEN_AT_STAGE(stage) - WAGNER_LEN_AT_STAGE(stage + 1);
+        dst = string_at(next_list, stage + 1, idx);
         
-        // strings in the range [m, n) have the common interesting bits
+        memcpy(dst, c + diff, WAGNER_LEN_AT_STAGE(stage + 1));
 
-        for (k = m; k < n; k++) {
-            for (t = k + 1; t < n; t++) {
-                // check for duplicates
-                if (stage != 0) {
-                    prev_set = pair_set_at_stage(state, stage - 1);
-                    if (has_dup(prev_set->pair[index[k]], prev_set->pair[index[t]]))
-                        continue;
+        return idx;
+    }
+
+    return -1;
+}
+
+void wagner_transform(wagner_state_t *state)
+{
+    int stage = state->stage;
+    int nstr = state->nstr;
+
+    wagner_pair_set_t *pair_set = pair_set_at_stage(state, stage);
+    // wagner_pair_set_t *prev_set;
+
+    wagner_bucket_t *cur_buck;
+    wagner_hash_table_t *hashtab = state->hashtab;
+    wagner_entry_t *entry;
+
+    byte_t *cur_list = list_at_stage(state, stage);
+    byte_t *tmp;
+
+    uint32_t tmp_idx, idx, cur_idx;
+
+    int i = WAGNER_I_AT_STAGE(stage),
+        j = WAGNER_J_AT_STAGE(stage),
+        k = j - WAGNER_BUCKET_BITS;
+
+    int count;
+
+    // for each string in the current stage
+    // bits i -> k are the sort bits
+    // bits k -> j are the bucket bits
+
+    int m, n, start, end;
+
+    printf("stage: %d, %d bytes per string: %d, %d, %d\n", stage, nstr, WAGNER_LEN_AT_STAGE(stage), i, j);
+    printf("cur list: %p\n", cur_list);
+
+    // init buckets
+    for (m = 0; m < WAGNER_BUCKET; m++) {
+        state->bucks[m]->size = 0;
+    }
+
+    // init pair set
+    pair_set->size = 0;
+
+    // linear scan to sort all strings to buckets
+    for (m = 0; m < nstr; m++) {
+        tmp = string_at(cur_list, stage, m);
+        // 0x5576ec4
+        bucket_add(state->bucks[mask_bucket_bits(tmp, i, j)], m);
+    }
+
+    // printf("bucket sorted\n");
+
+    for (m = 0; m < WAGNER_BUCKET; m++) {
+        cur_buck = state->bucks[m];
+
+        // init hash table
+        bzero(hashtab, sizeof(*hashtab));
+
+        // printf("bucket size: %d\n", cur_buck->size);
+
+        for (n = 0; n < cur_buck->size; n++) {
+            cur_idx = cur_buck->buck[n];
+
+            tmp = string_at(cur_list, stage, cur_idx);
+
+            entry = &hashtab->tab[mask_sort_bits(tmp, i, j)];
+
+            if (entry->count == 0) {
+                // add pair
+                entry->count++;
+                entry->where = cur_idx;
+            } else if (entry->count == 1) {
+                // add pair (entry->where, cur_buck->buck[n])
+                idx = collide(state, entry->where, cur_idx);
+
+                if (idx != -1) {
+                    // write result to the next string list
+                    entry->count++;
+                    entry->where = idx;
+                }
+            } else {
+                // add multiple pairs
+               
+                // we have, from entry->where, entry->count - 1 pairs
+                // (a, k), (b, k), (c, k) ... (a + count - 1, k)
+                // we pair (a, b, c .. a + count - 1, k) each with the current index(cur_buck->buck[n])
+
+                start = entry->where;
+                end = start + entry->count - 2;
+
+                count = 0;
+                idx = -1;
+
+                #define PAIR_WITH(a) \
+                    tmp_idx = collide(state, (a), cur_idx); \
+                    if (tmp_idx != -1) { \
+                        if (idx == -1) idx = tmp_idx; \
+                        count++; \
+                    }
+
+                // iterate though each previous pair
+                for (; start <= end; start++) {
+                    PAIR_WITH(pair_set->pairs[start].i);
                 }
 
-                // add k - t, pair
-                if (append_pair(state, pair_set, index[k], index[t])) {
-                    // printf("found pair\n");
+                // add the last pair
+                PAIR_WITH(pair_set->pairs[end].j);
 
-                    // generate a new string in the next list
-                    dst = STR_AT(next_list, pair_set->size - 1);
-
-                    // xor bits in [i, N)
-                    xor_bits(STR_AT(cur_list, index[k]), STR_AT(cur_list, index[t]), dst, i, WAGNER_N);
-                } // if not, ignore the pair
+                if (idx != -1) {
+                    entry->count = count + 1;
+                    entry->where = idx;
+                }
             }
         }
     }
 
     // prepare for the next state
-    state->cur_nstr = pair_set->size;
+    state->nstr = pair_set->size;
     state->stage++;
 }
 
@@ -275,11 +268,10 @@ int wagner_trace_solution(wagner_state_t *state, wagner_pair_t from,
         prev = pair_set_at_stage(state, stage - 1);
 
         // traverse left child
-        new_size = wagner_trace_solution(state, prev->pair[from.i], stage - 1, cur_size, sol);
+        new_size = wagner_trace_solution(state, prev->pairs[from.i], stage - 1, cur_size, sol);
 
-        if (stage != FINAL_STAGE)
-            // traverse right child if it's not the final stage
-            new_size = wagner_trace_solution(state, prev->pair[from.j], stage - 1, new_size, sol);
+        // traverse right child
+        new_size = wagner_trace_solution(state, prev->pairs[from.j], stage - 1, new_size, sol);
     }
 
     return new_size;
@@ -287,11 +279,33 @@ int wagner_trace_solution(wagner_state_t *state, wagner_pair_t from,
 
 bool wagner_finalize(wagner_state_t *state, index_t *sol)
 {
-    wagner_pair_set_t *pair_set = pair_set_at_stage(state, FINAL_STAGE);
+    byte_t *last_list = list_at_stage(state, FINAL_STAGE);
+    byte_t *tmp;
 
-    if (pair_set->size) {
+    int nstr = state->nstr;
+    int m, n;
+
+    bool found = false;
+
+    // find any pair that yields zero
+    for (m = 0; m < nstr; m++) {
+        tmp = string_at(last_list, FINAL_STAGE, m);
+        found = true;
+
+        for (n = 0; n < WAGNER_LEN_AT_STAGE(FINAL_STAGE); n++) {
+            if (tmp[n]) found = false;
+        }
+
+        if (found) break;
+    }
+
+    printf("found: %d\n", found);
+
+    wagner_pair_set_t *prev_set = pair_set_at_stage(state, FINAL_STAGE - 1);
+
+    if (found) {
         // trace the tree
-        wagner_trace_solution(state, pair_set->pair[0], FINAL_STAGE, 0, sol);
+        wagner_trace_solution(state, prev_set->pairs[m], FINAL_STAGE - 1, 0, sol);
         return true;
     } else {
         return false;
@@ -304,25 +318,38 @@ bool wagner_finalize(wagner_state_t *state, index_t *sol)
 // max mem needed = 1 unit * WAGNER_K + 1 unit for storage of the list
 bool wagner_solve(const byte_t *init_list, int nstr, index_t *sol)
 {
+    wagner_hash_table_t hashtab;
     wagner_state_t state = {
-        .ctx = malloc(mem_total(nstr)),
-        .cur_nstr = nstr,
+        .ctx = NULL,
+        .hashtab = &hashtab,
+        .nstr = nstr,
         .init_nstr = nstr,
         .stage = 0
     };
 
     int i;
     bool found;
+    size_t size = sizeof_ctx(&state);
 
-    printf("allocating %lu bytes\n", mem_total(nstr));
+    printf("allocating %lu bytes\n", size);
 
-    memcpy(list_at_stage(&state, 0), init_list, mem_list(nstr));
+    state.ctx = malloc(size);
 
-    for (i = 0; i <= WAGNER_K; i++) {
+    memcpy(list_at_stage(&state, 0), init_list, nstr * WAGNER_LEN_AT_STAGE(0));
+
+    for (i = 0; i < WAGNER_BUCKET; i++) {
+        state.bucks[i] = malloc(sizeof_bucket(nstr));
+    }
+
+    for (i = 0; i < WAGNER_TOTAL_STAGE; i++) {
         wagner_transform(&state);
     }
 
     found = wagner_finalize(&state, sol);
+
+    for (i = 0; i < WAGNER_BUCKET; i++) {
+        free(state.bucks[i]);
+    }
 
     free(state.ctx);
 

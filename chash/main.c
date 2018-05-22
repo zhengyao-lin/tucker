@@ -25,13 +25,20 @@ int main()
 
     // do_mine(raw, sizeof(raw) - 1, target, 4);
 
-    #define N 2965504
+    // printf("%d\n", mask_bits("\x58\x7d\x42", 12, 20));
+    // printf("%d\n", mask_bits("\x58\x7d\x82", 12, 20));
+    // return 0;
 
-    // printf("result: %d\n", compare_bits("abd", "abc", 8, 19));
+    // printf("%lu\n", sizeof_ctx(2097125));
+
+    #define N 2965504
+    // #define N 10000
+
+    // printf("result: %d\n", compare_bits("abd", "abc", 0));
     // return 0;
 
     hash256_t *test_hash = malloc(N * sizeof(*test_hash));
-    char dat[10] = "abcsad";
+    char dat[10] = "fgdsad";
     int *hash_idx = (int *)(dat + 6);
 
     byte_t *list = malloc(WAGNER_N / 8 * N);
@@ -54,17 +61,16 @@ int main()
         for (int i = 0; i < (1 << WAGNER_K); i++) {
             str = list + sol[i] * (WAGNER_N / 8);
 
-            printf("%d: ", i);
+            printf("%3.d: %7.d: ", i, sol[i]);
 
             for (int j = 0; j < WAGNER_N / 8; j++) {
                 print_byte(str[j]);
             }
 
-            if (i == 1) {
-                prev = list + sol[i - 1] * (WAGNER_N / 8);
-                xor_bits(prev, str, res, 0, WAGNER_N);
-            } else if (i > 0) {
-                xor_bits(res, str, res, 0, WAGNER_N);
+            if (i == 0) {
+                memcpy(res, str, WAGNER_N / 8);
+            } else {
+                xor_all(res, str, res, WAGNER_N / 8);
             }
 
             printf("\n");
