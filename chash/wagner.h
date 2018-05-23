@@ -6,6 +6,7 @@
 #define WAGNER_N 200
 #define WAGNER_K 9
 
+#define WAGNER_N_BYTE (WAGNER_N / 8)
 #define WAGNER_BITS (WAGNER_N / (WAGNER_K + 1)) // bits per stage
 #define WAGNER_BUCKET_BITS 8
 #define WAGNER_SORT_BITS (WAGNER_BITS - WAGNER_BUCKET_BITS)
@@ -14,6 +15,8 @@
 // [ bucket bits ] [ sort bits ]
 
 #define WAGNER_BUCKET (1 << WAGNER_BUCKET_BITS)
+
+#define WAGNER_SOLUTION (1 << WAGNER_K)
 
 #define WAGNER_TOTAL_STAGE WAGNER_K
 #define WAGNER_TOTAL_CHUNK (WAGNER_K + 1)
@@ -71,6 +74,6 @@ typedef struct {
     int nstr;
 } wagner_state_t;
 
-bool wagner_solve(const byte_t *init_list, int nstr, index_t *sol);
+int wagner_solve(const byte_t *init_list, index_t *sols, int max_sol);
 
 #endif

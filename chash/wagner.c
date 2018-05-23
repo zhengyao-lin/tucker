@@ -176,16 +176,6 @@ index_t append_pair(wagner_state_t *state, wagner_pair_set_t *set, index_t a, in
     }
 }
 
-// ONLY bits in the range [i, j) in dst are VALID
-void xor_string(const byte_t *a, const byte_t *b, byte_t *dst, int size)
-{
-    int i;
-
-    for (i = 0; i < size; i++) {
-        dst[i] = a[i] ^ b[i];
-    }
-}
-
 inline static
 void xor_chunks(const wagner_chunk_t *a,
                 const wagner_chunk_t *b,
@@ -398,54 +388,43 @@ int wagner_trace_solution(wagner_state_t *state, wagner_pair_t from,
     return new_size;
 }
 
-bool wagner_finalize(wagner_state_t *state, index_t *sol)
+int wagner_finalize(wagner_state_t *state, index_t *sols, int max_sol)
 {
     wagner_chunk_t *last_list = list_at_stage(state, FINAL_STAGE);
     wagner_chunk_t *tmp;
 
     int nstr = state->nstr;
-    int m, n;
-
-    int found = 0;
-
-    // find any pair that yields zero
-    for (m = 0; m < nstr; m++) {
-        tmp = string_at(last_list, FINAL_STAGE, m);
-        if (tmp[0] == 0) {
-            found++;
-            n = m;
-        }
-    }
-
-    printf("found: %d %d\n", found, n);
+    int i, found = 0;
 
     wagner_pair_set_t *prev_set = pair_set_at_stage(state, FINAL_STAGE - 1);
 
-    if (found) {
-        // trace the tree
-        wagner_trace_solution(state, prev_set->pairs[n], FINAL_STAGE - 1, 0, sol);
-        return true;
-    } else {
-        return false;
+    // find any pair that yields zero
+    for (i = 0; i < nstr; i++) {
+        tmp = string_at(last_list, FINAL_STAGE, i);
+        if (tmp[0] == 0 && found < max_sol) {
+            wagner_trace_solution(state, prev_set->pairs[i], FINAL_STAGE - 1, 0,
+                                  sols + found * WAGNER_SOLUTION);
+            found++;
+        }
     }
+    
+    printf("found: %d\n", found);
+
+    return found;
 }
 
-// assuming each string is WAGNER_N-bit long
-// maximum nstr pairs found in each stage
-// 1 unit = nstr * sizeof(pair) = nstr * 8
-// max mem needed = 1 unit * WAGNER_K + 1 unit for storage of the list
-bool wagner_solve(const byte_t *init_list, int nstr, index_t *sol)
+// sols should have max_sol * WAGNER_SOLUTION elems
+int wagner_solve(const byte_t *init_list, index_t *sols, int max_sol)
 {
     wagner_hash_table_t hashtab;
     wagner_state_t state = {
         .ctx = NULL,
         .hashtab = &hashtab,
-        .nstr = nstr,
+        .nstr = WAGNER_INIT_NSTR,
         .stage = 0
     };
 
-    int i, j;
-    bool found;
+    int i, j, found;
     size_t size = sizeof_ctx(&state);
     wagner_chunk_t *init_chunk, *tmp;
     const byte_t *str;
@@ -456,17 +435,15 @@ bool wagner_solve(const byte_t *init_list, int nstr, index_t *sol)
     init_chunk = list_at_stage(&state, 0);
 
     // init chunks
-    for (i = 0; i < nstr; i++) {
+    for (i = 0; i < WAGNER_INIT_NSTR; i++) {
         tmp = string_at(init_chunk, 0, i);
-        str = init_list + WAGNER_N / 8 * i;
+        str = init_list + WAGNER_N_BYTE * i;
 
         for (j = 0; j < WAGNER_TOTAL_CHUNK; j++) {
             tmp[j] = mask_bits(str, j * WAGNER_BITS, (j + 1) * WAGNER_BITS);
         }
     }
-
-    // memcpy(list_at_stage(&state, 0), init_list, nstr * WAGNER_LEN_AT_STAGE(0));
-
+    
     printf("bucket size: %lu\n", sizeof_bucket(WAGNER_MAX_PAIR));
 
     for (i = 0; i < WAGNER_BUCKET; i++) {
@@ -477,7 +454,7 @@ bool wagner_solve(const byte_t *init_list, int nstr, index_t *sol)
         wagner_transform(&state);
     }
 
-    found = wagner_finalize(&state, sol);
+    found = wagner_finalize(&state, sols, max_sol);
 
     for (i = 0; i < WAGNER_BUCKET; i++) {
         free(state.bucks[i]);
