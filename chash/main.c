@@ -8,9 +8,11 @@
 #include "common.h"
 #include "wagner.h"
 
+#include "blake/blake2.h"
+
 int main()
 {
-    do_test();
+    // do_test();
 
     // byte_t raw[] =
     //     "\x00\x00\x00\x00\x6f\xe2\x8c\x0a" "\xb6\xf1\xb3\x72\xc1\xa6\xa2\x46"
@@ -31,14 +33,14 @@ int main()
 
     // printf("%lu\n", sizeof_ctx(2097125));
 
-    #define N 2965504
+    #define N WAGNER_INIT_NSTR
     // #define N 10000
 
     // printf("result: %d\n", compare_bits("abd", "abc", 0));
     // return 0;
 
     hash256_t *test_hash = malloc(N * sizeof(*test_hash));
-    char dat[10] = "fgdsad";
+    char dat[20] = "ahsjeidlkfieldki";
     int *hash_idx = (int *)(dat + 6);
 
     byte_t *list = malloc(WAGNER_N / 8 * N);
@@ -46,10 +48,11 @@ int main()
 
     for (int i = 0; i < N; i++) {
         *hash_idx = i;
-        sha256(dat, 10, test_hash[i]);
+        // sha256(dat, 10, test_hash[i]);
 
-        // copy the first 25 bytes
-        memcpy(list + i * WAGNER_N / 8, test_hash[i], WAGNER_N / 8);
+        // // copy the first 25 bytes
+        // memcpy(list + i * WAGNER_N / 8, test_hash[i], WAGNER_N / 8);
+        blake2b(list + i * WAGNER_N / 8, dat, NULL, WAGNER_N / 8, sizeof(dat), 0);
     }
 
     bool found = wagner_solve(list, N, sol);
@@ -61,19 +64,19 @@ int main()
         for (int i = 0; i < (1 << WAGNER_K); i++) {
             str = list + sol[i] * (WAGNER_N / 8);
 
-            printf("%3.d: %7.d: ", i, sol[i]);
-
-            for (int j = 0; j < WAGNER_N / 8; j++) {
-                print_byte(str[j]);
-            }
-
             if (i == 0) {
                 memcpy(res, str, WAGNER_N / 8);
             } else {
-                xor_all(res, str, res, WAGNER_N / 8);
+                xor_string(res, str, res, WAGNER_N / 8);
             }
 
-            printf("\n");
+            // printf("%3.d: %7.d: ", i, sol[i]);
+
+            // for (int j = 0; j < WAGNER_N / 8; j++) {
+            //     print_byte(str[j]);
+            // }
+
+            // printf("\n");
         }
 
         for (int j = 0; j < WAGNER_N / 8; j++) {

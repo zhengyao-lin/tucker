@@ -7,14 +7,106 @@
 // #define FINAL_STAGE (WAGNER_TOTAL_STAGE - 1) // the last collection stage
 #define FINAL_STAGE WAGNER_TOTAL_STAGE
 
-void bucket_add(wagner_bucket_t *bucket, index_t idx)
+inline static
+size_t sizeof_pair_set(int nstr)
 {
-    bucket->buck[bucket->size++] = idx;
+    return nstr * sizeof(wagner_pair_t) + sizeof(index_t);
+}
+
+inline static
+index_t max_bucket_size(int nstr)
+{
+    return (nstr / WAGNER_BUCKET) * WAGNER_BUCKET_RATIO;
+}
+
+inline static
+size_t sizeof_bucket(int nstr)
+{
+    return max_bucket_size(nstr) * sizeof(index_t) + sizeof(index_t);
+}
+
+inline static
+size_t mem_unit(wagner_state_t *state)
+{
+    return sizeof_pair_set(WAGNER_MAX_PAIR);
+}
+
+inline static
+wagner_pair_set_t *
+pair_set_at_stage(wagner_state_t *state, int stage)
+{
+    return (wagner_pair_set_t *)((byte_t *)state->ctx + mem_unit(state) * stage);
+}
+
+inline static
+wagner_chunk_t *list_at_stage(wagner_state_t *state, int stage)
+{
+    wagner_chunk_t *base =
+        (wagner_chunk_t *)((byte_t *)state->ctx + mem_unit(state) * (stage + 2));
+
+    if (stage & 1) {
+        return base + WAGNER_MAX_PAIR * WAGNER_CHUNK_AT_STAGE(stage - 1);
+    } else
+        return base;
+}
+
+inline static
+wagner_chunk_t *string_at(wagner_chunk_t *list, int stage, int i)
+{
+    return list + WAGNER_CHUNK_AT_STAGE(stage) * i;
+}
+
+inline static
+size_t sizeof_ctx(wagner_state_t *state)
+{
+    size_t max = 0, tmp;
+    int i;
+
+    state->ctx = NULL;
+
+    for (i = 0; i < WAGNER_TOTAL_STAGE; i++) {
+        tmp = (size_t)(list_at_stage(state, i) +
+                       WAGNER_MAX_PAIR * WAGNER_CHUNK_AT_STAGE(i));
+    
+        if (tmp > max) max = tmp;
+    }
+
+    return max;
+}
+
+inline static
+wagner_pair_t to_pair(index_t i, index_t j)
+{
+    return (wagner_pair_t) { i, j };
+}
+
+inline static
+index_t pair_i(wagner_pair_t pair)
+{
+    return pair.i;
+}
+
+inline static
+index_t pair_j(wagner_pair_t pair)
+{
+    return pair.j;
+}
+
+inline static
+void bucket_add(wagner_state_t *state, wagner_bucket_t *bucket, index_t idx)
+{
+    if (bucket->size < max_bucket_size(WAGNER_MAX_PAIR)) {
+        bucket->buck[bucket->size++] = idx;
+    } else {
+        // printf("bucket overflow %d %d\n", bucket->size, max_bucket_size(WAGNER_MAX_PAIR));
+        // *((int *)0) = 1;
+    }
 }
 
 // mask bits from i to j in a string
 // precond j - i <= 32
-uint32_t mask_bits(byte_t *str, int i, int j)
+inline static
+uint32_t mask_bits(const byte_t *str, int i, int j)
 {
     int ei = i % 8,
         ej = j % 8;
@@ -46,30 +138,46 @@ uint32_t mask_bits(byte_t *str, int i, int j)
     return ret;
 }
 
-uint32_t mask_bucket_bits(byte_t *str, int i, int j)
+// uint32_t mask_bucket_bits(byte_t *str, int i, int j)
+// {
+//     return mask_bits(str, j - WAGNER_BUCKET_BITS, j);
+// }
+
+// uint32_t mask_sort_bits(byte_t *str, int i, int j)
+// {
+//     return mask_bits(str, i, j - WAGNER_BUCKET_BITS);
+// }
+
+inline static
+uint32_t mask_bucket_bits(const wagner_chunk_t *str)
 {
-    return mask_bits(str, j - WAGNER_BUCKET_BITS, j);
+    return (*str) >> WAGNER_SORT_BITS;
 }
 
-uint32_t mask_sort_bits(byte_t *str, int i, int j)
+inline static
+uint32_t mask_sort_bits(const wagner_chunk_t *str)
 {
-    return mask_bits(str, i, j - WAGNER_BUCKET_BITS);
+    return (*str) & ~(~0 << WAGNER_SORT_BITS);
 }
 
 // add a new pair to pair set
+inline static
 index_t append_pair(wagner_state_t *state, wagner_pair_set_t *set, index_t a, index_t b)
 {
     index_t idx = set->size;
 
-    if (set->size < state->init_nstr) {
-        set->pairs[set->size++] = (wagner_pair_t){ a, b };
-    }
+    if (idx < WAGNER_MAX_PAIR) {
+        set->pairs[idx] = to_pair(a, b);
+        set->size++;
 
-    return idx;
+        return idx;
+    } else {
+        return -1;
+    }
 }
 
 // ONLY bits in the range [i, j) in dst are VALID
-void xor_all(const byte_t *a, const byte_t *b, byte_t *dst, int size)
+void xor_string(const byte_t *a, const byte_t *b, byte_t *dst, int size)
 {
     int i;
 
@@ -78,10 +186,29 @@ void xor_all(const byte_t *a, const byte_t *b, byte_t *dst, int size)
     }
 }
 
+inline static
+void xor_chunks(const wagner_chunk_t *a,
+                const wagner_chunk_t *b,
+                wagner_chunk_t *dst, int size)
+{
+    int i;
+
+    for (i = 0; i < size; i++) {
+        dst[i] = a[i] ^ b[i];
+    }
+}
+
+inline static
 bool has_dup(wagner_pair_t a, wagner_pair_t b)
 {
     // return false;
-    return a.i == b.i || a.j == b.j || a.i == b.j || a.j == b.i;
+    index_t ai = pair_i(a),
+            aj = pair_j(a),
+            bi = pair_i(b),
+            bj = pair_j(b);
+
+    return ai == bi || aj == bj ||
+           ai == bj || aj == bi;
 }
 
 // append a new pair to the pair set,
@@ -92,18 +219,17 @@ index_t collide(wagner_state_t *state, index_t ai, index_t bi)
 
     wagner_pair_set_t *pair_set = pair_set_at_stage(state, stage);
     wagner_pair_set_t *prev_set;
-    byte_t *cur_list = list_at_stage(state, stage);
-    byte_t *next_list = list_at_stage(state, stage + 1);
+    wagner_chunk_t *cur_list = list_at_stage(state, stage);
+    wagner_chunk_t *next_list = list_at_stage(state, stage + 1);
 
     index_t idx;
 
-    byte_t *a = string_at(cur_list, stage, ai),
-           *b = string_at(cur_list, stage, bi),
-           *dst;
+    wagner_chunk_t
+        *a = string_at(cur_list, stage, ai),
+        *b = string_at(cur_list, stage, bi),
+        *dst;
 
-    byte_t c[WAGNER_LEN_AT_STAGE(stage)];
-
-    int j = WAGNER_J_AT_STAGE(stage);
+    // wagner_chunk_t c[WAGNER_CHUNK_AT_STAGE(stage)];
 
     int diff;
 
@@ -120,18 +246,12 @@ index_t collide(wagner_state_t *state, index_t ai, index_t bi)
     // in the last stage
     idx = append_pair(state, pair_set, ai, bi);
 
-    if (idx < state->init_nstr) {
-        xor_all(a, b, c, WAGNER_LEN_AT_STAGE(stage));
-
-        diff = WAGNER_LEN_AT_STAGE(stage) - WAGNER_LEN_AT_STAGE(stage + 1);
+    if (idx != -1) {
         dst = string_at(next_list, stage + 1, idx);
-        
-        memcpy(dst, c + diff, WAGNER_LEN_AT_STAGE(stage + 1));
-
-        return idx;
+        xor_chunks(a + 1, b + 1, dst, WAGNER_CHUNK_AT_STAGE(stage + 1));
     }
 
-    return -1;
+    return idx;
 }
 
 void wagner_transform(wagner_state_t *state)
@@ -146,14 +266,10 @@ void wagner_transform(wagner_state_t *state)
     wagner_hash_table_t *hashtab = state->hashtab;
     wagner_entry_t *entry;
 
-    byte_t *cur_list = list_at_stage(state, stage);
-    byte_t *tmp;
+    wagner_chunk_t *cur_list = list_at_stage(state, stage);
+    wagner_chunk_t *tmp;
 
     uint32_t tmp_idx, idx, cur_idx;
-
-    int i = WAGNER_I_AT_STAGE(stage),
-        j = WAGNER_J_AT_STAGE(stage),
-        k = j - WAGNER_BUCKET_BITS;
 
     int count;
 
@@ -163,8 +279,8 @@ void wagner_transform(wagner_state_t *state)
 
     int m, n, start, end;
 
-    printf("stage: %d, %d bytes per string: %d, %d, %d\n", stage, nstr, WAGNER_LEN_AT_STAGE(stage), i, j);
-    printf("cur list: %p\n", cur_list);
+    printf("stage: %d, inputs: %d, chunks: %d\n", stage, nstr, WAGNER_CHUNK_AT_STAGE(stage));
+    // printf("cur list: %p\n", cur_list);
 
     // init buckets
     for (m = 0; m < WAGNER_BUCKET; m++) {
@@ -174,16 +290,17 @@ void wagner_transform(wagner_state_t *state)
     // init pair set
     pair_set->size = 0;
 
+    int a = 0;
+
     // linear scan to sort all strings to buckets
     for (m = 0; m < nstr; m++) {
         tmp = string_at(cur_list, stage, m);
-        // 0x5576ec4
-        bucket_add(state->bucks[mask_bucket_bits(tmp, i, j)], m);
+        bucket_add(state, state->bucks[mask_bucket_bits(tmp)], m);
     }
 
-    // printf("bucket sorted\n");
-
     for (m = 0; m < WAGNER_BUCKET; m++) {
+        if (pair_set->size >= WAGNER_MAX_PAIR) break;
+
         cur_buck = state->bucks[m];
 
         // init hash table
@@ -195,54 +312,58 @@ void wagner_transform(wagner_state_t *state)
             cur_idx = cur_buck->buck[n];
 
             tmp = string_at(cur_list, stage, cur_idx);
+            entry = &hashtab->tab[mask_sort_bits(tmp)];
 
-            entry = &hashtab->tab[mask_sort_bits(tmp, i, j)];
-
-            if (entry->count == 0) {
-                // add pair
-                entry->count++;
-                entry->where = cur_idx;
-            } else if (entry->count == 1) {
-                // add pair (entry->where, cur_buck->buck[n])
-                idx = collide(state, entry->where, cur_idx);
-
-                if (idx != -1) {
-                    // write result to the next string list
+            switch (entry->count) {
+                case 0:
                     entry->count++;
-                    entry->where = idx;
-                }
-            } else {
-                // add multiple pairs
-               
-                // we have, from entry->where, entry->count - 1 pairs
-                // (a, k), (b, k), (c, k) ... (a + count - 1, k)
-                // we pair (a, b, c .. a + count - 1, k) each with the current index(cur_buck->buck[n])
+                    entry->where = cur_idx;
+                    break;
 
-                start = entry->where;
-                end = start + entry->count - 2;
+                case 1:
+                    idx = collide(state, entry->where, cur_idx);
 
-                count = 0;
-                idx = -1;
-
-                #define PAIR_WITH(a) \
-                    tmp_idx = collide(state, (a), cur_idx); \
-                    if (tmp_idx != -1) { \
-                        if (idx == -1) idx = tmp_idx; \
-                        count++; \
+                    if (idx != -1) {
+                        // write result to the next string list
+                        entry->count++;
+                        entry->where = idx;
                     }
 
-                // iterate though each previous pair
-                for (; start <= end; start++) {
-                    PAIR_WITH(pair_set->pairs[start].i);
-                }
+                    break;
 
-                // add the last pair
-                PAIR_WITH(pair_set->pairs[end].j);
+                default:
+                    // add multiple pairs
+                
+                    // we have, from entry->where, entry->count - 1 pairs
+                    // (a, k), (b, k), (c, k) ... (a + count - 1, k)
+                    // we pair (a, b, c .. a + count - 1, k) each with the current index(cur_buck->buck[n])
 
-                if (idx != -1) {
-                    entry->count = count + 1;
-                    entry->where = idx;
-                }
+                    start = entry->where;
+                    end = start + entry->count - 2;
+
+                    count = 0;
+                    idx = -1;
+
+                    #define PAIR_WITH(a) \
+                        tmp_idx = collide(state, (a), cur_idx); \
+                        if (tmp_idx != -1) { \
+                            if (idx == -1) idx = tmp_idx; \
+                            count++; \
+                        }
+
+                    // iterate though each previous pair
+                    for (; start <= end; start++) {
+                        PAIR_WITH(pair_i(pair_set->pairs[start]));
+                    }
+
+                    // add the last pair
+                    PAIR_WITH(pair_j(pair_set->pairs[end]));
+
+                    if (idx != -1) {
+                        // printf("added: %d\n", count);
+                        entry->count = count + 1;
+                        entry->where = idx;
+                    }
             }
         }
     }
@@ -260,18 +381,18 @@ int wagner_trace_solution(wagner_state_t *state, wagner_pair_t from,
 
     if (stage == 0) {
         // write the actual index
-        sol[cur_size++] = from.i;
-        sol[cur_size++] = from.j;
+        sol[cur_size++] = pair_i(from);
+        sol[cur_size++] = pair_j(from);
         new_size = cur_size;
     } else {
         // continue tracing
         prev = pair_set_at_stage(state, stage - 1);
 
         // traverse left child
-        new_size = wagner_trace_solution(state, prev->pairs[from.i], stage - 1, cur_size, sol);
+        new_size = wagner_trace_solution(state, prev->pairs[pair_i(from)], stage - 1, cur_size, sol);
 
         // traverse right child
-        new_size = wagner_trace_solution(state, prev->pairs[from.j], stage - 1, new_size, sol);
+        new_size = wagner_trace_solution(state, prev->pairs[pair_j(from)], stage - 1, new_size, sol);
     }
 
     return new_size;
@@ -279,33 +400,30 @@ int wagner_trace_solution(wagner_state_t *state, wagner_pair_t from,
 
 bool wagner_finalize(wagner_state_t *state, index_t *sol)
 {
-    byte_t *last_list = list_at_stage(state, FINAL_STAGE);
-    byte_t *tmp;
+    wagner_chunk_t *last_list = list_at_stage(state, FINAL_STAGE);
+    wagner_chunk_t *tmp;
 
     int nstr = state->nstr;
     int m, n;
 
-    bool found = false;
+    int found = 0;
 
     // find any pair that yields zero
     for (m = 0; m < nstr; m++) {
         tmp = string_at(last_list, FINAL_STAGE, m);
-        found = true;
-
-        for (n = 0; n < WAGNER_LEN_AT_STAGE(FINAL_STAGE); n++) {
-            if (tmp[n]) found = false;
+        if (tmp[0] == 0) {
+            found++;
+            n = m;
         }
-
-        if (found) break;
     }
 
-    printf("found: %d\n", found);
+    printf("found: %d %d\n", found, n);
 
     wagner_pair_set_t *prev_set = pair_set_at_stage(state, FINAL_STAGE - 1);
 
     if (found) {
         // trace the tree
-        wagner_trace_solution(state, prev_set->pairs[m], FINAL_STAGE - 1, 0, sol);
+        wagner_trace_solution(state, prev_set->pairs[n], FINAL_STAGE - 1, 0, sol);
         return true;
     } else {
         return false;
@@ -323,22 +441,36 @@ bool wagner_solve(const byte_t *init_list, int nstr, index_t *sol)
         .ctx = NULL,
         .hashtab = &hashtab,
         .nstr = nstr,
-        .init_nstr = nstr,
         .stage = 0
     };
 
-    int i;
+    int i, j;
     bool found;
     size_t size = sizeof_ctx(&state);
+    wagner_chunk_t *init_chunk, *tmp;
+    const byte_t *str;
 
     printf("allocating %lu bytes\n", size);
 
     state.ctx = malloc(size);
+    init_chunk = list_at_stage(&state, 0);
 
-    memcpy(list_at_stage(&state, 0), init_list, nstr * WAGNER_LEN_AT_STAGE(0));
+    // init chunks
+    for (i = 0; i < nstr; i++) {
+        tmp = string_at(init_chunk, 0, i);
+        str = init_list + WAGNER_N / 8 * i;
+
+        for (j = 0; j < WAGNER_TOTAL_CHUNK; j++) {
+            tmp[j] = mask_bits(str, j * WAGNER_BITS, (j + 1) * WAGNER_BITS);
+        }
+    }
+
+    // memcpy(list_at_stage(&state, 0), init_list, nstr * WAGNER_LEN_AT_STAGE(0));
+
+    printf("bucket size: %lu\n", sizeof_bucket(WAGNER_MAX_PAIR));
 
     for (i = 0; i < WAGNER_BUCKET; i++) {
-        state.bucks[i] = malloc(sizeof_bucket(nstr));
+        state.bucks[i] = malloc(sizeof_bucket(WAGNER_MAX_PAIR));
     }
 
     for (i = 0; i < WAGNER_TOTAL_STAGE; i++) {
