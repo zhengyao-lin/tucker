@@ -50,7 +50,7 @@ bool equihash_verify(const byte_t *dat, size_t size, index_t *sol)
     byte_t xor_sum[WAGNER_N_BYTE];
 
     index_t idx;
-    int i;
+    int i, j;
 
 #define STR(i) (prob + (i) * WAGNER_N_BYTE)
 
@@ -58,13 +58,22 @@ bool equihash_verify(const byte_t *dat, size_t size, index_t *sol)
         idx = sol[i];
 
         // check solution range
-        if (idx >= WAGNER_INIT_NSTR)
+        if (idx >= WAGNER_INIT_NSTR) {
+            printf("solution not in range\n");
             return false;
+        }
         
         if (i == 0) {
             memcpy(xor_sum, STR(idx), WAGNER_N_BYTE);
         } else {
             xor_string(STR(idx), xor_sum, xor_sum, WAGNER_N_BYTE);
+        }
+
+        for (j = i + 1; j < WAGNER_SOLUTION; j++) {
+            if (sol[j] == idx) {
+                printf("trivial solution %d\n", idx);
+                // return false;
+            }
         }
 
         // printf("%3.d: %7.d: ", i, idx);
@@ -87,7 +96,10 @@ bool equihash_verify(const byte_t *dat, size_t size, index_t *sol)
     // printf("\n");
 
     for (i = 0; i < WAGNER_N_BYTE; i++) {
-        if (xor_sum[i] != 0) return false;
+        if (xor_sum[i] != 0) {
+            printf("xor sum not zero on byte %d\n", i);
+            return false;
+        }
     }
 
     return true;

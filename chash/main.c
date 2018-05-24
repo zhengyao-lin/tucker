@@ -12,7 +12,7 @@
 
 int main()
 {
-    char dat[] = "hello, this is rod from mars. im just trying to make this string longer because the real zcash header is quite long.";
+    char dat[] = "hello, pop pop pop pop pop pop 12300 1233 dsfasaf";
     index_t sols[20 * WAGNER_SOLUTION];
 
     int found;
