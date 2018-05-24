@@ -21,7 +21,8 @@
 #define WAGNER_TOTAL_STAGE WAGNER_K
 #define WAGNER_TOTAL_CHUNK (WAGNER_K + 1)
 
-#define WAGNER_INIT_NSTR (1 << (WAGNER_BITS + 1))
+#define WAGNER_MAX_IDX_BITS (WAGNER_BITS + 1)
+#define WAGNER_INIT_NSTR (1 << WAGNER_MAX_IDX_BITS)
 #define WAGNER_MAX_PAIR ((size_t)(WAGNER_INIT_NSTR))
 
 // #define WAGNER_LEN_AT_STAGE(stage) ((WAGNER_N - (stage) * WAGNER_BITS + 7) / 8)
@@ -37,11 +38,17 @@
 
 typedef byte_t *wagner_string_list_t;
 
-typedef uint32_t wagner_chunk_t; // WAGNER_BITS of data
+#if WAGNER_BITS <= 32
+    typedef uint32_t wagner_chunk_t; // WAGNER_BITS of data
+    typedef uint32_t index_t;
+#elif WAGNER_BITS <= 64
+    typedef uint64_t wagner_chunk_t;
+    typedef uint64_t index_t;
+#else
+    #error "too many bits per round"
+#endif
 
 // we need a hash table: WAGNER_BITS -> 
-
-typedef uint32_t index_t;
 
 typedef struct {
     index_t i, j;
@@ -51,10 +58,19 @@ typedef struct {
     wagner_pair_t pairs[WAGNER_MAX_PAIR];
 } wagner_pair_set_t;
 
-typedef struct {
-    uint32_t count: 8;
-    uint32_t where: 24; // position of the recent pair added
-} wagner_entry_t;
+#if WAGNER_COLLISION_BITS + WAGNER_MAX_IDX_BITS <= 32
+    typedef struct {
+        uint32_t count: 32 - WAGNER_MAX_IDX_BITS;
+        uint32_t where: WAGNER_MAX_IDX_BITS; // position of the recent pair added
+    } wagner_entry_t;
+#elif WAGNER_COLLISION_BITS + WAGNER_MAX_IDX_BITS <= 64
+    typedef struct {
+        uint64_t count: 64 - WAGNER_MAX_IDX_BITS;
+        uint64_t where: WAGNER_MAX_IDX_BITS; // position of the recent pair added
+    } wagner_entry_t;
+#else
+    #error "too many bits per round"
+#endif
 
 typedef struct {
     wagner_entry_t tab[1 << WAGNER_COLLISION_BITS];

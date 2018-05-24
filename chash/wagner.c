@@ -326,7 +326,7 @@ L_END:
 
 int wagner_trace_solution(void *ctx, wagner_pair_t from,
                           int stage, int cur_size, index_t *sol,
-                          bool used[WAGNER_INIT_NSTR])
+                          bool *used)
 {
     wagner_pair_set_t *prev;
 
@@ -365,7 +365,7 @@ int wagner_trace_solution(void *ctx, wagner_pair_t from,
 
 int wagner_finalize(wagner_state_t *state, index_t *sols, int max_sol)
 {
-    bool used[WAGNER_INIT_NSTR];
+    bool *used = malloc(WAGNER_INIT_NSTR * sizeof(*used));
     void *ctx = state->ctx;
 
     wagner_chunk_t *last_list = list_at_stage(ctx, FINAL_STAGE);
@@ -388,6 +388,8 @@ int wagner_finalize(wagner_state_t *state, index_t *sols, int max_sol)
         }
     }
     
+    free(used);
+
     printf("found: %d\n", found);
 
     return found;

@@ -12,7 +12,7 @@
 
 int main()
 {
-    char dat[] = "hello, pop pop pop pop pop pop 12300 1233 dsfasaf";
+    char dat[] = "hello, my name is rod. im just trying to make this string longer.";
     index_t sols[20 * WAGNER_SOLUTION];
 
     int found;
