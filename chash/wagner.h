@@ -9,7 +9,7 @@
 #define WAGNER_N_BYTE (WAGNER_N / 8)
 #define WAGNER_BITS (WAGNER_N / (WAGNER_K + 1)) // bits per stage
 #define WAGNER_BUCKET_BITS 8
-#define WAGNER_SORT_BITS (WAGNER_BITS - WAGNER_BUCKET_BITS)
+#define WAGNER_COLLISION_BITS (WAGNER_BITS - WAGNER_BUCKET_BITS)
 
 // | <-  total bits/stage   -> | 
 // [ bucket bits ] [ sort bits ]
@@ -23,15 +23,17 @@
 
 #define WAGNER_INIT_NSTR (1 << (WAGNER_BITS + 1))
 #define WAGNER_MAX_PAIR ((size_t)(WAGNER_INIT_NSTR))
-#define WAGNER_BUCKET_RATIO 1.5
 
 // #define WAGNER_LEN_AT_STAGE(stage) ((WAGNER_N - (stage) * WAGNER_BITS + 7) / 8)
 // #define WAGNER_I_AT_STAGE(stage) ((stage) * WAGNER_BITS % 8)
 // #define WAGNER_J_AT_STAGE(stage) (WAGNER_I_AT_STAGE(stage) + WAGNER_BITS)
 
-#define WAGNER_CHUNK_AT_STAGE(stage) (WAGNER_TOTAL_STAGE - (stage) + 1)
+#define WAGNER_BUCKET_ELEM ((WAGNER_MAX_PAIR / WAGNER_BUCKET) * 3 / 2)
+#define WAGNER_BUCKET_SIZE sizeof(wagner_bucket_t)
+#define WAGNER_PAIR_SET_SIZE sizeof(wagner_pair_set_t)
+#define WAGNER_MEM_UNIT WAGNER_PAIR_SET_SIZE
 
-// assuming WAGNER_BUCKET_BITS <= 32 && WAGNER_SORT_BITS <= 32
+#define WAGNER_CHUNK_AT_STAGE(stage) (WAGNER_TOTAL_STAGE - (stage) + 1)
 
 typedef byte_t *wagner_string_list_t;
 
@@ -46,28 +48,32 @@ typedef struct {
 } wagner_pair_t;
 
 typedef struct {
-    index_t size;
-    wagner_pair_t pairs[];
+    wagner_pair_t pairs[WAGNER_MAX_PAIR];
 } wagner_pair_set_t;
 
 typedef struct {
-    int count;
-    index_t where; // position of the recent pair added
+    uint32_t count: 8;
+    uint32_t where: 24; // position of the recent pair added
 } wagner_entry_t;
 
 typedef struct {
-    wagner_entry_t tab[1 << WAGNER_SORT_BITS];
+    wagner_entry_t tab[1 << WAGNER_COLLISION_BITS];
 } wagner_hash_table_t;
 
 typedef struct {
+    index_t idx;
+    wagner_chunk_t head;
+} wagner_bucket_item_t;
+
+typedef struct {
     index_t size;
-    index_t buck[];
+    wagner_bucket_item_t buck[WAGNER_BUCKET_ELEM];
 } wagner_bucket_t;
 
 typedef struct {
     void *ctx;
 
-    wagner_bucket_t *bucks[WAGNER_BUCKET];
+    wagner_bucket_t *bucks;
     wagner_hash_table_t *hashtab;
 
     int stage;
