@@ -7,7 +7,7 @@
 // #define FINAL_STAGE (WAGNER_TOTAL_STAGE - 1) // the last collection stage
 #define FINAL_STAGE WAGNER_TOTAL_STAGE
 
-#define ONES(n) (~(~(uint32_t)0 << (n)))
+#define ONES(n) (~(~(wagner_chunk_t)0 << (n)))
 
 inline static
 wagner_pair_set_t *
@@ -82,9 +82,9 @@ index_t pair_j(wagner_pair_t pair)
 }
 
 // mask bits at range [i, j) in a string
-// precond j - i <= 32
+// precond j - i <= chunk size
 inline static
-uint32_t mask_bits(const byte_t *str, int i, int j)
+wagner_chunk_t mask_bits(const byte_t *str, int i, int j)
 {
     int ei = i % 8,
         ej = j % 8;
@@ -93,7 +93,7 @@ uint32_t mask_bits(const byte_t *str, int i, int j)
     int m = k = i / 8,
         n = (j + 7) / 8 - 1;
 
-    uint32_t ret = 0;
+    wagner_chunk_t ret = 0;
 
     for (; m <= n; m++) {
         if (m == k) {
@@ -106,9 +106,9 @@ uint32_t mask_bits(const byte_t *str, int i, int j)
             }
         } else if (m == n && ej) {
             // last byte
-            ret |= ((uint32_t)str[m] & ONES(ej)) << base;
+            ret |= ((wagner_chunk_t)str[m] & ONES(ej)) << base;
         } else {
-            ret |= (uint32_t)str[m] << base;
+            ret |= (wagner_chunk_t)str[m] << base;
             base += 8;
         }
     }
@@ -117,13 +117,13 @@ uint32_t mask_bits(const byte_t *str, int i, int j)
 }
 
 inline static
-uint32_t mask_bucket_bits(wagner_chunk_t head)
+wagner_chunk_t mask_bucket_bits(wagner_chunk_t head)
 {
     return head >> WAGNER_COLLISION_BITS;
 }
 
 inline static
-uint32_t mask_collision_bits(wagner_chunk_t head)
+wagner_chunk_t mask_collision_bits(wagner_chunk_t head)
 {
     return head & ONES(WAGNER_COLLISION_BITS);
 }
@@ -143,12 +143,11 @@ void xor_chunks(const wagner_chunk_t *a,
 inline static
 bool has_dup(wagner_pair_t a, wagner_pair_t b)
 {
-    // return false;
     index_t ai = pair_i(a),
             aj = pair_j(a),
             bi = pair_i(b),
             bj = pair_j(b);
-
+            
     return ai == bi || aj == bj ||
            ai == bj || aj == bi;
 }
@@ -208,7 +207,7 @@ void wagner_collide(wagner_state_t *state)
     wagner_pair_t *pair_list = pair_set->pairs;
     index_t pair_next = 0;
     
-    uint32_t tmp_idx, idx, cur_idx;
+    index_t idx, cur_idx;
 
     index_t bucket_size[WAGNER_BUCKET];
 
@@ -225,11 +224,6 @@ void wagner_collide(wagner_state_t *state)
 
     // init buckets
     bzero(bucket_size, sizeof(bucket_size));
-
-    // init pair set
-    // pair_set->size = 0;
-
-    int a = 0;
 
     // linear scan to sort all strings to buckets
     for (m = 0; m < nstr; m++) {
@@ -379,7 +373,7 @@ int wagner_finalize(wagner_state_t *state, index_t *sols, int max_sol)
     for (i = 0; i < nstr; i++) {
         if (*head_at(last_list, i) == 0 &&
             found < max_sol) {
-            bzero(used, sizeof(used));
+            bzero(used, WAGNER_INIT_NSTR * sizeof(*used));
 
             if (wagner_trace_solution(ctx, prev_set->pairs[i], FINAL_STAGE - 1, 0,
                                       sols + found * WAGNER_SOLUTION, used) != -1) {

@@ -29,7 +29,7 @@
 // #define WAGNER_I_AT_STAGE(stage) ((stage) * WAGNER_BITS % 8)
 // #define WAGNER_J_AT_STAGE(stage) (WAGNER_I_AT_STAGE(stage) + WAGNER_BITS)
 
-#define WAGNER_BUCKET_ELEM ((WAGNER_MAX_PAIR / WAGNER_BUCKET) * 4 / 3)
+#define WAGNER_BUCKET_ELEM ((WAGNER_MAX_PAIR / WAGNER_BUCKET) * 5 / 4)
 #define WAGNER_BUCKET_SIZE sizeof(wagner_bucket_t)
 #define WAGNER_PAIR_SET_SIZE sizeof(wagner_pair_set_t)
 #define WAGNER_MEM_UNIT WAGNER_PAIR_SET_SIZE
