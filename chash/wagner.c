@@ -81,18 +81,18 @@ index_t pair_j(wagner_pair_t pair)
     return pair.j;
 }
 
-inline static
-void bucket_add(wagner_bucket_t *bucket, index_t idx, wagner_chunk_t chunk)
-{
-    if (bucket->size != WAGNER_BUCKET_ELEM) {
-        bucket->buck[bucket->size++] = (wagner_bucket_item_t) { idx, chunk };
-    }
+// inline static
+// void bucket_add(wagner_bucket_t *bucket, index_t idx, wagner_chunk_t chunk)
+// {
+//     if (bucket->size != WAGNER_BUCKET_ELEM) {
+//         bucket->buck[bucket->size++] = (wagner_bucket_item_t) { idx, chunk };
+//     }
     
-    // else {
-        // printf("bucket overflow %d %d\n", bucket->size, max_bucket_size(WAGNER_MAX_PAIR));
-        // *((int *)0) = 1;
-    // }
-}
+//     // else {
+//         // printf("bucket overflow %d %d\n", bucket->size, max_bucket_size(WAGNER_MAX_PAIR));
+//         // *((int *)0) = 1;
+//     // }
+// }
 
 // mask bits at range [i, j) in a string
 // precond j - i <= 32
@@ -246,6 +246,8 @@ void wagner_collide(wagner_state_t *state)
     
     uint32_t tmp_idx, idx, cur_idx;
 
+    index_t bucket_size[WAGNER_BUCKET];
+
     int count;
 
     // for each string in the current stage
@@ -258,9 +260,7 @@ void wagner_collide(wagner_state_t *state)
     // printf("cur list: %p\n", cur_list);
 
     // init buckets
-    for (m = 0; m < WAGNER_BUCKET; m++) {
-        bucks[m].size = 0;
-    }
+    bzero(bucket_size, sizeof(bucket_size));
 
     // init pair set
     // pair_set->size = 0;
@@ -269,8 +269,11 @@ void wagner_collide(wagner_state_t *state)
 
     // linear scan to sort all strings to buckets
     for (m = 0; m < nstr; m++) {
-        tmp = *head_at(cur_list, m);
-        bucket_add(&bucks[mask_bucket_bits(tmp)], m, tmp);
+        tmp = mask_bucket_bits(*head_at(cur_list, m));
+
+        if (bucket_size[tmp] != WAGNER_BUCKET_ELEM) {
+            bucks[tmp].buck[bucket_size[tmp]++] = (wagner_bucket_item_t) { m, tmp };
+        }
     }
 
     for (m = 0; m < WAGNER_BUCKET; m++) {
@@ -283,7 +286,7 @@ void wagner_collide(wagner_state_t *state)
 
         // printf("bucket size: %d\n", cur_buck->size);
 
-        for (n = 0; n < cur_buck->size; n++) {
+        for (n = 0; n < bucket_size[m]; n++) {
             cur_idx = cur_buck->buck[n].idx;
 
             entry = &hashtab->tab[mask_collision_bits(cur_buck->buck[n].head)];

@@ -66,7 +66,7 @@ typedef struct {
 } wagner_bucket_item_t;
 
 typedef struct {
-    index_t size;
+    // index_t size;
     wagner_bucket_item_t buck[WAGNER_BUCKET_ELEM];
 } wagner_bucket_t;
 
