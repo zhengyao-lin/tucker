@@ -28,12 +28,6 @@ wagner_chunk_t *list_at_stage(void *ctx, int stage)
         return base;
 }
 
-// inline static
-// wagner_chunk_t *string_at(wagner_chunk_t *list, int stage, int i)
-// {
-//     return list + WAGNER_CHUNK_AT_STAGE(stage) * i;
-// }
-
 inline static
 wagner_chunk_t *head_at(wagner_chunk_t *list, int i)
 {
@@ -152,35 +146,13 @@ bool has_dup(wagner_pair_t a, wagner_pair_t b)
            ai == bj || aj == bi;
 }
 
-// append a new pair to the pair set,
-// then xor a, b in the current list and put the result to the next list
+// check if the collision is valid
 inline static
-bool collide_pair(void *ctx, int stage,
-                  wagner_pair_t *prev_pair_list,
-                  index_t pair_next, index_t ai, index_t bi)
+bool check_collide(int stage, wagner_pair_t *prev_pair_list, index_t ai, index_t bi)
 {
-    wagner_chunk_t *cur_list = list_at_stage(ctx, stage);
-    wagner_chunk_t *next_list = list_at_stage(ctx, stage + 1);
-
-    wagner_chunk_t
-        *a_tail = tail_at(cur_list, stage, ai),
-        *b_tail = tail_at(cur_list, stage, bi),
-        *dst_head,
-        *dst_tail;
-
     // check duplication
-    if (stage != 0 &&
-        has_dup(prev_pair_list[ai], prev_pair_list[bi])) {
-        return false;
-    }
-
-    dst_head = head_at(next_list, pair_next);
-    dst_tail = tail_at(next_list, stage + 1, pair_next);
-
-    *dst_head = *a_tail ^ *b_tail; // process the head separately
-    xor_chunks(a_tail + 1, b_tail + 1, dst_tail, WAGNER_CHUNK_AT_STAGE(stage + 1) - 1);
-
-    return true;
+    return stage < WAGNER_TOTAL_STAGE / 3 ||
+           !has_dup(prev_pair_list[ai], prev_pair_list[bi]);
 }
 
 // we can put the first chunk of each string at the front
@@ -194,11 +166,12 @@ void wagner_collide(wagner_state_t *state)
     wagner_pair_set_t *pair_set = pair_set_at_stage(ctx, stage);
 
     wagner_bucket_t *bucks = state->bucks;
-    wagner_bucket_t *cur_buck;
-    wagner_hash_table_t *hashtab = state->hashtab;
+    wagner_bucket_item_t *cur_buck;
+    wagner_entry_t *tab = state->hashtab->tab;
     wagner_entry_t *entry;
 
     wagner_chunk_t *cur_list = list_at_stage(ctx, stage);
+    wagner_chunk_t *next_list = list_at_stage(ctx, stage + 1);
     wagner_chunk_t chunk, buck_bits, col_bits;
 
     wagner_pair_t *prev_pair_list =
@@ -207,7 +180,7 @@ void wagner_collide(wagner_state_t *state)
     wagner_pair_t *pair_list = pair_set->pairs;
     index_t pair_next = 0;
     
-    index_t idx, cur_idx;
+    index_t idx, cur_idx, m, n, i, j;
 
     index_t bucket_size[WAGNER_BUCKET];
 
@@ -216,8 +189,6 @@ void wagner_collide(wagner_state_t *state)
     // for each string in the current stage
     // bits i -> k are the sort bits
     // bits k -> j are the bucket bits
-
-    int m, n, start, end;
 
     printf("stage: %d, inputs: %d, chunks: %d\n", stage, nstr, WAGNER_CHUNK_AT_STAGE(stage));
     // printf("cur list: %p\n", cur_list);
@@ -238,18 +209,21 @@ void wagner_collide(wagner_state_t *state)
         }
     }
 
+    // r/w tab
+    // 
+
     for (m = 0; m < WAGNER_BUCKET; m++) {
-        cur_buck = &bucks[m];
+        cur_buck = bucks[m].buck;
 
         // init hash table
-        bzero(hashtab, sizeof(*hashtab));
+        bzero(tab, sizeof(wagner_hash_table_t));
 
         // printf("bucket size: %d %d\n", bucket_size[m], pair_next);
 
         for (n = 0; n < bucket_size[m]; n++) {
-            cur_idx = cur_buck->buck[n].idx;
+            cur_idx = cur_buck[n].idx;
 
-            entry = &hashtab->tab[cur_buck->buck[n].head];
+            entry = tab + cur_buck[n].head;
 
             switch (entry->count) {
                 case 0:
@@ -259,8 +233,7 @@ void wagner_collide(wagner_state_t *state)
 
                 case 1:
                     if (pair_next != WAGNER_MAX_PAIR) {
-                        if (collide_pair(ctx, stage, prev_pair_list,
-                                         pair_next, entry->where, cur_idx)) {
+                        if (check_collide(stage, prev_pair_list, entry->where, cur_idx)) {
                             pair_list[pair_next] = to_pair(entry->where, cur_idx);
                             entry->count++;
                             entry->where = pair_next;
@@ -277,16 +250,15 @@ void wagner_collide(wagner_state_t *state)
                     // (a, k), (b, k), (c, k) ... (a + count - 1, k)
                     // we pair (a, b, c .. a + count - 1, k) each with the current index(cur_buck->buck[n])
 
-                    start = entry->where;
-                    end = start + entry->count - 2;
+                    i = entry->where;
+                    j = i + entry->count - 2;
 
                     count = 0;
                     idx = -1;
 
                     #define PAIR_WITH(a) \
                         if (pair_next != WAGNER_MAX_PAIR) { \
-                            if (collide_pair(ctx, stage, prev_pair_list, \
-                                             pair_next, (a), cur_idx)) { \
+                            if (check_collide(stage, prev_pair_list, (a), cur_idx)) { \
                                 pair_list[pair_next] = to_pair((a), cur_idx); \
                                 if (idx == -1) idx = pair_next; \
                                 count++; \
@@ -295,15 +267,14 @@ void wagner_collide(wagner_state_t *state)
                         } else goto L_END;
 
                     // iterate though each previous pair
-                    for (; start <= end; start++) {
-                        PAIR_WITH(pair_i(pair_list[start]));
+                    for (; i <= j; i++) {
+                        PAIR_WITH(pair_i(pair_list[i]));
                     }
 
                     // add the last pair
-                    PAIR_WITH(pair_j(pair_list[end]));
+                    PAIR_WITH(pair_j(pair_list[j]));
 
                     if (idx != -1) {
-                        // printf("added: %d\n", count);
                         entry->count = count + 1;
                         entry->where = idx;
                     }
@@ -312,6 +283,18 @@ void wagner_collide(wagner_state_t *state)
     }
 
 L_END:
+
+    for (m = 0; m < pair_next; m++) {
+        i = pair_i(pair_list[m]);
+        j = pair_j(pair_list[m]);
+
+        next_list[m] = *tail_at(cur_list, stage, i) ^ *tail_at(cur_list, stage, j);
+
+        xor_chunks(tail_at(cur_list, stage, i) + 1,
+                   tail_at(cur_list, stage, j) + 1,
+                   tail_at(next_list, stage + 1, m),
+                   WAGNER_CHUNK_AT_STAGE(stage + 1) - 1);
+    }
 
     // prepare for the next state
     state->nstr = pair_next; // pair_set->size;

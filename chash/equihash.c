@@ -125,11 +125,12 @@ int equihash(const byte_t *dat, size_t size,
 
     msec_t start, end;
 
+    hashes = gen_problem(dat, size);
+
     start = get_cpu_ms();
 
-    hashes = gen_problem(dat, size);
     found = wagner_solve(hashes, sols, max_sol);
-
+    
     end = get_cpu_ms();
 
     printf("searching finished after %dms\n", end - start);
