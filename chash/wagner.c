@@ -151,16 +151,16 @@ inline static
 bool check_collide(int stage, wagner_pair_t *prev_pair_list, index_t ai, index_t bi)
 {
     // check duplication
-    return stage < WAGNER_TOTAL_STAGE / 3 ||
-           !has_dup(prev_pair_list[ai], prev_pair_list[bi]);
+    return !stage || !has_dup(prev_pair_list[ai], prev_pair_list[bi]);
 }
 
 // we can put the first chunk of each string at the front
 // and put the rest data at the end
-void wagner_collide(wagner_state_t *state)
+inline static
+void wagner_collide(wagner_state_t *state, int stage)
 {
     void *ctx = state->ctx;
-    int stage = state->stage;
+    // int stage = state->stage;
     int nstr = state->nstr;
 
     wagner_pair_set_t *pair_set = pair_set_at_stage(ctx, stage);
@@ -210,7 +210,10 @@ void wagner_collide(wagner_state_t *state)
     }
 
     // r/w tab
-    // 
+    // r cur_list
+    // w next_list
+    // r bucks
+    // r/w pair_list
 
     for (m = 0; m < WAGNER_BUCKET; m++) {
         cur_buck = bucks[m].buck;
@@ -298,7 +301,6 @@ L_END:
 
     // prepare for the next state
     state->nstr = pair_next; // pair_set->size;
-    state->stage++;
 }
 
 int wagner_trace_solution(void *ctx, wagner_pair_t from,
@@ -411,9 +413,21 @@ int wagner_solve(const byte_t *init_list, index_t *sols, int max_sol)
 
     state.bucks = malloc(WAGNER_BUCKET * WAGNER_BUCKET_SIZE);
 
+#if WAGNER_TOTAL_STAGE == 9
+    wagner_collide(&state, 0);
+    wagner_collide(&state, 1);
+    wagner_collide(&state, 2);
+    wagner_collide(&state, 3);
+    wagner_collide(&state, 4);
+    wagner_collide(&state, 5);
+    wagner_collide(&state, 6);
+    wagner_collide(&state, 7);
+    wagner_collide(&state, 8);
+#else
     for (i = 0; i < WAGNER_TOTAL_STAGE; i++) {
-        wagner_collide(&state);
+        wagner_collide(&state, i);
     }
+#endif
 
     found = wagner_finalize(&state, sols, max_sol);
 

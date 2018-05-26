@@ -1,4 +1,4 @@
-all:
+all: wagner.c equihash.c main.c blake
 	gcc -O3 -g -o chash *.c blake/*.c -lpthread
 
 profile: all
