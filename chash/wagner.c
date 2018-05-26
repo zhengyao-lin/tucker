@@ -5,9 +5,11 @@
 #include "wagner.h"
 
 // #define FINAL_STAGE (WAGNER_TOTAL_STAGE - 1) // the last collection stage
-#define FINAL_STAGE WAGNER_TOTAL_STAGE
+#define FINAL_STAGE (WAGNER_TOTAL_STAGE - 1)
 
 #define ONES(n) (~(~(wagner_chunk_t)0 << (n)))
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 inline static
 wagner_pair_set_t *
@@ -17,28 +19,16 @@ pair_set_at_stage(void *ctx, int stage)
 }
 
 inline static
-wagner_chunk_t *list_at_stage(void *ctx, int stage)
+byte_t *list_at_stage(void *ctx, int stage)
 {
-    wagner_chunk_t *base =
-        (wagner_chunk_t *)((byte_t *)ctx + WAGNER_MEM_UNIT * (stage + 2));
+    byte_t *base = (byte_t *)ctx + WAGNER_MEM_UNIT * (stage + 2);
 
     if (stage & 1) {
-        return base + WAGNER_MAX_PAIR * WAGNER_CHUNK_AT_STAGE(stage - 1);
+        // return base + MAX(WAGNER_MAX_PAIR * WAGNER_LEN_AT_STAGE(stage - 1);
+        return base + MAX(WAGNER_MAX_PAIR * WAGNER_ALIGNED_LEN_AT_STAGE(stage - 1),
+                          WAGNER_MEM_UNIT + WAGNER_MAX_PAIR * WAGNER_ALIGNED_LEN_AT_STAGE(stage + 1));
     } else
         return base;
-}
-
-inline static
-wagner_chunk_t *head_at(wagner_chunk_t *list, int i)
-{
-    return list + i;
-}
-
-inline static
-wagner_chunk_t *tail_at(wagner_chunk_t *list, int stage, int i)
-{
-                /* all head chunks */
-    return list + WAGNER_MAX_PAIR + (WAGNER_CHUNK_AT_STAGE(stage) - 1) * i;
 }
 
 inline static
@@ -48,8 +38,7 @@ size_t sizeof_ctx()
     int i;
 
     for (i = 0; i < WAGNER_TOTAL_STAGE; i++) {
-        tmp = (size_t)(list_at_stage(NULL, i) +
-                       WAGNER_MAX_PAIR * WAGNER_CHUNK_AT_STAGE(i));
+        tmp = (size_t)(list_at_stage(NULL, i) + WAGNER_MAX_PAIR * WAGNER_ALIGNED_LEN_AT_STAGE(i));
     
         if (tmp > max) max = tmp;
     }
@@ -77,8 +66,9 @@ index_t pair_j(wagner_pair_t pair)
 
 // mask bits at range [i, j) in a string
 // precond j - i <= chunk size
+
 inline static
-wagner_chunk_t mask_bits(const byte_t *str, int i, int j)
+wagner_chunk_t mask_bits(byte_t *str, int i, int j)
 {
     int ei = i % 8,
         ej = j % 8;
@@ -110,6 +100,26 @@ wagner_chunk_t mask_bits(const byte_t *str, int i, int j)
     return ret;
 }
 
+// specialized for BITS == 20, even stage
+inline static
+wagner_chunk_t mask_bits_even(byte_t *str)
+{
+    return
+        ((wagner_chunk_t)str[0]) |
+        ((wagner_chunk_t)str[1] << 8) |
+        (((wagner_chunk_t)str[2] & ONES(4)) << 16);
+}
+
+// specialized for BITS == 20, odd stage
+inline static
+wagner_chunk_t mask_bits_odd(byte_t *str)
+{
+    return
+        ((wagner_chunk_t)str[0] >> 4) |
+        ((wagner_chunk_t)str[1] << 4) |
+        ((wagner_chunk_t)str[2] << 12);
+}
+
 inline static
 wagner_chunk_t mask_bucket_bits(wagner_chunk_t head)
 {
@@ -123,14 +133,48 @@ wagner_chunk_t mask_collision_bits(wagner_chunk_t head)
 }
 
 inline static
-void xor_chunks(const wagner_chunk_t *a,
-                const wagner_chunk_t *b,
-                wagner_chunk_t *dst, int size)
+byte_t *string_at(byte_t *list, int stage, int i)
+{
+    return list + i * WAGNER_ALIGNED_LEN_AT_STAGE(stage);
+}
+
+#if WAGNER_BITS == 20
+    inline static
+    wagner_chunk_t head_at(byte_t *list, int stage, int i)
+    {
+        if (stage & 1) {
+            return mask_bits_odd(string_at(list, stage, i));
+        } else {
+            return mask_bits_even(string_at(list, stage, i));
+        }
+    }
+#else
+    inline static
+    wagner_chunk_t head_at(byte_t *list, int stage, int i)
+    {
+        int ofs = WAGNER_OFS_AT_STAGE(stage);
+        return mask_bits(string_at(list, stage, i), ofs, ofs + WAGNER_BITS);
+    }
+#endif
+
+inline static
+void xor_string(const byte_t *a,
+                const byte_t *b,
+                byte_t *dst, int size)
 {
     int i;
 
-    for (i = 0; i < size; i++) {
-        dst[i] = a[i] ^ b[i];
+    for (i = 0; i < size; i += 4) {
+        ((uint32_t *)dst)[i / 4] = ((uint32_t *)a)[i / 4] ^
+                                   ((uint32_t *)b)[i / 4];
+    }
+
+    i -= 4;
+
+    switch (size - i) {
+        case 3: dst[i] = a[i] ^ b[i]; i++;
+        case 2: dst[i] = a[i] ^ b[i]; i++;
+        case 1: dst[i] = a[i] ^ b[i]; i++;
     }
 }
 
@@ -154,10 +198,49 @@ bool check_collide(int stage, wagner_pair_t *prev_pair_list, index_t ai, index_t
     return !stage || !has_dup(prev_pair_list[ai], prev_pair_list[bi]);
 }
 
+int wagner_trace_solution(void *ctx, wagner_pair_t from,
+                          int stage, int cur_size, index_t *sol,
+                          bool *used)
+{
+    wagner_pair_set_t *prev;
+
+    wagner_pair_t p1, p2;
+    index_t i = pair_i(from),
+            j = pair_j(from);
+
+    int new_size;
+
+    if (cur_size == -1) return -1;
+
+    if (stage == 0) {
+        // have reached the leaves, write the actual index
+        if (used[i] || used[j]) return -1;
+
+        used[i] = true;
+        used[j] = true;
+
+        sol[cur_size++] = i;
+        sol[cur_size++] = j;
+        
+        return cur_size;
+    } else {
+        // continue tracing
+        prev = pair_set_at_stage(ctx, stage - 1);
+
+        p1 = prev->pairs[i];
+        p2 = prev->pairs[j];
+        
+        new_size = wagner_trace_solution(ctx, p1, stage - 1, cur_size, sol, used);
+        new_size = wagner_trace_solution(ctx, p2, stage - 1, new_size, sol, used);
+    
+        return new_size;
+    }
+}
+
 // we can put the first chunk of each string at the front
 // and put the rest data at the end
 inline static
-void wagner_collide(wagner_state_t *state, int stage)
+int wagner_collide(wagner_state_t *state, int stage)
 {
     void *ctx = state->ctx;
     // int stage = state->stage;
@@ -170,8 +253,8 @@ void wagner_collide(wagner_state_t *state, int stage)
     wagner_entry_t *tab = state->hashtab->tab;
     wagner_entry_t *entry;
 
-    wagner_chunk_t *cur_list = list_at_stage(ctx, stage);
-    wagner_chunk_t *next_list = list_at_stage(ctx, stage + 1);
+    byte_t *cur_list = list_at_stage(ctx, stage);
+    byte_t *next_list = list_at_stage(ctx, stage + 1);
     wagner_chunk_t chunk, buck_bits, col_bits;
 
     wagner_pair_t *prev_pair_list =
@@ -184,13 +267,16 @@ void wagner_collide(wagner_state_t *state, int stage)
 
     index_t bucket_size[WAGNER_BUCKET];
 
-    int count;
+    int count, diff;
 
     // for each string in the current stage
     // bits i -> k are the sort bits
     // bits k -> j are the bucket bits
 
-    printf("stage: %d, inputs: %d, chunks: %d\n", stage, nstr, WAGNER_CHUNK_AT_STAGE(stage));
+    printf("stage: %d, inputs: %d, ofs: %d, len: %d, aligned len: %d\n",
+           stage, nstr, WAGNER_OFS_AT_STAGE(stage),
+           WAGNER_LEN_AT_STAGE(stage),
+           WAGNER_ALIGNED_LEN_AT_STAGE(stage));
     // printf("cur list: %p\n", cur_list);
 
     // init buckets
@@ -198,7 +284,8 @@ void wagner_collide(wagner_state_t *state, int stage)
 
     // linear scan to sort all strings to buckets
     for (m = 0; m < nstr; m++) {
-        chunk = *head_at(cur_list, m);
+        chunk = head_at(cur_list, stage, m);
+
         buck_bits = mask_bucket_bits(chunk);
 
         if (bucket_size[buck_bits] != WAGNER_BUCKET_ELEM) {
@@ -208,12 +295,6 @@ void wagner_collide(wagner_state_t *state, int stage)
                 };
         }
     }
-
-    // r/w tab
-    // r cur_list
-    // w next_list
-    // r bucks
-    // r/w pair_list
 
     for (m = 0; m < WAGNER_BUCKET; m++) {
         cur_buck = bucks[m].buck;
@@ -237,6 +318,9 @@ void wagner_collide(wagner_state_t *state, int stage)
                 case 1:
                     if (pair_next != WAGNER_MAX_PAIR) {
                         if (check_collide(stage, prev_pair_list, entry->where, cur_idx)) {
+                            // if (head_at(cur_list, stage, entry->where) != head_at(cur_list, stage, cur_idx))
+                            //     printf("impossible\n");
+
                             pair_list[pair_next] = to_pair(entry->where, cur_idx);
                             entry->count++;
                             entry->where = pair_next;
@@ -287,91 +371,51 @@ void wagner_collide(wagner_state_t *state, int stage)
 
 L_END:
 
-    for (m = 0; m < pair_next; m++) {
-        i = pair_i(pair_list[m]);
-        j = pair_j(pair_list[m]);
+    diff = WAGNER_LEN_AT_STAGE(stage) - WAGNER_LEN_AT_STAGE(stage + 1);
 
-        next_list[m] = *tail_at(cur_list, stage, i) ^ *tail_at(cur_list, stage, j);
+    if (stage != FINAL_STAGE) {
+        for (m = 0; m < pair_next; m++) {
+            i = pair_i(pair_list[m]);
+            j = pair_j(pair_list[m]);
 
-        xor_chunks(tail_at(cur_list, stage, i) + 1,
-                   tail_at(cur_list, stage, j) + 1,
-                   tail_at(next_list, stage + 1, m),
-                   WAGNER_CHUNK_AT_STAGE(stage + 1) - 1);
-    }
+            xor_string(string_at(cur_list, stage, i) + diff,
+                       string_at(cur_list, stage, j) + diff,
+                       string_at(next_list, stage + 1, m),
+                       WAGNER_LEN_AT_STAGE(stage + 1));
+        }
 
-    // prepare for the next state
-    state->nstr = pair_next; // pair_set->size;
-}
+        // prepare for the next state
+        state->nstr = pair_next; // pair_set->size;
 
-int wagner_trace_solution(void *ctx, wagner_pair_t from,
-                          int stage, int cur_size, index_t *sol,
-                          bool *used)
-{
-    wagner_pair_set_t *prev;
-
-    wagner_pair_t p1, p2;
-    index_t i = pair_i(from),
-            j = pair_j(from);
-
-    int new_size;
-
-    if (cur_size == -1) return -1;
-
-    if (stage == 0) {
-        // have reached the leaves, write the actual index
-        if (used[i] || used[j]) return -1;
-
-        used[i] = true;
-        used[j] = true;
-
-        sol[cur_size++] = i;
-        sol[cur_size++] = j;
-        
-        return cur_size;
+        return -1;
     } else {
-        // continue tracing
-        prev = pair_set_at_stage(ctx, stage - 1);
+        // finalize solutions
 
-        p1 = prev->pairs[i];
-        p2 = prev->pairs[j];
-        
-        new_size = wagner_trace_solution(ctx, p1, stage - 1, cur_size, sol, used);
-        new_size = wagner_trace_solution(ctx, p2, stage - 1, new_size, sol, used);
-    
-        return new_size;
-    }
-}
+        int found = 0;
+        bool *used = malloc(WAGNER_INIT_NSTR * sizeof(*used));
 
-int wagner_finalize(wagner_state_t *state, index_t *sols, int max_sol)
-{
-    bool *used = malloc(WAGNER_INIT_NSTR * sizeof(*used));
-    void *ctx = state->ctx;
+        for (m = 0; m < pair_next; m++) {
+            i = pair_i(pair_list[m]);
+            j = pair_j(pair_list[m]);
 
-    wagner_chunk_t *last_list = list_at_stage(ctx, FINAL_STAGE);
+            if (memcmp(string_at(cur_list, stage, i) + diff,
+                       string_at(cur_list, stage, j) + diff,
+                       WAGNER_LEN_AT_STAGE(stage + 1)) == 0) {
 
-    int nstr = state->nstr;
-    int i, found = 0;
-
-    wagner_pair_set_t *prev_set = pair_set_at_stage(ctx, FINAL_STAGE - 1);
-
-    // find any pair that yields zero
-    for (i = 0; i < nstr; i++) {
-        if (*head_at(last_list, i) == 0 &&
-            found < max_sol) {
-            bzero(used, WAGNER_INIT_NSTR * sizeof(*used));
-
-            if (wagner_trace_solution(ctx, prev_set->pairs[i], FINAL_STAGE - 1, 0,
-                                      sols + found * WAGNER_SOLUTION, used) != -1) {
-                found++;
+                if (found < state->max_sol) {
+                    bzero(used, WAGNER_INIT_NSTR * sizeof(*used));
+                    if (wagner_trace_solution(ctx, pair_list[m], FINAL_STAGE, 0,
+                                              state->sols + found * WAGNER_SOLUTION, used) != -1) {
+                        found++;
+                    }
+                } else break;
             }
         }
+
+        free(used);
+
+        return found;
     }
-    
-    free(used);
-
-    printf("found: %d\n", found);
-
-    return found;
 }
 
 // sols should have max_sol * WAGNER_SOLUTION elems
@@ -381,34 +425,32 @@ int wagner_solve(const byte_t *init_list, index_t *sols, int max_sol)
     wagner_state_t state = {
         .ctx = NULL,
         .hashtab = &hashtab,
-        .nstr = WAGNER_INIT_NSTR,
-        .stage = 0
+        .sols = sols,
+        .max_sol = max_sol,
+        .nstr = WAGNER_INIT_NSTR
     };
 
-    int i, j, found;
+    int i, found;
     size_t size = sizeof_ctx();
-    wagner_chunk_t *init_chunk, *tmp_head, *tmp_tail;
-    const byte_t *str;
+    // wagner_chunk_t *init_chunk, *tmp_head, *tmp_tail;
+    // const byte_t *str;
 
     printf("allocating %lu bytes\n", size);
 
     state.ctx = malloc(size);
-    init_chunk = list_at_stage(state.ctx, 0);
-
-    // init chunks
-    for (i = 0; i < WAGNER_INIT_NSTR; i++) {
-        tmp_head = head_at(init_chunk, i);
-        tmp_tail = tail_at(init_chunk, 0, i);
-
-        str = init_list + WAGNER_N_BYTE * i;
-
-        *tmp_head = mask_bits(str, 0, WAGNER_BITS);
-
-        for (j = 0; j < WAGNER_TOTAL_CHUNK - 1; j++) {
-            tmp_tail[j] = mask_bits(str, (j + 1) * WAGNER_BITS, (j + 2) * WAGNER_BITS);
-        }
-    }
     
+#if WAGNER_INIT_ALIGNED
+    memcpy(list_at_stage(state.ctx, 0), init_list, WAGNER_INIT_NSTR * WAGNER_LEN_AT_STAGE(0));
+#else
+    // copy the stirngs one by one to ensure the alignment
+
+    byte_t *list = list_at_stage(state.ctx, 0);
+
+    for (i = 0; i < WAGNER_INIT_NSTR; i++) {
+        memcpy(string_at(list, 0, i), init_list + i * WAGNER_LEN_AT_STAGE(0), WAGNER_LEN_AT_STAGE(0));
+    }
+#endif
+
     printf("bucket size: %lu\n", WAGNER_BUCKET_SIZE);
 
     state.bucks = malloc(WAGNER_BUCKET * WAGNER_BUCKET_SIZE);
@@ -422,17 +464,37 @@ int wagner_solve(const byte_t *init_list, index_t *sols, int max_sol)
     wagner_collide(&state, 5);
     wagner_collide(&state, 6);
     wagner_collide(&state, 7);
-    wagner_collide(&state, 8);
+    found = wagner_collide(&state, 8);
 #else
     for (i = 0; i < WAGNER_TOTAL_STAGE; i++) {
-        wagner_collide(&state, i);
+        found = wagner_collide(&state, i);
     }
 #endif
 
-    found = wagner_finalize(&state, sols, max_sol);
+    // found = wagner_finalize(&state, sols, max_sol);
+
+    printf("found: %d\n", found);
 
     free(state.bucks);
     free(state.ctx);
 
     return found;
 }
+
+/*
+
+allocating 209715200 bytes
+bucket size: 81920
+stage: 0, inputs: 2097152, chunks: 10
+stage: 1, inputs: 2097152, chunks: 9
+stage: 2, inputs: 2096607, chunks: 8
+stage: 3, inputs: 2097152, chunks: 7
+stage: 4, inputs: 2097152, chunks: 6
+stage: 5, inputs: 2097152, chunks: 5
+stage: 6, inputs: 2097152, chunks: 4
+stage: 7, inputs: 2096375, chunks: 3
+stage: 8, inputs: 2093012, chunks: 2
+found: 0
+searching finished after 2047ms
+
+*/

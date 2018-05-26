@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 
-typedef unsigned char byte_t;
+typedef uint8_t byte_t;
 typedef uint32_t word_t;
 typedef byte_t hash256_t[32];
 typedef uint32_t nonce_t;

@@ -96,13 +96,13 @@ bool equihash_verify(const byte_t *dat, size_t size, index_t *sol)
 
 #undef STR
 
-    // printf("final: ", i, idx);
+    printf("final: ");
 
-    // for (int j = 0; j < WAGNER_N_BYTE; j++) {
-    //     print_byte(xor_sum[j]);
-    // }
+    for (int j = 0; j < WAGNER_N_BYTE; j++) {
+        print_byte(xor_sum[j]);
+    }
 
-    // printf("\n");
+    printf("\n");
 
     for (i = 0; i < WAGNER_N_BYTE; i++) {
         if (xor_sum[i] != 0) {
