@@ -98,7 +98,7 @@ bool equihash_verify(const byte_t *dat, size_t size, index_t *sol)
 
     printf("final: ");
 
-    for (int j = 0; j < WAGNER_N_BYTE; j++) {
+    for (j = 0; j < WAGNER_N_BYTE; j++) {
         print_byte(xor_sum[j]);
     }
 
@@ -112,6 +112,7 @@ bool equihash_verify(const byte_t *dat, size_t size, index_t *sol)
         }
     }
 
+    free(prob);
     free(used);
 
     return valid;

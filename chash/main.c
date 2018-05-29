@@ -12,13 +12,11 @@
 
 int main()
 {
-    char dat[] = "hello, my name is rod. im just trying to make this string longer and longer and longer and longer";
+    char dat[] = "hello, my name is rod. im just trying to make this string longer and longer and longer and longer and longer";
     index_t sols[20 * WAGNER_SOLUTION];
-
-    int found;
     
     do_test();
-    found = equihash((byte_t *)dat, sizeof(dat), sols, 20);
+    equihash((byte_t *)dat, sizeof(dat), sols, 20);
 
     return 0;
 }

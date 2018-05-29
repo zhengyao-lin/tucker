@@ -16,6 +16,12 @@ typedef uint64_t size_t;
 
 typedef uint32_t msec_t;
 
+// align a number to 2^k
+#define ALIGNK(k, i) (((i) + (1 << (k)) - 1) & (~((1 << (k)) - 1)))
+#define ALIGN4(i) ALIGNK(2, i)
+#define ALIGN8(i) ALIGNK(3, i)
+#define ALIGN16(i) ALIGNK(4, i)
+
 static inline msec_t
 get_cpu_ms()
 {

@@ -10,8 +10,8 @@
 /* n < 32 */
 #define ONES(n) (~((word_t)0xffffffff << (n)))
 
-#define ROTATER(v, n) (((v) >> (n)) | ((v) << 32 - (n)))
-#define ROTATEL(v, n) (((v) << (n)) | ((v) >> 32 - (n)))
+#define ROTATER(v, n) (((v) >> (n)) | ((v) << (32 - (n))))
+#define ROTATEL(v, n) (((v) << (n)) | ((v) >> (32 - (n))))
 
 #define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
 #define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
@@ -146,9 +146,6 @@ void sha256_finalize(ctx_sha256_t *ctx, const byte_t *remain, size_t rsize, size
 {
     size_t k = get_k(rsize);
     size_t nappend = 1 + k + 8;
-
-    size_t fsize = rsize + nappend;
-    size_t nchunk = fsize / CHUNK_SIZE;
 
     word_t last_chunk[16] = {0};
 

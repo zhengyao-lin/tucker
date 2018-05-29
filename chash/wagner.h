@@ -29,7 +29,7 @@
 #define WAGNER_MAX_IDX_BITS (WAGNER_BITS + 1)
 
 #define WAGNER_LEN_AT_STAGE(stage) ((WAGNER_N - (stage) * WAGNER_BITS + 7) / 8)
-#define WAGNER_ALIGNED_LEN_AT_STAGE(stage) ((WAGNER_N - (stage) * WAGNER_BITS + 31) / 32 * 4)
+#define WAGNER_ALIGNED_LEN_AT_STAGE(stage) ALIGN4(WAGNER_LEN_AT_STAGE(stage))
 #define WAGNER_OFS_AT_STAGE(stage) ((stage) * WAGNER_BITS % 8)
 
 #define WAGNER_BUCKET_ELEM ((WAGNER_MAX_PAIR / WAGNER_BUCKET) * 5 / 4)
@@ -55,9 +55,11 @@
     #error "too many bits per round"
 #endif
 
-typedef struct {
-    index_t i, j;
-} wagner_pair_t;
+// typedef struct {
+//     index_t i, j;
+// } wagner_pair_t;
+
+typedef uint64_t wagner_pair_t;
 
 typedef struct {
     wagner_pair_t pairs[WAGNER_MAX_PAIR];

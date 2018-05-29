@@ -98,10 +98,7 @@ miner_state_t *init_miner(const byte_t *dat, size_t size, const hash256_t target
 {
     size_t nsize = size + 4;
 
-    size_t rsize = size % CHUNK_SIZE,
-           preproc = size - rsize;
-
-    nonce_t answer = MAX_BOUND;
+    size_t rsize = size % CHUNK_SIZE;
 
     // jobs/state
     miner_state_t *state = malloc(sizeof(*state));

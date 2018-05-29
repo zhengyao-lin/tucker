@@ -49,19 +49,19 @@ size_t sizeof_ctx()
 inline static
 wagner_pair_t to_pair(index_t i, index_t j)
 {
-    return (wagner_pair_t) { i, j };
+    return (wagner_pair_t)i << 32 | j;
 }
 
 inline static
 index_t pair_i(wagner_pair_t pair)
 {
-    return pair.i;
+    return pair >> 32;
 }
 
 inline static
 index_t pair_j(wagner_pair_t pair)
 {
-    return pair.j;
+    return pair << 32 >> 32;
 }
 
 // mask bits at range [i, j) in a string
@@ -104,20 +104,22 @@ wagner_chunk_t mask_bits(byte_t *str, int i, int j)
 inline static
 wagner_chunk_t mask_bits_even(byte_t *str)
 {
-    return
-        ((wagner_chunk_t)str[0]) |
-        ((wagner_chunk_t)str[1] << 8) |
-        (((wagner_chunk_t)str[2] & ONES(4)) << 16);
+    return *(wagner_chunk_t *)str & ONES(WAGNER_BITS);
+    // return
+    //     ((wagner_chunk_t)str[0]) |
+    //     ((wagner_chunk_t)str[1] << 8) |
+    //     (((wagner_chunk_t)str[2] & ONES(4)) << 16);
 }
 
 // specialized for BITS == 20, odd stage
 inline static
 wagner_chunk_t mask_bits_odd(byte_t *str)
 {
-    return
-        ((wagner_chunk_t)str[0] >> 4) |
-        ((wagner_chunk_t)str[1] << 4) |
-        ((wagner_chunk_t)str[2] << 12);
+    return (*(wagner_chunk_t *)str >> 4) & ONES(WAGNER_BITS);
+    // return
+    //     ((wagner_chunk_t)str[0] >> 4) |
+    //     ((wagner_chunk_t)str[1] << 4) |
+    //     ((wagner_chunk_t)str[2] << 12);
 }
 
 inline static
@@ -158,18 +160,20 @@ byte_t *string_at(byte_t *list, int stage, int i)
 #endif
 
 inline static
-void xor_string(const byte_t *a,
-                const byte_t *b,
-                byte_t *dst, int size)
+void xor_string(const byte_t *a, const byte_t *b, byte_t *dst, int size)
 {
-    int i;
+    int i = 0, isize = size / 4;
+    uint32_t *idst = (uint32_t *)dst,
+             *end = idst + isize;
+    uint32_t *ia = (uint32_t *)a;
+    uint32_t *ib = (uint32_t *)b;
 
-    for (i = 0; i < size; i += 4) {
-        ((uint32_t *)dst)[i / 4] = ((uint32_t *)a)[i / 4] ^
-                                   ((uint32_t *)b)[i / 4];
+    while (idst != end) {
+        *idst++ = *ia++ ^ *ib++;
+        i++;
     }
 
-    i -= 4;
+    i *= 4;
 
     switch (size - i) {
         case 3: dst[i] = a[i] ^ b[i]; i++;
@@ -198,42 +202,27 @@ bool check_collide(int stage, wagner_pair_t *prev_pair_list, index_t ai, index_t
     return !stage || !has_dup(prev_pair_list[ai], prev_pair_list[bi]);
 }
 
-int wagner_trace_solution(void *ctx, wagner_pair_t from,
-                          int stage, int cur_size, index_t *sol,
-                          bool *used)
+bool wagner_trace_solution(void *ctx, wagner_pair_t from, int stage, bool *used)
 {
     wagner_pair_set_t *prev;
 
-    wagner_pair_t p1, p2;
     index_t i = pair_i(from),
             j = pair_j(from);
 
-    int new_size;
-
-    if (cur_size == -1) return -1;
-
     if (stage == 0) {
         // have reached the leaves, write the actual index
-        if (used[i] || used[j]) return -1;
-
-        used[i] = true;
-        used[j] = true;
-
-        sol[cur_size++] = i;
-        sol[cur_size++] = j;
-        
-        return cur_size;
+        if (used[i] || used[j])
+            return false;
+        else {
+            used[i] = used[j] = true;
+            return true;
+        }
     } else {
         // continue tracing
         prev = pair_set_at_stage(ctx, stage - 1);
 
-        p1 = prev->pairs[i];
-        p2 = prev->pairs[j];
-        
-        new_size = wagner_trace_solution(ctx, p1, stage - 1, cur_size, sol, used);
-        new_size = wagner_trace_solution(ctx, p2, stage - 1, new_size, sol, used);
-    
-        return new_size;
+        return wagner_trace_solution(ctx, prev->pairs[i], stage - 1, used) &&
+               wagner_trace_solution(ctx, prev->pairs[j], stage - 1, used);
     }
 }
 
@@ -243,19 +232,18 @@ inline static
 int wagner_collide(wagner_state_t *state, int stage)
 {
     void *ctx = state->ctx;
-    // int stage = state->stage;
     int nstr = state->nstr;
 
     wagner_pair_set_t *pair_set = pair_set_at_stage(ctx, stage);
 
     wagner_bucket_t *bucks = state->bucks;
-    wagner_bucket_item_t *cur_buck;
+    wagner_bucket_item_t *cur_buck, *cur_buck_end;
     wagner_entry_t *tab = state->hashtab->tab;
     wagner_entry_t *entry;
 
     byte_t *cur_list = list_at_stage(ctx, stage);
     byte_t *next_list = list_at_stage(ctx, stage + 1);
-    wagner_chunk_t chunk, buck_bits, col_bits;
+    wagner_chunk_t chunk, buck_bits;
 
     wagner_pair_t *prev_pair_list =
         stage ? pair_set_at_stage(ctx, stage - 1)->pairs : NULL;
@@ -263,11 +251,11 @@ int wagner_collide(wagner_state_t *state, int stage)
     wagner_pair_t *pair_list = pair_set->pairs;
     index_t pair_next = 0;
     
-    index_t idx, cur_idx, m, n, i, j;
+    index_t idx, cur_idx, m, i, j;
 
     index_t bucket_size[WAGNER_BUCKET];
 
-    int count, diff;
+    int count;
 
     // for each string in the current stage
     // bits i -> k are the sort bits
@@ -290,24 +278,22 @@ int wagner_collide(wagner_state_t *state, int stage)
 
         if (bucket_size[buck_bits] != WAGNER_BUCKET_ELEM) {
             bucks[buck_bits].buck[bucket_size[buck_bits]++] =
-                (wagner_bucket_item_t) {
-                    m, mask_collision_bits(chunk)
-                };
+                (wagner_bucket_item_t) { m, mask_collision_bits(chunk) };
         }
     }
 
     for (m = 0; m < WAGNER_BUCKET; m++) {
         cur_buck = bucks[m].buck;
+        cur_buck_end = cur_buck + bucket_size[m];
 
         // init hash table
         bzero(tab, sizeof(wagner_hash_table_t));
 
         // printf("bucket size: %d %d\n", bucket_size[m], pair_next);
 
-        for (n = 0; n < bucket_size[m]; n++) {
-            cur_idx = cur_buck[n].idx;
-
-            entry = tab + cur_buck[n].head;
+        for (; cur_buck != cur_buck_end; cur_buck++) {
+            cur_idx = cur_buck->idx;
+            entry = tab + cur_buck->head;
 
             switch (entry->count) {
                 case 0:
@@ -318,9 +304,6 @@ int wagner_collide(wagner_state_t *state, int stage)
                 case 1:
                     if (pair_next != WAGNER_MAX_PAIR) {
                         if (check_collide(stage, prev_pair_list, entry->where, cur_idx)) {
-                            // if (head_at(cur_list, stage, entry->where) != head_at(cur_list, stage, cur_idx))
-                            //     printf("impossible\n");
-
                             pair_list[pair_next] = to_pair(entry->where, cur_idx);
                             entry->count++;
                             entry->where = pair_next;
@@ -371,15 +354,17 @@ int wagner_collide(wagner_state_t *state, int stage)
 
 L_END:
 
-    diff = WAGNER_LEN_AT_STAGE(stage) - WAGNER_LEN_AT_STAGE(stage + 1);
+#define DIFF (WAGNER_LEN_AT_STAGE(stage) - WAGNER_LEN_AT_STAGE(stage + 1))
+
+    // diff = WAGNER_LEN_AT_STAGE(stage) - WAGNER_LEN_AT_STAGE(stage + 1);
 
     if (stage != FINAL_STAGE) {
         for (m = 0; m < pair_next; m++) {
             i = pair_i(pair_list[m]);
             j = pair_j(pair_list[m]);
 
-            xor_string(string_at(cur_list, stage, i) + diff,
-                       string_at(cur_list, stage, j) + diff,
+            xor_string(string_at(cur_list, stage, i) + DIFF,
+                       string_at(cur_list, stage, j) + DIFF,
                        string_at(next_list, stage + 1, m),
                        WAGNER_LEN_AT_STAGE(stage + 1));
         }
@@ -393,19 +378,27 @@ L_END:
 
         int found = 0;
         bool *used = malloc(WAGNER_INIT_NSTR * sizeof(*used));
+        index_t *cur_sol = state->sols,
+                *end = cur_sol + state->max_sol * WAGNER_SOLUTION;
 
         for (m = 0; m < pair_next; m++) {
             i = pair_i(pair_list[m]);
             j = pair_j(pair_list[m]);
 
-            if (memcmp(string_at(cur_list, stage, i) + diff,
-                       string_at(cur_list, stage, j) + diff,
+            if (memcmp(string_at(cur_list, stage, i) + DIFF,
+                       string_at(cur_list, stage, j) + DIFF,
                        WAGNER_LEN_AT_STAGE(stage + 1)) == 0) {
 
-                if (found < state->max_sol) {
+                if (cur_sol != end) {
                     bzero(used, WAGNER_INIT_NSTR * sizeof(*used));
-                    if (wagner_trace_solution(ctx, pair_list[m], FINAL_STAGE, 0,
-                                              state->sols + found * WAGNER_SOLUTION, used) != -1) {
+
+                    if (wagner_trace_solution(ctx, pair_list[m], FINAL_STAGE, used)) {
+                        for (i = 0; i < WAGNER_INIT_NSTR; i++) {
+                            if (used[i]) {
+                                *cur_sol++ = i;
+                            }
+                        }
+
                         found++;
                     }
                 } else break;
@@ -416,6 +409,8 @@ L_END:
 
         return found;
     }
+
+#undef DIFF
 }
 
 // sols should have max_sol * WAGNER_SOLUTION elems
