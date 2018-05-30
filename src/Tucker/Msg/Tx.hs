@@ -123,6 +123,8 @@ nullTxOutput = TxOutput { value = -1, pk_script = BSR.empty }
 -- TxWitness is a list of stack items
 newtype TxWitness = TxWitness [ByteString] deriving (Eq, Show)
 
+nullWitness = TxWitness []
+
 instance NFData TxWitness where
     rnf (TxWitness items) = rnf items
 
@@ -143,6 +145,17 @@ data TxPayload =
                                -- if lock_time >= 500,000,000, treat it as an unix timestamp
         -- tx_cache    :: Maybe ByteString
     } deriving (Show)
+
+instance Default TxPayload where
+    def = TxPayload {
+        txid = undefined,
+        wtxid = undefined,
+        version = undefined,
+        tx_in = undefined,
+        tx_out = undefined,
+        tx_witness = undefined,
+        lock_time = undefined
+    }
 
 instance Eq TxPayload where
     tx1 == tx2 = txid tx1 == txid tx2
@@ -321,7 +334,7 @@ instance Decodable TxPayload where
 
         final_len <- lenD
 
-        return $ updateIds $ TxPayload {
+        return $ updateTx TxPayload {
             txid = nullHash256,
             wtxid = nullHash256,
 
@@ -385,8 +398,8 @@ getWtxId tx =
     stdHash256 $ encodeLE tx
 
 -- update txid and wtxid
-updateIds :: TxPayload -> TxPayload
-updateIds tx =
+updateTx :: TxPayload -> TxPayload
+updateTx tx =
     tx {
         txid = getTxId tx,
         wtxid = getWtxId tx

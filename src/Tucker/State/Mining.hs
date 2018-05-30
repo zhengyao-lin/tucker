@@ -67,10 +67,7 @@ coinbaseP2PKH :: TCKRConf -> Block -> CoinbaseInfo -> String -> Satoshi -> TxPay
 coinbaseP2PKH conf block info addr fee =
     let segwit = any hasWitness (FD.toList (txns block)) in
 
-    updateIds TxPayload {
-        txid = undefined,
-        wtxid = undefined,
-
+    updateTx def {
         version = 0,
         
         tx_in = [
