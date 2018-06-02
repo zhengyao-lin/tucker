@@ -36,6 +36,8 @@ import Tucker.State.Tx
 import Tucker.State.Block
 import Tucker.State.SoftFork
 
+import Tucker.Wallet.Wallet
+
 data BlockChain =
     BlockChain {
         bc_conf         :: TCKRConf,
@@ -44,9 +46,10 @@ data BlockChain =
         bc_thread_state :: Maybe ThreadState, -- thread-support is optional
 
         bc_chain        :: Chain,
-        bc_tx_state     :: TxState UTXOCache1,
-        bc_fork_state   :: SoftForkState
-        -- use 1 layer of cache in UTXO
+        bc_tx_state     :: TxState UTXOCache1, -- use 1 layer of cache in UTXO
+        bc_fork_state   :: SoftForkState,
+
+        bc_wallet       :: Maybe Wallet
     }
 
 data VerifyConf =
@@ -88,7 +91,9 @@ initBlockChain conf@(TCKRConf {
 
         bc_chain = bc_chain,
         bc_tx_state = bc_tx_state,
-        bc_fork_state = bc_fork_state
+        bc_fork_state = bc_fork_state,
+
+        bc_wallet = Nothing
     }
 
     return tmp
@@ -838,6 +843,9 @@ allMemPoolTxns bc = memPoolTxns (bc_tx_state bc)
 lookupMemPool :: BlockChain -> Hash256 -> IO (Maybe TxPayload)
 lookupMemPool bc txid = lookupMemPoolTx (bc_tx_state bc) txid
 
+withWallet :: BlockChain -> (Wallet -> IO a) -> IO ()
+withWallet bc proc = maybe (return ()) (void . proc) (bc_wallet bc)
+
 -- revert the change of a block on UTXO
 -- assuming the block is a full block
 revertBlockOnUTXO :: UTXOMap a => BlockChain -> TxState a -> Branch -> Block -> IO ()
@@ -852,16 +860,24 @@ revertBlockOnUTXO bc tx_state branch block = do
         -- re-add all outputs cancelled
         -- tM ("reverting tx " ++ show i)
 
+        when (i /= 0) $
+            withWallet bc $ \wallet ->
+                unregisterTx wallet tx
+
         forM_ (tx_in tx) $ \input@(TxInput {
-            prev_out = OutPoint prev_txid out_idx
+            prev_out = outpoint@(OutPoint prev_txid out_idx)
         }) -> do
             (prev_bnode, tx_idx) <-
                 parentBranchOfTx bc tx_state branch prev_txid
 
-            prev_bnode <- toFullBlockNodeFail (bc_chain bc) prev_bnode
+            prev_block <- block_data <$> toFullBlockNodeFail (bc_chain bc) prev_bnode
+            let prev_tx = FD.toList (txns prev_block) !! fi tx_idx
 
             addOutput tx_state (cur_height prev_bnode)
-                      (block_data prev_bnode) (fi tx_idx) (fi out_idx)
+                      prev_block (fi tx_idx) (fi out_idx)
+
+            withWallet bc $ \wallet ->
+                registerOutPoint wallet outpoint (tx_out prev_tx !! fi out_idx)
 
 hasBlock :: BlockChain -> Hash256 -> IO Bool
 hasBlock (BlockChain { bc_chain = chain }) hash =
@@ -1024,9 +1040,13 @@ addBlockFail bc@(BlockChain {
             orphan_txns <- orphanPoolTxns (bc_tx_state bc)
             forM_ orphan_txns (addPoolTx bc)
 
-            -- remove accepted txns from mem pool
             forM_ (tail all_txns) $ \tx -> do
+                -- remove accepted txns from mem pool
                 removePoolTx tx_state (txid tx)
+
+                -- register tx in wallet
+                withWallet bc $ \wallet ->
+                    registerTx wallet tx
 
             bc <- collectOrphanBlock bc block_hash
             

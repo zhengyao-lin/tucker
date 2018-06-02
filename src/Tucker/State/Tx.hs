@@ -29,7 +29,6 @@ txLocator = (,)
 locatorToHash = fst
 locatorToIdx = snd
 
--- the last byte of indicates whether the outpoint is spent
 type UTXOArg c = c OutPoint UTXOValue
 
 type UTXOCache c = UTXOArg (CacheMap c)

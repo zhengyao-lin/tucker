@@ -92,6 +92,12 @@ data TCKRConf =
         tckr_bucket_fork_name           :: String,
         tckr_bucket_stat_name           :: String,
 
+        tckr_wallet_path                :: FilePath,
+        tckr_wallet_db_max_file         :: Int,
+        tckr_wallet_bucket_conf_name    :: String,
+        tckr_wallet_bucket_utxo_name    :: String,
+        tckr_wallet_bucket_redeem_name  :: String,
+
         tckr_block_db_max_file          :: Int,
         tckr_tx_db_max_file             :: Int,
         tckr_max_socket                 :: Int,
@@ -243,6 +249,12 @@ tucker_default_conf_mainnet mpath = do
         tckr_bucket_utxo_name = "utxo",
         tckr_bucket_fork_name = "fork",
         tckr_bucket_stat_name = "stat",
+
+        tckr_wallet_path = tucker_path </> "wallet",
+        tckr_wallet_db_max_file = 64,
+        tckr_wallet_bucket_conf_name = "conf",
+        tckr_wallet_bucket_utxo_name = "utxo",
+        tckr_wallet_bucket_redeem_name = "redeem",
 
         -- each file is roughly 2mb
         tckr_block_db_max_file = 256,
