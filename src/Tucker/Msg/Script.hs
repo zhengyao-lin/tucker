@@ -18,8 +18,8 @@ import Control.Monad.Except
 import Tucker.Enc
 import Tucker.ECC
 import Tucker.Util
-import Tucker.Auth
 import Tucker.Error
+import Tucker.Crypto
 
 import Tucker.Msg.Tx
 import Tucker.Msg.Common

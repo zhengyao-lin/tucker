@@ -11,9 +11,9 @@ import Tucker.DB
 import Tucker.ECC
 import Tucker.Enc
 import Tucker.Msg
-import Tucker.Auth
 import Tucker.Conf
 import Tucker.Util
+import Tucker.Crypto
 
 import Tucker.Container.IOMap
 
@@ -87,7 +87,7 @@ initWallet conf@(TCKRConf {
 
 -- create a new wallet from mnemonic words
 newWalletFromMnemonic :: TCKRConf -> [String] -> IO ()
-newWalletFromMnemonic conf seed = undefined
+newWalletFromMnemonic conf words = undefined
 
 isMine :: Wallet -> TxOutput -> IO Bool
 isMine wallet output =

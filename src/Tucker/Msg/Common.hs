@@ -16,7 +16,7 @@ import Network.Socket
 import Tucker.Enc
 import Tucker.Conf
 import Tucker.Util
-import Tucker.Auth
+import Tucker.Crypto
 
 type Height = Int64
 

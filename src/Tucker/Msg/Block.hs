@@ -13,9 +13,9 @@ import qualified Data.ByteString.Builder as BSB
 import Control.Monad
 
 import Tucker.Enc
-import Tucker.Auth
 import Tucker.Conf
 import Tucker.Util
+import Tucker.Crypto
 import Tucker.DeepSeq
 
 import Tucker.Msg.Tx

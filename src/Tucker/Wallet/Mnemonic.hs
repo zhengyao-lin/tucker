@@ -6,13 +6,15 @@ module Tucker.Wallet.Mnemonic where
 
 import Data.Bits
 import Data.List
+import qualified Data.Text as TXT
 import qualified Data.ByteString as BSR
+import qualified Data.Text.Normalize as NORM
 import qualified Data.ByteString.Char8 as BS
 
 import Tucker.Enc
-import Tucker.Auth
 import Tucker.Util
 import Tucker.Error
+import Tucker.Crypto
 
 import qualified Tucker.Container.Map as MAP
 
@@ -52,17 +54,23 @@ alistToWordList list =
     (MAP.fromList ENG.word_list,
      MAP.fromList (map (\(a, b) -> (b, a)) ENG.word_list))
 
+-- normalize utf-8 nfkd
+normalize :: String -> String
+normalize = TXT.unpack . NORM.normalize NORM.NFKD . TXT.pack
+
 data MnemonicConf =
     MnemonicConf {
-        mne_list :: WordList, -- the word list should be sorted
-        mne_n    :: Int,
-        mne_c    :: Int
+        mne_list     :: WordList, -- the word list should be sorted
+        mne_kdf_iter :: Int,
+        mne_n        :: Int,
+        mne_c        :: Int
     }
 
 instance Default MnemonicConf where
     def =
         MnemonicConf {
             mne_list = alistToWordList ENG.word_list,
+            mne_kdf_iter = 2048,
             mne_n = 11,
             mne_c = 32
         }
@@ -124,3 +132,11 @@ mnemonicToEntropy conf words = do
     assertMT "checksum not met" (obs_checksum == exp_checksum)
 
     return ent
+
+mnemonicToSeed :: MnemonicConf -> [String] -> Maybe String -> Either TCKRError ByteString
+mnemonicToSeed conf words mpass = do
+    mnemonicToEntropy conf words
+    return (pbkdf2 mne pass (mne_kdf_iter conf) 64)
+    where
+        mne = BS.pack (normalize (unwords words))
+        pass = BS.pack (normalize ("mnemonic" ++ maybe "" id mpass))

@@ -14,10 +14,10 @@ import Control.Exception
 import Control.Applicative
 
 import Tucker.Enc
-import Tucker.Auth
 import Tucker.Util
 import Tucker.Conf
 import Tucker.Error
+import Tucker.Crypto
 
 type ScriptPc = Int
 

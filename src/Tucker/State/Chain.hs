@@ -22,10 +22,10 @@ import Tucker.DB
 import Tucker.Msg
 import Tucker.Enc
 import Tucker.Util
-import Tucker.Auth
 import Tucker.Conf
 import Tucker.Error
 import Tucker.Signal
+import Tucker.Crypto
 import Tucker.Thread
 import Tucker.DeepSeq
 

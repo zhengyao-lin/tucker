@@ -21,9 +21,9 @@ import Tucker.Enc
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Atom
-import Tucker.Auth
 import Tucker.Util
 import Tucker.Error
+import Tucker.Crypto
 import Tucker.Thread
 import Tucker.Transport
 import qualified Tucker.Lock as LK

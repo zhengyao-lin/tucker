@@ -48,6 +48,9 @@ dependencies:
 - hashable
 - unordered-containers
 - insert-ordered-containers
+- unicode-transforms
+- pbkdf
+- text
 
 library:
   source-dirs: src

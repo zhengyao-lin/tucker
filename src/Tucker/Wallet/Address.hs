@@ -9,8 +9,8 @@ import Tucker.Enc
 import Tucker.Msg
 import Tucker.ECC
 import Tucker.Conf
-import Tucker.Auth
 import Tucker.Error
+import Tucker.Crypto
 
 data Address
     = P2PKHAddr ByteString -- pub key hash(ripemd160)

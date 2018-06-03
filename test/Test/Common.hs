@@ -24,7 +24,7 @@ module Test.Common (
     module Tucker.Msg,
     module Tucker.Conf,
     module Tucker.Atom,
-    module Tucker.Auth,
+    module Tucker.Crypto,
     module Tucker.Util,
     module Tucker.ASN1,
     module Tucker.Error,
@@ -68,10 +68,10 @@ import Tucker.Enc
 import Tucker.Msg
 import Tucker.Conf
 import Tucker.Atom
-import Tucker.Auth
 import Tucker.Util
 import Tucker.ASN1
 import Tucker.Error
+import Tucker.Crypto
 import Tucker.Thread
 
 import Tucker.P2P.Init

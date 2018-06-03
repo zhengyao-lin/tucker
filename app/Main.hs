@@ -9,8 +9,8 @@ import System.Environment
 
 import Tucker.Conf
 import Tucker.Util
-import Tucker.Auth
 import Tucker.Atom
+import Tucker.Crypto
 import Tucker.Signal
 import Tucker.Console
 import Tucker.P2P.Init

@@ -14,9 +14,9 @@ import qualified Data.ByteString.Char8 as BS
 
 import Tucker.Enc
 import Tucker.Conf
-import Tucker.Auth
 import Tucker.Util
 import Tucker.Error
+import Tucker.Crypto
 import Tucker.DeepSeq
 
 import Tucker.Msg.Common

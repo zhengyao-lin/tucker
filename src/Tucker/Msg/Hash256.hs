@@ -18,8 +18,8 @@ import System.IO.Unsafe
 import Foreign.Ptr
 
 import Tucker.Enc
-import Tucker.Auth
 import Tucker.Util
+import Tucker.Crypto
 import Tucker.DeepSeq
 
 foreign import ccall "hash256_compare" c_hash256_compare :: Ptr Word8 -> Ptr Word8 -> IO Int8

@@ -5,23 +5,20 @@
 -- Base 58 Check
 -- ECDSA
 
-module Tucker.Auth where
+module Tucker.Crypto where
 
 import qualified Data.ByteString as BSR
 import qualified Data.ByteString.Char8 as BS
 
 import qualified Data.ByteArray as BA
 
-import Crypto.Error
-import Crypto.PubKey.ECC.P256
-import Crypto.PubKey.ECC.Types
-import Crypto.PubKey.ECC.Generate
-
 import Crypto.PubKey.ECC.ECDSA hiding (sign, verify)
 import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 
 import Crypto.Hash (hash, Digest)
 import Crypto.Hash.Algorithms
+import Crypto.PBKDF.ByteString
+import qualified Crypto.MAC.HMAC as HMAC
 
 -- import Data.ByteString.Base58
 import Data.List
@@ -78,6 +75,22 @@ sha1 dat = ba2bs (hash dat :: Digest SHA1)
 
 ripemd160 :: ByteString -> ByteString
 ripemd160 dat = ba2bs (hash dat :: Digest RIPEMD160)
+
+hmacSHA512 :: ByteString -> ByteString -> ByteString
+hmacSHA512 key msg = ba2bs (HMAC.hmac key msg :: HMAC.HMAC SHA512)
+
+-- using HMAC-SHA256
+pbkdf2 = sha512PBKDF2
+
+-- BSR.pack res
+--     where
+--         prf_hmac_sha256 pass salt =
+--             BSR.unpack (hmacSHA512 (BSR.pack pass) (BSR.pack salt))
+
+--         HashedPass res =
+--             pbkdf2' (prf_hmac_sha256, 64) 2048 64
+--                     (Password (BSR.unpack pass))
+--                     (Salt (BSR.unpack salt))
 
 base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 

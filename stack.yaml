@@ -39,7 +39,9 @@ packages:
 - .
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-extra-deps: [secp256k1-0.5.2]
+extra-deps: [secp256k1-0.5.2,pbkdf-1.1.1.1]
+
+allow-newer: true
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

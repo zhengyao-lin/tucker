@@ -9,9 +9,9 @@ import Control.Exception
 
 import Tucker.Msg
 import Tucker.Enc
-import Tucker.Auth
 import Tucker.Conf
 import Tucker.Util
+import Tucker.Crypto
 
 import Tucker.State.Tx
 import Tucker.State.Block
