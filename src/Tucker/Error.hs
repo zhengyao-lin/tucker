@@ -14,6 +14,7 @@ import System.Exit
 import Tucker.DeepSeq
 
 newtype TCKRError = TCKRError String deriving (Eq)
+newtype IDError = IDError String
 
 type TCKRErrorM = Either TCKRError
 
@@ -27,6 +28,11 @@ instance Exception TCKRError
 
 instance NFData TCKRError where
     rnf (TCKRError err) = rnf err
+
+instance Show IDError where
+    show (IDError a) = a
+
+instance Exception IDError
 
 wrapError :: TCKRError -> String -> TCKRError
 wrapError (TCKRError err) prep =
@@ -66,11 +72,11 @@ tryT action = catchT (Right <$> action) (return . Left)
 -- is generally not safe because it can
 -- only be caught by the catch in IO monad
 throwT :: String -> a
-throwT = throw . TCKRError
+throwT = throw . IDError
 
 -- a more gentle monad throw
 throwMT :: MonadThrow m => String -> m a
-throwMT = throwM . TCKRError
+throwMT = throwM . IDError
 
 assertT :: String -> Bool -> a -> a
 assertT msg cond code =

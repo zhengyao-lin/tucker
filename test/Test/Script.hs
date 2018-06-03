@@ -48,4 +48,3 @@ scriptTest1 = TestCase $ do
 scriptTests = TestList [
         TestLabel "script test 1" scriptTest1
     ]
-

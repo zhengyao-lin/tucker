@@ -12,12 +12,13 @@ import Test.DB
 import Test.Enc
 import Test.Util
 import Test.Chain
+import Test.Wallet
 import Test.Script
 import Test.Validation
 
 allTests = TestList [
         encTests, dbTests, chainTests, scriptTests,
-        validationTests
+        validationTests, walletTests
     ]
 
 testAll = runTestTT allTests

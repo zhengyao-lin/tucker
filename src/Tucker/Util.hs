@@ -371,6 +371,10 @@ binarySearchIO pred lo hi =
             EQ -> return (Just half)
             GT -> binarySearchIO pred (half + 1) hi
 
+binarySearch :: Integral a => (a -> Ordering) -> a -> a -> Maybe a
+binarySearch pred lo hi =
+    unsafePerformIO (binarySearchIO (return . pred) lo hi)
+
 first :: (a -> Bool) -> [a] -> Maybe a
 first pred lst =
     case dropWhile (not . pred) lst of
@@ -406,3 +410,7 @@ for = flip map
 trim :: String -> String
 trim = f . f
    where f = reverse . dropWhile isSpace
+
+ones :: Bits t => Int -> t
+ones n =
+    complement (shift (complement zeroBits) n)

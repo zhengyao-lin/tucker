@@ -27,7 +27,7 @@ encode_map_be = [
 
 genCoinbase :: Satoshi -> TxPayload
 genCoinbase value =
-    updateIds $ TxPayload {
+    updateTx TxPayload {
         txid = 0,
         wtxid = 0,
 

@@ -85,6 +85,10 @@ initWallet conf@(TCKRConf {
 
         Nothing -> error "uninitialized wallet"
 
+-- create a new wallet from mnemonic words
+newWalletFromMnemonic :: TCKRConf -> [String] -> IO ()
+newWalletFromMnemonic conf seed = undefined
+
 isMine :: Wallet -> TxOutput -> IO Bool
 isMine wallet output =
     isJust <$> lookupIO (wal_bucket_redeem wallet) hash

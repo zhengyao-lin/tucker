@@ -40,7 +40,9 @@ module Test.Common (
     module Tucker.State.Block,
     module Tucker.State.Mining,
 
-    module Tucker.Container.IOMap
+    module Tucker.Container.IOMap,
+
+    module Tucker.Wallet.Mnemonic
 ) where
 
 import Data.Hex
@@ -83,3 +85,5 @@ import Tucker.State.Block
 import Tucker.State.Mining
 
 import Tucker.Container.IOMap
+
+import Tucker.Wallet.Mnemonic
