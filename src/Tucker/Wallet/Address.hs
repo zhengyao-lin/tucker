@@ -20,17 +20,17 @@ data Address
 
 encodeAddress :: TCKRConf -> Address -> String
 encodeAddress conf (P2PKHAddr hash) =
-    BS.unpack (base58encCheck (BSR.cons (tckr_p2pkh_addr_pref conf) hash))
+    encodeBase58Check (BSR.cons (tckr_p2pkh_addr_pref conf) hash)
 
 encodeAddress conf (P2SHAddr hash) =
-    BS.unpack (base58encCheck (BSR.cons (tckr_p2sh_addr_pref conf) hash))
+    encodeBase58Check (BSR.cons (tckr_p2sh_addr_pref conf) hash)
     
 decodeAddressFail :: TCKRConf -> String -> Address
 decodeAddressFail conf = either (error . show) id . decodeAddress conf
 
 decodeAddress :: TCKRConf -> String -> Either TCKRError Address
 decodeAddress conf addr' = do
-    addr <- base58decCheck (BS.pack addr')
+    addr <- decodeBase58Check addr'
     let pref = BSR.head addr
         hash = BSR.tail addr
 

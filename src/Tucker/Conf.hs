@@ -108,6 +108,10 @@ data TCKRConf =
         tckr_p2pkh_addr_pref            :: Word8,
         tckr_p2sh_addr_pref             :: Word8,
         tckr_magic_no                   :: BSR.ByteString,
+        tckr_hd_priv_key_prefix         :: BSR.ByteString,
+        tckr_hd_pub_key_prefix          :: BSR.ByteString,
+        tckr_hd_seed_key                :: String,
+
         tckr_listen_addr                :: String, 
         tckr_listen_port                :: Word16,
 
@@ -267,6 +271,9 @@ tucker_default_conf_mainnet mpath = do
         tckr_p2pkh_addr_pref = 0x00,
         tckr_p2sh_addr_pref = 0x05,
         tckr_magic_no = BSR.pack [ 0xf9, 0xbe, 0xb4, 0xd9 ],
+        tckr_hd_priv_key_prefix = BSR.pack [ 0x04, 0x88, 0xad, 0xe4 ],
+        tckr_hd_pub_key_prefix = BSR.pack [ 0x04, 0x88, 0xb2, 0x1e ],
+        tckr_hd_seed_key = "Bitcoin seed",
 
         tckr_listen_addr = "127.0.0.1",
         tckr_listen_port = 8333,
@@ -416,6 +423,10 @@ tucker_default_conf_testnet3 mpath = do
         tckr_p2pkh_addr_pref = 0x6f,
         tckr_p2sh_addr_pref = 0xc4,
         tckr_magic_no = BSR.pack [ 0x0b, 0x11, 0x09, 0x07 ],
+
+        tckr_hd_priv_key_prefix = BSR.pack [ 0x04, 0x35, 0x83, 0x94 ],
+        tckr_hd_pub_key_prefix = BSR.pack [ 0x04, 0x35, 0x87, 0xcf ],
+
         tckr_listen_port = 18333,
 
         tckr_bootstrap_host = [

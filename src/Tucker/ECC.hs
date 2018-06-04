@@ -4,10 +4,14 @@ module Tucker.ECC where
     
 import qualified Data.ByteString as BSR
 
+import Crypto.Error
 import Crypto.Secp256k1
+import Crypto.PubKey.ECC.Types
+import qualified Crypto.PubKey.ECC.Prim as ECC
 
 import Tucker.Enc
 import Tucker.Util
+import Tucker.Conf
 import Tucker.Error
 
 type ECCPrivateKey = SecKey
@@ -62,6 +66,31 @@ instance Decodable ECCLaxSignature where
 privToPub :: ECCPrivateKey -> ECCPublicKey
 privToPub priv = ECCPublicKey True (derivePubKey priv)
 
+privToInt :: ECCPrivateKey -> Integer
+privToInt priv = decodeVWord BigEndian (encodeBE priv)
+
+intToPriv :: Integer -> ECCPrivateKey
+intToPriv int = decodeFailBE (encodeInt 32 BigEndian (int `mod` paramN))
+
+compress :: ECCPublicKey -> ECCPublicKey
+compress (ECCPublicKey _ k) = ECCPublicKey True k
+
+uncompress :: ECCPublicKey -> ECCPublicKey
+uncompress (ECCPublicKey _ k) = ECCPublicKey False k
+
+pubToPoint :: ECCPublicKey -> (Integer, Integer)
+pubToPoint pub =
+    let raw = encodeBE (uncompress pub)
+        x = decodeVWord BigEndian (BSR.take 32 (BSR.drop 1 raw))
+        y = decodeVWord BigEndian (BSR.drop 33 raw)
+    in (x, y)
+
+pointToPub :: (Integer, Integer) -> Either TCKRError ECCPublicKey
+pointToPub (x, y) =
+    (compress <$>) $
+    decodeAllBE $
+    bchar 0x4 <> encodeInt 32 BigEndian x <> encodeInt 32 BigEndian y
+
 -- genRaw :: IO (ECCPublicKey, ECCPrivateKey)
 -- genRaw = do
 --     (PublicKey _ pt, PrivateKey _ num) <- generate tucker_curve
@@ -105,3 +134,20 @@ verifyLaxDER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Boo
 verifyLaxDER pub msg sig_enc = do
     ECCLaxSignature sig <- decodeAllBE sig_enc
     return $ verify pub msg sig
+
+paramN = 115792089237316195423570985008687907852837564279074904382605163141518161494337 :: Integer
+paramG = pubToPoint (decodeFailBE (hex2bs "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"))
+paramA = 0
+paramB = 7
+
+pointAdd :: (Integer, Integer) -> (Integer, Integer) -> (Integer, Integer)
+pointAdd p1 p2 = (x, y)
+    where
+        curve = getCurveByName SEC_p256k1
+        Point x y = ECC.pointAdd curve (uncurry Point p1) (uncurry Point p2)
+
+pointMul :: Integer -> (Integer, Integer) -> (Integer, Integer)
+pointMul s p = (x, y)
+    where
+        curve = getCurveByName SEC_p256k1
+        Point x y = ECC.pointMul curve s (uncurry Point p)

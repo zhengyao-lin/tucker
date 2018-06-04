@@ -82,21 +82,10 @@ hmacSHA512 key msg = ba2bs (HMAC.hmac key msg :: HMAC.HMAC SHA512)
 -- using HMAC-SHA256
 pbkdf2 = sha512PBKDF2
 
--- BSR.pack res
---     where
---         prf_hmac_sha256 pass salt =
---             BSR.unpack (hmacSHA512 (BSR.pack pass) (BSR.pack salt))
-
---         HashedPass res =
---             pbkdf2' (prf_hmac_sha256, 64) 2048 64
---                     (Password (BSR.unpack pass))
---                     (Salt (BSR.unpack salt))
-
 base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
-base58enc :: ByteString -> ByteString
-base58enc raw =
-    BS.pack $
+encodeBase58 :: ByteString -> String
+encodeBase58 raw =
     (pref ++) $
     reverse $
     map (\(_, m) -> alphabet !! (fromInteger m)) $
@@ -109,37 +98,36 @@ base58enc raw =
         pref = take numz $ repeat '1'
         rawi = bs2vwordLE $ BS.reverse $ BS.drop numz raw
 
-base58dec' :: Integer -> String -> Either TCKRError Integer
-base58dec' cur [] = Right cur
-base58dec' cur (c:str) = do
+decodeBase58' :: Integer -> String -> Either TCKRError Integer
+decodeBase58' cur [] = Right cur
+decodeBase58' cur (c:str) = do
     let alphabet = base58_alphabet
 
     case findIndex (== c) alphabet of
-        Just i -> base58dec' (cur * 58 + toInteger i) str
+        Just i -> decodeBase58' (cur * 58 + toInteger i) str
         Nothing -> Left $ TCKRError "illegal character in base58 encoding"
 
-base58dec :: ByteString -> Either TCKRError ByteString
-base58dec enc = do
-    res <- base58dec' (0 :: Integer) rest
+decodeBase58 :: String -> Either TCKRError ByteString
+decodeBase58 enc = do
+    res <- decodeBase58' (0 :: Integer) rest
     let res_enc = vword2bsLE res
 
     return $ BS.pack pref <> BS.reverse res_enc
     where
-        str = BS.unpack enc
-        numz = length $ takeWhile (== '1') str
+        numz = length $ takeWhile (== '1') enc
         pref = take numz $ repeat '\0'
-        rest = drop numz str
+        rest = drop numz enc
 
-base58encCheck :: ByteString -> ByteString
-base58encCheck raw =
-    base58enc $ raw <> BS.take 4 digest
+encodeBase58Check :: ByteString -> String
+encodeBase58Check raw =
+    encodeBase58 $ raw <> BS.take 4 digest
     where digest = sha256 $ sha256 raw
 
-base58decCheck :: ByteString -> Either TCKRError ByteString
-base58decCheck enc = do
-    dec <- base58dec enc
-    let
-        len = BS.length dec
+decodeBase58Check :: String -> Either TCKRError ByteString
+decodeBase58Check enc = do
+    dec <- decodeBase58 enc
+
+    let len = BS.length dec
         check = BS.drop (len - 4) dec
         orig = BS.take (len - 4) dec
         digest = BS.take 4 $ sha256 $ sha256 orig
@@ -147,7 +135,7 @@ base58decCheck enc = do
     if digest == check then
         pure orig
     else
-        Left $ TCKRError "base58dec check failed"
+        Left $ TCKRError "base58 decode check failed"
 
 -- enc/dec of pub/sig
 -- priv -> pub
@@ -179,11 +167,11 @@ privToWIF :: TCKRConf -> ECCPrivateKey -> WIF
 privToWIF conf priv =
     let priv_raw = encodeBE priv
         priv_proc = BSR.cons (tckr_wif_pref conf) priv_raw
-    in BS.unpack $ base58encCheck priv_proc
+    in encodeBase58Check priv_proc
 
 wifToPriv :: TCKRConf -> WIF -> Either TCKRError ECCPrivateKey
 wifToPriv conf wif = do
-    priv_proc <- base58decCheck $ BS.pack wif
+    priv_proc <- decodeBase58Check wif
     
     if BSR.head priv_proc /= (tckr_wif_pref conf) then
         Left $ TCKRError "illegal WIF"
