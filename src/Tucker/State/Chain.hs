@@ -69,15 +69,15 @@ instance NFData BlockChain where
         bc_tx_state = bc_tx_state
     }) = rnf bc_chain `seq` rnf bc_tx_state
 
-initBlockChain :: TCKRConf -> Maybe ThreadState -> ResIO BlockChain
+initBlockChain :: TCKRConf -> Maybe ThreadState -> Maybe Wallet -> ResIO BlockChain
 initBlockChain conf@(TCKRConf {
     tckr_block_db_path = block_db_path,
     tckr_tx_db_path = tx_db_path,
     tckr_block_db_max_file = block_db_max_file,
     tckr_tx_db_max_file = tx_db_max_file
-}) m_thread_state = do
-    block_db <- openDB (optMaxFile def block_db_max_file) block_db_path
-    tx_db <- openDB (optMaxFile def tx_db_max_file) tx_db_path
+}) m_thread_state m_wallet = do
+    block_db <- openDB (optMaxFile block_db_max_file def) block_db_path
+    tx_db <- openDB (optMaxFile tx_db_max_file def) tx_db_path
 
     bc_chain <- lift $ initChain conf block_db
     bc_tx_state <- lift $ initTxState conf tx_db
@@ -93,7 +93,7 @@ initBlockChain conf@(TCKRConf {
         bc_tx_state = bc_tx_state,
         bc_fork_state = bc_fork_state,
 
-        bc_wallet = Nothing
+        bc_wallet = m_wallet
     }
 
     return tmp

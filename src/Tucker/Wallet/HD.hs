@@ -95,5 +95,8 @@ seedToMaskerKey conf seed =
 
         return (HDPrivateKey 0 0 nullFingerPrint (decodeFailBE ll) lr)
 
+toECCPrivateKey (HDPrivateKey _ _ _ k _) = k
+toECCPublicKey (HDPublicKey _ _ _ k _) = k
+
 -- xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi
 -- xprv9s21ZrQH143K4NseeceEeKVPfKhLZAqLJjedpyUmTSMArMJvh2yCTcUMXLDq9UrhRF46AjsZG7f3D2yw3v4DuAozRT9r8xKRmsvXHx24a26

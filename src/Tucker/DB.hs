@@ -34,10 +34,16 @@ type DBOptionW = D.WriteOptions
 
 -- type DBKeySpace = ByteString
 
-optMaxFile :: DBOption -> Int -> DBOption
-optMaxFile opt max_file =
+optMaxFile :: Int -> DBOption -> DBOption
+optMaxFile max_file opt =
     opt {
         D.maxOpenFiles = max_file
+    }
+
+optCreateIfMissing :: Bool -> DBOption -> DBOption
+optCreateIfMissing v opt =
+    opt {
+        D.createIfMissing = v
     }
 
 instance Default DBOption where
@@ -151,7 +157,7 @@ openBucket db name = do
 instance (Encodable k, Decodable k, Encodable v, Decodable v)
          => IOMap (DBBucket k v) k v where
     lookupIO = lookupAsIO
-    insertIO (DBBucket pref db) k v = insertIO db (pref <> encodeLE k) (encodeLE v)
+    insertIO = insertAsIO
     deleteIO (DBBucket pref db) k = deleteIO db (pref <> encodeLE k)
 
     foldKeyIO (DBBucket pref db) init proc =
@@ -194,5 +200,9 @@ lookupAsIO :: (Encodable k, Decodable v') => DBBucket k v -> k -> IO (Maybe v')
 lookupAsIO (DBBucket pref db) k = do
     mres <- lookupIO db (pref <> encodeLE k)
     return (decodeFailLE <$> mres)
+
+insertAsIO :: (Encodable k, Encodable v') => DBBucket k v -> k -> v' -> IO ()
+insertAsIO (DBBucket pref db) k v =
+    insertIO db (pref <> encodeLE k) (encodeLE v)
 
 type DBEntry = DBBucket Placeholder

@@ -239,7 +239,7 @@ txSigHashV0WitS sig_raw = do
 
     let htype = intToHashType (BSR.last sig_raw)
         pk_script = encodeLE (drop (cs_op + 1) code)
-        script_code = encodeLE (VInt $ fi $ BSR.length pk_script) <> pk_script
+        script_code = encodeLE (fi (BSR.length pk_script) :: VInt) <> pk_script
         -- note the script code signed here is serialized with
         -- its length prepended as a VInt
         hash = txSigHashV0Wit cur_tx (fi in_idx) prev_out htype script_code

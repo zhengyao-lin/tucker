@@ -32,6 +32,8 @@ import Tucker.State.Chain
 
 import Tucker.P2P.Util
 
+import Tucker.Wallet.Wallet
+
 -- two parts
 -- 1. main old tree, most common chain for all blocks
 -- 2. side chains, side chains rooted from main tree
@@ -56,7 +58,9 @@ data MainLoopEnv =
         chain_lock    :: LK.Lock,
         block_chain   :: Atom BlockChain,
 
-        thread_state  :: ThreadState
+        thread_state  :: ThreadState,
+
+        main_wallet     :: Maybe Wallet
     }
 
 data RouterAction
@@ -252,10 +256,16 @@ initEnv conf = do
 
     thread_state <- lift $ initThread conf
 
-    chain_lock <- lift $ LK.new
-    block_chain <- initBlockChain conf (Just thread_state) >>= (lift . newA)
+    mwallet <-
+        if tckr_enable_wallet conf then
+            Just <$> initWallet conf
+        else
+            return Nothing
 
-    return $ MainLoopEnv {
+    chain_lock <- lift $ LK.new
+    block_chain <- initBlockChain conf (Just thread_state) mwallet >>= (lift . newA)
+
+    return MainLoopEnv {
         global_conf = conf,
 
         timeout_s = tckr_trans_timeout conf,
@@ -271,7 +281,9 @@ initEnv conf = do
         chain_lock = chain_lock,
         block_chain = block_chain,
 
-        thread_state = thread_state
+        thread_state = thread_state,
+
+        main_wallet = mwallet
 
         -- db_block = db_block,
         -- db_tx = db_tx,
