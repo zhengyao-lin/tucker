@@ -9,6 +9,7 @@ import Tucker.Util
 import Tucker.Atom
 import Tucker.Console
 
+-- all possible flags that can be used
 data Flag
     = TuckerPath String
     | WalletPath String
@@ -23,8 +24,10 @@ data Flag
     | SetJob Int
     deriving (Eq, Show)
 
-opts :: [Option Flag]
-opts = [
+help_opt = [ NoArg [ "h", "help" ] ShowHelp "show this help message" ]
+
+-- options related to the chain environment
+chain_opts = [
         WithArg [ "p", "path" ] TuckerPath "set tucker path",
         WithArg [ "w", "wallet" ] WalletPath "set wallet path",
         
@@ -43,13 +46,17 @@ opts = [
 
         WithArg ["min-fee"] MinFee "min tx fee required for mem pool txns(in satoshi/kb)",
 
-        WithArg [ "j", "job" ] SetJob "set the number of native threads to use",
-
-        NoArg [ "h", "help" ] ShowHelp "show this help message"
-    ]
+        WithArg [ "j", "job" ] SetJob "set the number of native threads to use"
+    ] ++ help_opt
 
 def_flags =
     [ EnableMiner True, EnableMemPool True ]
+
+hasHelp :: [String] -> Bool
+hasHelp args =
+    case parseFlags args help_opt of
+        Right (_:_, _) -> True
+        _ -> False
 
 flagsToConf :: [Flag] -> IO TCKRConf
 flagsToConf flags' = do
@@ -101,10 +108,17 @@ flagsToConf flags' = do
 
     getA conf_var
 
-showHelp :: IO ()
-showHelp = do
+showHelp :: [String] -> [Option Flag] -> IO ()
+showHelp tool_path opts = do
     prog_name <- getProgName
 
-    tLnM ("usage: " ++ prog_name ++ " [options]")
-    tLnM "options:"
-    tLnM (genHelp opts)
+    if null tool_path then do
+        tLnM ("usage: " ++ prog_name ++ " [options]")
+        tLnM ("       " ++ prog_name ++ " tool <tool> [subtool1 [subtool2]...] [options]")
+    else
+        tLnM ("usage: " ++ prog_name ++ " " ++ unwords tool_path ++ " [options]")
+
+    unless (null opts) $ do
+        tLnM ""
+        tLnM "options:"
+        tLnM (genHelp opts)

@@ -93,7 +93,9 @@ genHelp opts =
                     WithArg names _ _ ->
                         intercalate ", " (map (gen True) names)
 
-        flags = "flag syntax" : flags'
+        col0_cont = "flag syntax"
+
+        flags = col0_cont : flags'
         notes = "details" : map optionToNote opts
 
         gen has_arg name =
@@ -102,7 +104,9 @@ genHelp opts =
             else
                 "--" ++ name ++ (if has_arg then "=<value>" else "")
 
-        align_n = 3 + length (maximumBy (\a b -> compare (length a) (length b)) flags)
+        align_n =
+            max (length col0_cont)
+                (length (maximumBy (\a b -> compare (length a) (length b)) flags)) + 3
     in
         intercalate "\n" $
         flip map (zip flags notes) $ \(flag, note) ->

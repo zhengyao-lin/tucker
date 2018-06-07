@@ -22,27 +22,19 @@ import Tool
 main = do
     -- runTestTT chainTest4
 
-    args' <- getArgs
+    args <- getArgs
 
-    let (mtool, args) =
-            case args' of
-                "tool":tool:rst ->
-                    if not ("-" `isPrefixOf` tool) then (Just tool, rst)
-                    else (Nothing, args')
-                _ -> (Nothing, args')
-
-    case parseFlags args opts of
-        Right (flags, non_opt) ->
-            if ShowHelp `elem` flags then
-                showHelp
-            else do
-                conf <- flagsToConf flags
-
-                case mtool of
-                    Nothing -> void (mainLoop conf)
-                    Just tool -> execTool conf tool non_opt
-
-        Left err -> do
-            tLnM (show err)
-            tLnM ""
-            showHelp
+    case args of
+        "tool":rst -> findAndExecTool rst
+        args ->
+            case parseFlags args chain_opts of
+                Right (flags, non_opt) ->
+                    if ShowHelp `elem` flags then
+                        showHelp [] chain_opts
+                    else
+                        void (flagsToConf flags >>= mainLoop)
+        
+                Left err -> do
+                    tLnM (show err)
+                    tLnM ""
+                    showHelp [] chain_opts
