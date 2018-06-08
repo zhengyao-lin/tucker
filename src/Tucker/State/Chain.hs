@@ -60,7 +60,8 @@ data VerifyConf =
         verify_cur_height    :: Height,
         verify_cur_branch    :: Branch,
         verify_block_hash    :: Maybe Hash256,
-        verify_check_dup_tx  :: Bool
+        verify_check_dup_tx  :: Bool,
+        verify_has_block     :: Bool
     }
 
 instance NFData BlockChain where
@@ -501,7 +502,8 @@ genVerifyConf bc@(BlockChain {
         verify_cur_branch = branch,
 
         verify_block_hash = block_hash <$> mblock,
-        verify_check_dup_tx = mtp >= tckr_dup_tx_disable_time conf
+        verify_check_dup_tx = mtp >= tckr_dup_tx_disable_time conf,
+        verify_has_block = isJust mblock
     }
 
 parentBranchOfTx :: UTXOMap a => BlockChain -> TxState a -> Branch -> Hash256 -> IO (Branch, Word32)
@@ -735,10 +737,13 @@ verifyFlow bc tx_state ver_conf tx = do
             pk_script <- expectEither REJECT_MALFORMED "public key script decode error" $
                 decodeAllLE (pk_script out)
 
-            expectTrue
-                REJECT_NONSTANDARD
-                ("non-standard public key script for tx " ++ show (txid tx) ++ " " ++ show out_idx) $
-                getScriptType pk_script /= SCRIPT_NONSTD
+            -- only allow non-standard tx
+            -- when it's included in a block
+            unless (verify_has_block ver_conf) $
+                expectTrue
+                    REJECT_NONSTANDARD
+                    ("non-standard public key script for tx " ++ show (txid tx) ++ " " ++ show out_idx) $
+                    getScriptType pk_script /= SCRIPT_NONSTD
     
     -- validity of values
     expectTrue

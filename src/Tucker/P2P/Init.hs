@@ -143,11 +143,9 @@ waitForMemPool env = do
 
         return (timeout || reached)
 
-mainLoop :: TCKRConf -> IO MainLoopEnv
-mainLoop conf = runResourceT $ do
-    env <- initEnv conf
-
-    lift $ do
+mainLoop :: TCKRConf -> ResIO MainLoopEnv
+mainLoop conf =
+    initEnv conf >>= \env -> lift $ do
         bootstrap env (tckr_bootstrap_host conf)
         -- setA (node_list env) init_nodes
 
@@ -171,4 +169,9 @@ mainLoop conf = runResourceT $ do
                 envMsg env "min mem pool size reached"
                 envFork env THREAD_BASE (miner env)
 
-        forever yieldWait
+        return env
+
+mainLoopForever :: TCKRConf -> IO a
+mainLoopForever conf =
+    runResourceT $
+    mainLoop conf >> lift (forever yieldWait)

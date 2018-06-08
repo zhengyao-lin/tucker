@@ -12,6 +12,7 @@ import Control.Applicative
 
 import Tucker.Util
 import Tucker.Error
+import Tucker.Table
 
 {-
 
@@ -81,37 +82,28 @@ optionToNote :: Option f -> String
 optionToNote (NoArg _ _ note) = note
 optionToNote (WithArg _ _ note) = note
 
--- generate help messages
-genHelp :: [Option f] -> String
-genHelp opts =
-    let flags' =
-            flip map opts $ \opt ->
-                case opt of
-                    NoArg names _ _ ->
-                        intercalate ", " (map (gen False) names)
+optionToFlagSyntax opt =
+    case opt of
+        NoArg names _ _ ->
+            intercalate ", " (map (gen False) names)
 
-                    WithArg names _ _ ->
-                        intercalate ", " (map (gen True) names)
-
-        col0_cont = "flag syntax"
-
-        flags = col0_cont : flags'
-        notes = "details" : map optionToNote opts
-
+        WithArg names _ _ ->
+            intercalate ", " (map (gen True) names)
+    where 
         gen has_arg name =
             if length name == 1 then
                 "-" ++ name ++ (if has_arg then "<value>" else "")
             else
                 "--" ++ name ++ (if has_arg then "=<value>" else "")
 
-        align_n =
-            max (length col0_cont)
-                (length (maximumBy (\a b -> compare (length a) (length b)) flags)) + 3
-    in
-        intercalate "\n" $
-        flip map (zip flags notes) $ \(flag, note) ->
-            flag ++ replicate (align_n - length flag) ' ' ++ note
-
+-- generate help messages
+genHelp :: [Option f] -> String
+genHelp opts =
+    table def [
+        "flag syntax" : map optionToFlagSyntax opts,
+        "details" : map optionToNote opts
+    ]
+    
 -- find the first item that's not Left Nothing
 -- otherwise return Left Nothing
 matchResultFold :: [MatchResult f] -> MatchResult f

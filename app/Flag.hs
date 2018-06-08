@@ -108,17 +108,18 @@ flagsToConf flags' = do
 
     getA conf_var
 
-showHelp :: [String] -> [Option Flag] -> IO ()
-showHelp tool_path opts = do
+showHelp :: [String] -> [String] -> [Option Flag] -> IO ()
+showHelp tool_path args opts = do
     prog_name <- getProgName
 
     if null tool_path then do
         tLnM ("usage: " ++ prog_name ++ " [options]")
         tLnM ("       " ++ prog_name ++ " tool <tool> [subtool1 [subtool2]...] [options]")
     else
-        tLnM ("usage: " ++ prog_name ++ " " ++ unwords tool_path ++ " [options]")
+        let arg_string = if null args then "" else " " ++ unwords args in
+        tLnM ("usage: " ++ prog_name ++ " " ++ unwords tool_path ++ arg_string ++ " [options]")
 
     unless (null opts) $ do
         tLnM ""
         tLnM "options:"
-        tLnM (genHelp opts)
+        tM (genHelp opts)

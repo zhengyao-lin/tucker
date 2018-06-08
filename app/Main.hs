@@ -30,11 +30,11 @@ main = do
             case parseFlags args chain_opts of
                 Right (flags, non_opt) ->
                     if ShowHelp `elem` flags then
-                        showHelp [] chain_opts
+                        showHelp [] [] chain_opts
                     else
-                        void (flagsToConf flags >>= mainLoop)
+                        flagsToConf flags >>= mainLoopForever
         
                 Left err -> do
                     tLnM (show err)
                     tLnM ""
-                    showHelp [] chain_opts
+                    showHelp [] [] chain_opts
