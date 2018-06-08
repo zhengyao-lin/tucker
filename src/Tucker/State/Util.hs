@@ -29,7 +29,7 @@ addOutPoint bc@(BlockChain {
 
 withBlockChain :: TCKRConf -> Maybe ThreadState -> (BlockChain -> IO a) -> IO a
 withBlockChain conf mthread proc = runResourceT $ do
-    bc <- initBlockChain conf mthread Nothing
+    bc <- initBlockChain conf mthread []
     lift $ proc bc
 
 -- fallback to height h

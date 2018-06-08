@@ -51,6 +51,7 @@ dependencies:
 - unicode-transforms
 - pbkdf
 - text
+- aeson
 
 library:
   source-dirs: src

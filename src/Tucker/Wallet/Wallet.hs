@@ -104,7 +104,7 @@ instance TxInputBuilder RedeemOutPoint where
         return (TxInput {
             prev_out = prev_out,
             sig_script = encodeLE $ [
-                    OP_PUSHDATA (encodeBE sig <> encodeBE (hashTypeToInt htype :: Word8)) Nothing
+                    OP_PUSHDATA (encodeAE sig <> encodeBE (hashTypeToInt htype :: Word8)) Nothing
                 ] ++ script,
             seqn = maxBound
         }, nullWitness)
@@ -147,6 +147,8 @@ data Wallet =
         wal_bucket_redeem :: DBBucket ByteString RedeemScheme
     }
 
+type PrimaryAddress = ByteString -- hash160 of the compressed public key
+
 initWallet :: TCKRConf -> ResIO Wallet
 initWallet conf@(TCKRConf {
     tckr_wallet_path = path,
@@ -180,6 +182,10 @@ initWallet conf@(TCKRConf {
             }
 
         Nothing -> error "uninitialized wallet"
+
+getPrimaryAddress :: Wallet -> PrimaryAddress
+getPrimaryAddress =
+    ripemd160 . sha256 . encodeAE . compress . privToPub . wal_root_key
 
 -- create a new wallet from mnemonic words
 newWalletFromMnemonic :: TCKRConf -> [String] -> Maybe String -> IO ()

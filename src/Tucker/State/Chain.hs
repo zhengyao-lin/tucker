@@ -49,7 +49,7 @@ data BlockChain =
         bc_tx_state     :: TxState UTXOCache1, -- use 1 layer of cache in UTXO
         bc_fork_state   :: SoftForkState,
 
-        bc_wallet       :: Maybe Wallet
+        bc_wallet_list  :: [Wallet]
     }
 
 data VerifyConf =
@@ -70,13 +70,13 @@ instance NFData BlockChain where
         bc_tx_state = bc_tx_state
     }) = rnf bc_chain `seq` rnf bc_tx_state
 
-initBlockChain :: TCKRConf -> Maybe ThreadState -> Maybe Wallet -> ResIO BlockChain
+initBlockChain :: TCKRConf -> Maybe ThreadState -> [Wallet] -> ResIO BlockChain
 initBlockChain conf@(TCKRConf {
     tckr_block_db_path = block_db_path,
     tckr_tx_db_path = tx_db_path,
     tckr_block_db_max_file = block_db_max_file,
     tckr_tx_db_max_file = tx_db_max_file
-}) m_thread_state m_wallet = do
+}) m_thread_state wallets = do
     block_db <- openDB (optMaxFile block_db_max_file def) block_db_path
     tx_db <- openDB (optMaxFile tx_db_max_file def) tx_db_path
 
@@ -94,7 +94,7 @@ initBlockChain conf@(TCKRConf {
         bc_tx_state = bc_tx_state,
         bc_fork_state = bc_fork_state,
 
-        bc_wallet = m_wallet
+        bc_wallet_list = wallets
     }
 
     return tmp
@@ -848,8 +848,8 @@ allMemPoolTxns bc = memPoolTxns (bc_tx_state bc)
 lookupMemPool :: BlockChain -> Hash256 -> IO (Maybe TxPayload)
 lookupMemPool bc txid = lookupMemPoolTx (bc_tx_state bc) txid
 
-withWallet :: BlockChain -> (Wallet -> IO a) -> IO ()
-withWallet bc proc = maybe (return ()) (void . proc) (bc_wallet bc)
+eachWallet :: BlockChain -> (Wallet -> IO a) -> IO ()
+eachWallet bc proc = mapM_ proc (bc_wallet_list bc)
 
 -- revert the change of a block on UTXO
 -- assuming the block is a full block
@@ -866,7 +866,7 @@ revertBlockOnUTXO bc tx_state branch block = do
         -- tM ("reverting tx " ++ show i)
 
         when (i /= 0) $
-            withWallet bc $ \wallet ->
+            eachWallet bc $ \wallet ->
                 unregisterTx wallet tx
 
         forM_ (tx_in tx) $ \input@(TxInput {
@@ -881,7 +881,7 @@ revertBlockOnUTXO bc tx_state branch block = do
             addOutput tx_state (cur_height prev_bnode)
                       prev_block (fi tx_idx) (fi out_idx)
 
-            withWallet bc $ \wallet ->
+            eachWallet bc $ \wallet ->
                 registerOutPoint wallet outpoint (tx_out prev_tx !! fi out_idx)
 
 hasBlock :: BlockChain -> Hash256 -> IO Bool
@@ -1050,7 +1050,7 @@ addBlockFail bc@(BlockChain {
                 removePoolTx tx_state (txid tx)
 
                 -- register tx in wallet
-                withWallet bc $ \wallet ->
+                eachWallet bc $ \wallet ->
                     registerTx wallet tx
 
             bc <- collectOrphanBlock bc block_hash

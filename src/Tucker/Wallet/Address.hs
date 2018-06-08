@@ -52,7 +52,7 @@ genPubKeyScript (P2SHAddr hash) =
     [ OP_HASH160, OP_PUSHDATA hash Nothing, OP_EQUAL ]
 
 p2pkhAddress :: TCKRConf -> ECCPublicKey -> Address
-p2pkhAddress conf = P2PKHAddr . ripemd160 . sha256 . encodeBE
+p2pkhAddress conf = P2PKHAddr . ripemd160 . sha256 . encodeAE
 
 p2shAddress :: TCKRConf -> [ScriptOp] -> Address
-p2shAddress conf = P2SHAddr . ripemd160 . sha256 . encodeLE
+p2shAddress conf = P2SHAddr . ripemd160 . sha256 . encodeAE

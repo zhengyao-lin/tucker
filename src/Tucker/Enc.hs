@@ -60,11 +60,19 @@ class Encodable t where
     encodeBE :: t -> ByteString
     encodeBE = encode BigEndian
 
+    -- the result should not depend on the endianness
+    -- encode in any endianness
+    encodeAE :: t -> ByteString
+    encodeAE = encode (error "the encoding should be endianness-irrelavent")
+
     encodeLEB :: t -> Builder
     encodeLEB = encodeB LittleEndian
 
     encodeBEB :: t -> Builder
     encodeBEB = encodeB BigEndian
+
+    encodeAEB :: t -> Builder
+    encodeAEB = encodeB (error "the encoding should be endianness-irrelavent")
 
 instance Encodable Placeholder where
     encodeB _ _ = mempty

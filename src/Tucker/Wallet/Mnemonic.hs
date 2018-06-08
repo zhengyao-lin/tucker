@@ -51,8 +51,8 @@ E = W * N * C / (C + 1)
 type WordList = (MAP.TMap Int String, MAP.TMap String Int)
 
 alistToWordList list =
-    (MAP.fromList ENG.word_list,
-     MAP.fromList (map (\(a, b) -> (b, a)) ENG.word_list))
+    (MAP.fromList list,
+     MAP.fromList (map (\(a, b) -> (b, a)) list))
 
 -- normalize utf-8 nfkd
 normalize :: String -> String
@@ -69,7 +69,7 @@ data MnemonicConf =
 instance Default MnemonicConf where
     def =
         MnemonicConf {
-            mne_list = alistToWordList ENG.word_list,
+            mne_list = alistToWordList (zip [0..] ENG.word_list),
             mne_kdf_iter = 2048,
             mne_n = 11,
             mne_c = 32

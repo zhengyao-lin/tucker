@@ -2,7 +2,10 @@
 
 module Tool where
 
+import Data.Hex
 import Data.List
+import Data.Char
+import qualified Data.ByteString.Char8 as BS
 
 import Control.Monad
 import Control.Exception
@@ -46,42 +49,33 @@ toolDesc (Tool { tool_desc = desc }) = desc
 toolArgs (ToolGroup {}) = ["<subtool>"]
 toolArgs (Tool { tool_args = args }) = args
 
-toolNewWallet tool path flags (sent:rst) = do
-    conf <- flagsToConf flags
-    newWalletFromMnemonic
-        conf (words sent)
-        (case rst of [] -> Nothing; [pass] -> Just pass)
-
-toolNewWallet tool path _ _ =
-    showToolHelp tool path
-
-toolMnemonic tool path flags (entropy:_) =
-    case entropyToMnemonic def (hex2bs entropy) of
-        Right words -> tLnM (unwords words)
-        Left err -> throw err
-
-toolMnemonic tool path _ _ =
-    showToolHelp tool path
-
 root_tool =
     ToolGroup "tool" "root tool group" [
-        ToolGroup "new" "a tool collection for creating new objects" [
+        ToolGroup "wallet" "wallet utilities" [
             Tool {
-                tool_name = "wallet",
+                tool_name = "new",
                 tool_desc = "generate a wallet from a mnemonic sentence",
                 tool_args = [ "<mnemonic>", "[password]" ],
-                tool_proc = toolNewWallet,
-                tool_opts = chain_opts
+                tool_proc = toolWalletNew,
+                tool_opts = [ opt_chain_path, opt_wallet_path, opt_help ]
             }
         ],
 
-        ToolGroup "mnemonic" "a tool collection for mnemonic utilities(BIP 32)" [
+        ToolGroup "mnemonic" "mnemonic utilities(BIP 32)" [
             Tool {
                 tool_name = "from-entropy",
                 tool_desc = "generate a mnemonic sentence using the given entropy(in hex)",
                 tool_args = [ "<entropy in hex>" ],
-                tool_proc = toolMnemonic,
-                tool_opts = help_opt
+                tool_proc = toolMnemonicFromEntropy,
+                tool_opts = [ opt_help ]
+            },
+
+            Tool {
+                tool_name = "to-entropy",
+                tool_desc = "converse a mnemonic sentence back to the entropy",
+                tool_args = [ "<mnemonic>" ],
+                tool_proc = toolMnemonicToEntropy,
+                tool_opts = [ opt_help ]
             }
         ]
     ]
@@ -146,3 +140,30 @@ execTool tool@(ToolGroup {}) path args =
 
 findAndExecTool :: [String] -> IO ()
 findAndExecTool args = execTool root_tool ["tool"] args
+
+-- tool procs
+
+toolWalletNew tool path flags (sent:rst) = do
+    conf <- flagsToConf flags
+    newWalletFromMnemonic
+        conf (words sent)
+        (case rst of [] -> Nothing; [pass] -> Just pass)
+
+toolWalletNew tool path _ _ =
+    showToolHelp tool path
+
+toolMnemonicFromEntropy tool path flags (entropy:_) =
+    case entropyToMnemonic def (hex2bs entropy) of
+        Right words -> tLnM (unwords words)
+        Left err -> throw err
+
+toolMnemonicFromEntropy tool path _ _ =
+    showToolHelp tool path
+
+toolMnemonicToEntropy tool path flags (mnemonic:_) =
+    case mnemonicToEntropy def (words mnemonic) of
+        Right ent -> tLnM (map toLower (BS.unpack (hex ent)))
+        Left err -> throw err
+
+toolMnemonicToEntropy tool path _ _ =
+    showToolHelp tool path

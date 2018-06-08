@@ -24,7 +24,7 @@ isHardened :: Word32 -> Bool
 isHardened i = i >= 2 ^ 31
 
 toFingerPrint :: ECCPublicKey -> FingerPrint
-toFingerPrint pub = BSR.take 4 (ripemd160 (sha256 (encodeBE pub)))
+toFingerPrint = BSR.take 4 . ripemd160 . sha256 . encodeAE
 
 nullFingerPrint = BSR.pack [ 0, 0, 0, 0 ]
 
@@ -35,9 +35,9 @@ toChildKey i (HDPrivateKey depth _ _ priv code) =
     let pub = privToPub priv
         
         l = if isHardened i then
-                hmacSHA512 code (bchar 0 <> encodeBE priv <> encodeBE i)
+                hmacSHA512 code (bchar 0 <> encodeAE priv <> encodeBE i)
             else
-                hmacSHA512 code (encodeBE pub <> encodeBE i)
+                hmacSHA512 code (encodeAE pub <> encodeBE i)
         
         ll = decodeVWord BigEndian (BSR.take 32 l)
         lr = BSR.drop 32 l
@@ -53,7 +53,7 @@ toChildKey i (HDPrivateKey depth _ _ priv code) =
 toChildKey i (HDPublicKey depth _ _ pub code) =
     if isHardened i then fail "unable to derive from hardened keys"
     else let
-        l = hmacSHA512 code (encodeBE pub <> encodeBE i)
+        l = hmacSHA512 code (encodeAE pub <> encodeBE i)
         ll = decodeVWord BigEndian (BSR.take 32 l)
         lr = BSR.drop 32 l
         p0 = pubToPoint pub
@@ -77,12 +77,12 @@ serializeKey conf (HDPrivateKey d i f priv code) =
     encodeBase58Check $
     commonHeader (tckr_hd_priv_key_prefix conf) d i f code <>
     bchar 0 <>
-    encodeBE priv
+    encodeAE priv
 
 serializeKey conf (HDPublicKey d i f pub code) =
     encodeBase58Check $
     commonHeader (tckr_hd_pub_key_prefix conf) d i f code <>
-    encodeBE (compress pub)
+    encodeAE (compress pub)
 
 seedToMaskerKey :: TCKRConf -> ByteString -> Either TCKRError HDKey
 seedToMaskerKey conf seed =

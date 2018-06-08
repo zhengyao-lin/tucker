@@ -67,7 +67,7 @@ privToPub :: ECCPrivateKey -> ECCPublicKey
 privToPub priv = ECCPublicKey True (derivePubKey priv)
 
 privToInt :: ECCPrivateKey -> Integer
-privToInt priv = decodeVWord BigEndian (encodeBE priv)
+privToInt priv = decodeVWord BigEndian (encodeAE priv)
 
 intToPriv :: Integer -> ECCPrivateKey
 intToPriv int = decodeFailBE (encodeInt 32 BigEndian (int `mod` paramN))
@@ -80,7 +80,7 @@ uncompress (ECCPublicKey _ k) = ECCPublicKey False k
 
 pubToPoint :: ECCPublicKey -> (Integer, Integer)
 pubToPoint pub =
-    let raw = encodeBE (uncompress pub)
+    let raw = encodeAE (uncompress pub)
         x = decodeVWord BigEndian (BSR.take 32 (BSR.drop 1 raw))
         y = decodeVWord BigEndian (BSR.drop 33 raw)
     in (x, y)
@@ -123,7 +123,7 @@ verify (ECCPublicKey _ pub) msg sig' =
 signDER :: ECCPrivateKey -> ByteString -> IO ByteString
 signDER priv msg = do
     sig <- sign priv msg
-    return $ encodeBE sig
+    return $ encodeAE sig
 
 verifyDER :: ECCPublicKey -> ByteString -> ByteString -> Either TCKRError Bool
 verifyDER pub msg sig_enc = do

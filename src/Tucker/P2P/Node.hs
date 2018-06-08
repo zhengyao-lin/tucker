@@ -60,7 +60,7 @@ data MainLoopEnv =
 
         thread_state  :: ThreadState,
 
-        main_wallet     :: Maybe Wallet
+        wallets       :: [Wallet]
     }
 
 data RouterAction
@@ -256,14 +256,14 @@ initEnv conf = do
 
     thread_state <- lift $ initThread conf
 
-    mwallet <-
+    wallets <-
         if tckr_enable_wallet conf then
-            Just <$> initWallet conf
+            return <$> initWallet conf
         else
-            return Nothing
+            return []
 
     chain_lock <- lift $ LK.new
-    block_chain <- initBlockChain conf (Just thread_state) mwallet >>= (lift . newA)
+    block_chain <- initBlockChain conf (Just thread_state) wallets >>= (lift . newA)
 
     return MainLoopEnv {
         global_conf = conf,
@@ -283,7 +283,7 @@ initEnv conf = do
 
         thread_state = thread_state,
 
-        main_wallet = mwallet
+        wallets = wallets
 
         -- db_block = db_block,
         -- db_tx = db_tx,

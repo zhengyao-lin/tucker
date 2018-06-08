@@ -24,39 +24,13 @@ data Flag
     | SetJob Int
     deriving (Eq, Show)
 
-help_opt = [ NoArg [ "h", "help" ] ShowHelp "show this help message" ]
-
--- options related to the chain environment
-chain_opts = [
-        WithArg [ "p", "path" ] TuckerPath "set tucker path",
-        WithArg [ "w", "wallet" ] WalletPath "set wallet path",
-        
-        NoArg ["mainnet"] UseMainNet "use mainnet",
-        NoArg ["testnet"] UseTestNet "use testnet(in default)",
-
-        WithArg ["enable-miner"] EnableMiner "enable miner[TRUE/false]",
-        WithArg ["enable-min-diff"] EnableMinDiff
-            "use min-diff rule to mine(only available when min-diff is enabled on the net)[true/false]",
-
-        WithArg ["enable-mempool"] EnableMemPool
-            "enable tx mem pool(usually for mining)[TRUE/false]",
-
-        WithArg ["enable-wallet"] EnableWallet
-            "enable wallet[FALSE/true]",
-
-        WithArg ["min-fee"] MinFee "min tx fee required for mem pool txns(in satoshi/kb)",
-
-        WithArg [ "j", "job" ] SetJob "set the number of native threads to use"
-    ] ++ help_opt
-
-def_flags =
-    [ EnableMiner True, EnableMemPool True ]
-
 hasHelp :: [String] -> Bool
 hasHelp args =
-    case parseFlags args help_opt of
+    case parseFlags args [ opt_help ] of
         Right (_:_, _) -> True
         _ -> False
+
+def_flags = [ EnableMiner True, EnableMemPool True ]
 
 flagsToConf :: [Flag] -> IO TCKRConf
 flagsToConf flags' = do
@@ -123,3 +97,43 @@ showHelp tool_path args opts = do
         tLnM ""
         tLnM "options:"
         tM (genHelp opts)
+
+opt_help = NoArg [ "h", "help" ] ShowHelp "show this help message"
+opt_chain_path = WithArg [ "p", "path" ] TuckerPath "set tucker path"
+opt_wallet_path = WithArg [ "w", "wallet" ] WalletPath "set wallet path"
+opt_mainnet = WithArg [ "p", "path" ] TuckerPath "set tucker path"
+opt_testnet = NoArg ["testnet"] UseTestNet "use testnet(in default)"
+opt_enable_miner = WithArg ["enable-miner"] EnableMiner "enable miner[TRUE/false]"
+
+opt_enable_min_diff =
+    WithArg ["enable-min-diff"] EnableMinDiff
+            "use min-diff rule to mine(only available when min-diff is enabled on the net)[true/false]"
+
+opt_enable_mempool =
+    WithArg ["enable-mempool"] EnableMemPool
+            "enable tx mem pool(usually for mining)[TRUE/false]"
+
+opt_enable_wallet =
+    WithArg ["enable-wallet"] EnableWallet "enable wallet[FALSE/true]"
+
+opt_min_fee = WithArg ["min-fee"] MinFee "min tx fee required for mem pool txns(in satoshi/kb)"
+
+opt_job = WithArg [ "j", "job" ] SetJob "set the number of native threads to use"
+
+-- main proc opts
+main_opts = [
+        opt_chain_path,
+        opt_wallet_path,
+        opt_mainnet,
+        opt_testnet,
+        opt_enable_miner,
+        
+        opt_enable_min_diff,
+        opt_enable_mempool,
+        opt_enable_wallet,
+        
+        opt_min_fee,
+        
+        opt_job,
+        opt_help
+    ]

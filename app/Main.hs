@@ -27,14 +27,14 @@ main = do
     case args of
         "tool":rst -> findAndExecTool rst
         args ->
-            case parseFlags args chain_opts of
+            case parseFlags args main_opts of
                 Right (flags, non_opt) ->
                     if ShowHelp `elem` flags then
-                        showHelp [] [] chain_opts
+                        showHelp [] [] main_opts
                     else
                         flagsToConf flags >>= mainLoopForever
         
                 Left err -> do
                     tLnM (show err)
                     tLnM ""
-                    showHelp [] [] chain_opts
+                    showHelp [] [] main_opts

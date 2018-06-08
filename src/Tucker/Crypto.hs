@@ -165,7 +165,7 @@ type WIF = String
 
 privToWIF :: TCKRConf -> ECCPrivateKey -> WIF
 privToWIF conf priv =
-    let priv_raw = encodeBE priv
+    let priv_raw = encodeAE priv
         priv_proc = BSR.cons (tckr_wif_pref conf) priv_raw
     in encodeBase58Check priv_proc
 
