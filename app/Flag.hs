@@ -101,8 +101,10 @@ showHelp tool_path args opts = do
 opt_help = NoArg [ "h", "help" ] ShowHelp "show this help message"
 opt_chain_path = WithArg [ "p", "path" ] TuckerPath "set tucker path"
 opt_wallet_path = WithArg [ "w", "wallet" ] WalletPath "set wallet path"
-opt_mainnet = WithArg [ "p", "path" ] TuckerPath "set tucker path"
-opt_testnet = NoArg ["testnet"] UseTestNet "use testnet(in default)"
+
+opt_mainnet = NoArg ["mainnet"] UseMainNet "use mainnet"
+opt_testnet = NoArg ["testnet"] UseTestNet "use testnet(default)"
+
 opt_enable_miner = WithArg ["enable-miner"] EnableMiner "enable miner[TRUE/false]"
 
 opt_enable_min_diff =

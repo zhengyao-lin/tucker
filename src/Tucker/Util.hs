@@ -11,16 +11,16 @@ import Data.Time.Clock.POSIX
 import qualified Data.Foldable as FD
 import qualified Data.ByteString.Char8 as BS
 
-import System.Clock
-import System.IO.Unsafe
-import qualified System.Console.ANSI as CA
-
 import Control.Monad
 import Control.Exception
 import Control.Concurrent
 import Control.Monad.Loops
 import Control.Monad.Trans
 import qualified Control.Monad.Trans.Maybe as MT
+
+import System.Clock
+import System.IO.Unsafe
+import qualified System.Console.ANSI as CA
 
 import Tucker.Error
 import Tucker.DeepSeq
@@ -414,3 +414,9 @@ trim = f . f
 ones :: Bits t => Int -> t
 ones n =
     complement (shift (complement zeroBits) n)
+
+splitOn :: Eq a => a -> [a] -> ([a], [a])
+splitOn e list =
+    case elemIndex e list of
+        Just i -> (take i list, drop (i + 1) list)
+        Nothing -> (list, [])

@@ -133,3 +133,13 @@ timeoutFailS sec action = do
 
 timeoutRetryS :: Int -> IO a -> IO a
 timeoutRetryS sec action = untilJust $ timeoutS sec action
+
+listenOn :: String -> Int -> IO Socket
+listenOn ip port = do
+    addr <- ipToAddrInfo ip (fi port)
+    sock <- buildSocketTo addr
+
+    bind sock (addrAddress addr)
+    listen sock (fi port)
+
+    return sock

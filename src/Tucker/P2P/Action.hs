@@ -371,7 +371,7 @@ scheduleFetch env init_hashes callback = do
                             -- BSR.appendFile "test_blocks" (encodeLE block)
                             setA blockv Nothing
                             return block
-                
+
                 envFork env THREAD_VALIDATION $ do
                     readNClear >>= envAddBlocks env node
                     nodeMsg env node (show new_added ++ " new block(s) added")

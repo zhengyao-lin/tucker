@@ -71,6 +71,7 @@ tucker_default_socket_hints =
     }
 
 type Satoshi = Int64
+type Coin = Double
 type FeeRate = Satoshi -- in sat/kb
 type Timestamp = Word32
 
@@ -96,6 +97,7 @@ data TCKRConf =
         tckr_wallet_db_max_file         :: Int,
         tckr_wallet_bucket_conf_name    :: String,
         tckr_wallet_bucket_utxo_name    :: String,
+        tckr_wallet_bucket_addr_name    :: String,
         tckr_wallet_bucket_redeem_name  :: String,
         tckr_enable_wallet              :: Bool,
 
@@ -118,6 +120,8 @@ data TCKRConf =
 
         tckr_rpc_server_addr            :: String,
         tckr_rpc_server_port            :: Word16,
+        tckr_rpc_user_name              :: String,
+        tckr_rpc_user_pass              :: String,
 
         tckr_genesis_raw                :: BSR.ByteString, -- genesis hash
 
@@ -259,6 +263,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_wallet_db_max_file = 64,
         tckr_wallet_bucket_conf_name = "conf",
         tckr_wallet_bucket_utxo_name = "utxo",
+        tckr_wallet_bucket_addr_name = "addr",
         tckr_wallet_bucket_redeem_name = "redeem",
         tckr_enable_wallet = False,
 
@@ -282,6 +287,8 @@ tucker_default_conf_mainnet mpath = do
 
         tckr_rpc_server_addr = "127.0.0.1", -- only open up to local connections
         tckr_rpc_server_port = 3150,
+        tckr_rpc_user_name = "tucker",
+        tckr_rpc_user_pass = "sonia",
 
         tckr_genesis_raw = hex2bs "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4A29AB5F49FFFF001D1DAC2B7C0101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000",
 

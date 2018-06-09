@@ -34,6 +34,7 @@ data ThreadState =
 data ThreadType
     = THREAD_BASE
     | THREAD_NODE
+    | THREAD_RPC
     | THREAD_OTHER
     | THREAD_VALIDATION
 
@@ -41,7 +42,7 @@ initThread :: TCKRConf -> IO ThreadState
 initThread conf = do
     let job = tckr_job_number conf
         -- mextra is the number of thread for validation
-        total = max 1 job + 3
+        total = max 1 job + 4
 
     tid <- myThreadId
 
@@ -62,13 +63,14 @@ assignCap state ttype =
     case ttype of
         THREAD_BASE -> return 0
         THREAD_NODE -> return 1
-        THREAD_OTHER -> return 2
+        THREAD_RPC -> return 2
+        THREAD_OTHER -> return 3
         THREAD_VALIDATION ->
             -- even out on the validation threads
             fst <$>
             minimumBy (\(_, a) (_, b) -> compare a b) <$>
-            zip [3..] <$>
-            mapM getA (drop 3 (thread_caps state))
+            zip [4..] <$>
+            mapM getA (drop 4 (thread_caps state))
 
 exitAll :: Exception e => ThreadState -> e -> IO ()
 exitAll state e = throwTo (main_tid state) e

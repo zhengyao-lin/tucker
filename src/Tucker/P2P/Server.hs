@@ -519,13 +519,7 @@ server env = do
     let conf = global_conf env
         port = tckr_listen_port conf
 
-    addr <- ipToAddrInfo (tckr_listen_addr conf) (fi port)
-    sock <- buildSocketTo addr
-
-    bind sock (addrAddress addr)
-    listen sock (fi port)
-
-    let -- main server loop
+        -- main server loop
         loop sock = do
             -- wait until there are spare places for incoming nodes
             waitUntilIO (not <$> envInNodeFull env)
@@ -541,7 +535,7 @@ server env = do
             loop sock
 
     envInfo env "server started"
-    loop sock
+    listenOn (tckr_listen_addr conf) (fi port) >>= loop
 
 -- return alive address
 -- timeout in seconds
