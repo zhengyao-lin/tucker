@@ -154,7 +154,7 @@ instance Decodable AddressInfo where
         if is_mine then AddressInfo <$> decoder
         else return ObserveAddress
 
-type UTXOBucket = DBBucket OutPoint TxOutput
+type UTXOBucket = DBBucket OutPoint Placeholder
 
 data Wallet =
     Wallet {
@@ -297,8 +297,8 @@ eachUTXO wallet proc =
     (mapM_ proc . (wal_unknown_utxo wallet:) . MAP.elems)
 
 -- tx should not be coinbase
-registerTx :: Wallet -> TxPayload -> IO ()
-registerTx wallet tx = do
+addTxIfMine :: Wallet -> TxPayload -> IO ()
+addTxIfMine wallet tx = do
     -- remove all used outpoints
     forM_ (tx_in tx) $ \input ->
         -- apply for each utxo map
@@ -307,32 +307,32 @@ registerTx wallet tx = do
 
     -- add outpoint if isMine
     forM_ ([0..] `zip` tx_out tx) $ \(i, out) -> do
-        is_mine <- isMine wallet out
+        addOutPointIfMine wallet (OutPoint (txid tx) i) out
 
-        when is_mine $
-            registerOutPoint wallet (OutPoint (txid tx) i) out
-
-unregisterTx :: Wallet -> TxPayload -> IO ()
-unregisterTx wallet tx =
+removeTxIfMine :: Wallet -> TxPayload -> IO ()
+removeTxIfMine wallet tx =
     forM_ ([0..] `zip` tx_out tx) $ \(i, _) ->
         eachUTXO wallet $ \utxo ->
             deleteIO utxo (OutPoint (txid tx) i)
 
-registerOutPoint :: Wallet -> OutPoint -> TxOutput -> IO ()
-registerOutPoint wallet outpoint output = do
+addOutPointIfMine :: Wallet -> OutPoint -> TxOutput -> IO ()
+addOutPointIfMine wallet outpoint output = do
     let maddr = 
             encodeAddress (wal_conf wallet) <$>
             pubKeyScriptToAddress (decodeFailLE (pk_script output))
 
         insert :: UTXOBucket -> IO ()
-        insert utxo = insertIO utxo outpoint output
+        insert utxo = insertIO utxo outpoint Placeholder
         unknown = wal_unknown_utxo wallet
 
-    case maddr of
-        Nothing -> insert unknown
-        Just addr -> do
-            mutxo <- MAP.lookup addr <$> getA (wal_addr_utxo wallet)
+    is_mine <- isMine wallet output
 
-            case mutxo of
-                Nothing -> insert unknown
-                Just utxo -> insert utxo
+    when is_mine $
+        case maddr of
+            Nothing -> insert unknown
+            Just addr -> do
+                mutxo <- MAP.lookup addr <$> getA (wal_addr_utxo wallet)
+
+                case mutxo of
+                    Nothing -> insert unknown
+                    Just utxo -> insert utxo

@@ -867,7 +867,7 @@ revertBlockOnUTXO bc tx_state branch block = do
 
         when (i /= 0) $
             eachWallet bc $ \wallet ->
-                unregisterTx wallet tx
+                removeTxIfMine wallet tx
 
         forM_ (tx_in tx) $ \input@(TxInput {
             prev_out = outpoint@(OutPoint prev_txid out_idx)
@@ -882,7 +882,7 @@ revertBlockOnUTXO bc tx_state branch block = do
                       prev_block (fi tx_idx) (fi out_idx)
 
             eachWallet bc $ \wallet ->
-                registerOutPoint wallet outpoint (tx_out prev_tx !! fi out_idx)
+                addOutPointIfMine wallet outpoint (tx_out prev_tx !! fi out_idx)
 
 hasBlock :: BlockChain -> Hash256 -> IO Bool
 hasBlock (BlockChain { bc_chain = chain }) hash =
@@ -1049,9 +1049,8 @@ addBlockFail bc@(BlockChain {
                 -- remove accepted txns from mem pool
                 removePoolTx tx_state (txid tx)
 
-                -- register tx in wallet
                 eachWallet bc $ \wallet ->
-                    registerTx wallet tx
+                    addTxIfMine wallet tx
 
             bc <- collectOrphanBlock bc block_hash
             
