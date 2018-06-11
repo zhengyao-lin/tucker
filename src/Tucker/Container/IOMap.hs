@@ -66,11 +66,11 @@ instance (MAP.Constraint k, IOMap a k v) => IOMap (CacheMap a k v) k v where
             Nothing -> lookupIO parent k
             Just res -> return res
 
-    insertIO (CacheMap mmap _) k v =
-        appA (MAP.insert k (Just v)) mmap >> return ()
+    insertIO (CacheMap mmap _) k v = void $
+        appA (MAP.insert k (Just v)) mmap
 
-    deleteIO (CacheMap mmap _) k =
-        appA (MAP.insert k Nothing) mmap >> return ()
+    deleteIO (CacheMap mmap _) k = void $
+        appA (MAP.insert k Nothing) mmap
 
     foldKeyIO (CacheMap mmap parent) init proc = do
         map_var <- getA mmap >>= newA
@@ -82,3 +82,16 @@ instance (MAP.Constraint k, IOMap a k v) => IOMap (CacheMap a k v) k v where
                 Nothing -> proc init k
                 Just Nothing -> return init -- deleted already
                 Just (Just _) -> proc init k
+
+type AtomMap k v = Atom (MAP.TMap k v)
+
+instance MAP.Constraint k => IOMap (AtomMap k v) k v where
+    lookupIO amap k = MAP.lookup k <$> getA amap
+    insertIO amap k v = void $ appA (MAP.insert k v) amap
+    deleteIO amap k = void $ appA (MAP.delete k) amap
+
+    foldKeyIO amap init proc =
+        join $
+        MAP.foldlWithKey' (\mv k _ -> mv >>= flip proc k) (return init) <$> getA amap
+
+    countIO amap = fromIntegral <$> MAP.size <$> getA amap

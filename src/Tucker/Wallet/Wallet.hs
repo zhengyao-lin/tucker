@@ -140,21 +140,27 @@ instance Decodable RedeemScheme where
 
 data AddressInfo
     = AddressInfo ECCPrivateKey
-    | ObserveAddress -- don't have the private key
-    deriving (Show)
+    | WatchOnly -- don't have the private key
+    deriving (Eq, Show)
+
+data AddressMemInfo =
+    AddressMemInfo {
+        addr_balance :: Satoshi,
+        addr_utxo    :: UTXOBucket
+    }
 
 instance Encodable AddressInfo where
     encode _ (AddressInfo priv) = encodeLE True <> encodeAE priv
-    encode _ ObserveAddress = encodeLE False <> mempty
+    encode _ WatchOnly = encodeLE False <> mempty
 
 instance Decodable AddressInfo where
     decoder = do
         is_mine <- decoder
 
         if is_mine then AddressInfo <$> decoder
-        else return ObserveAddress
+        else return WatchOnly
 
-type UTXOBucket = DBBucket OutPoint Placeholder
+type UTXOBucket = DBBucket OutPoint TxOutput
 
 data Wallet =
     Wallet {
@@ -166,7 +172,7 @@ data Wallet =
         wal_bucket_addr   :: DBBucket String AddressInfo,
 
         wal_unknown_utxo  :: UTXOBucket,
-        wal_addr_utxo     :: Atom (MAP.TMap String UTXOBucket),
+        wal_addr_utxo     :: AtomMap String AddressMemInfo,
 
         wal_bucket_redeem :: DBBucket ByteString RedeemScheme
     }
@@ -197,7 +203,15 @@ initWallet conf@(TCKRConf {
 
     alist <- lift $ mapKeyIO bucket_addr $ \addr -> do
         utxo <- openBucket db (utxo_name ++ "." ++ addr)
-        return (addr, utxo)
+
+        values <- mapKeyIO utxo $ \k -> do
+            Just out <- lookupIO utxo k
+            return (value out)
+
+        return (addr, AddressMemInfo {
+            addr_balance = sum values,
+            addr_utxo = utxo
+        })
 
     addr_utxo <- lift $ newA (MAP.fromList alist)
 
@@ -291,19 +305,41 @@ isMine wallet output =
     isJust <$> lookupIO (wal_bucket_redeem wallet) hash
     where hash = sha256 (pk_script output)
 
-eachUTXO :: Wallet -> (UTXOBucket -> IO a) -> IO ()
-eachUTXO wallet proc =
+eachAddress :: Wallet -> (String -> AddressMemInfo -> IO a) -> IO ()
+eachAddress wallet proc =
     getA (wal_addr_utxo wallet) >>=
-    (mapM_ proc . (wal_unknown_utxo wallet:) . MAP.elems)
+    (mapM_ (uncurry proc) . MAP.toList)
+
+removeAddressOutPoint :: AddressMemInfo -> OutPoint -> IO AddressMemInfo
+removeAddressOutPoint info outpoint = do
+    mout <- lookupIO (addr_utxo info) outpoint
+
+    case mout of
+        Nothing -> return info
+        Just out -> do
+            deleteIO (addr_utxo info) outpoint
+            return info {
+                addr_balance = addr_balance info - value out
+            }
+
+addAddressOutPoint :: AddressMemInfo -> OutPoint -> TxOutput -> IO AddressMemInfo
+addAddressOutPoint info outpoint output = do
+    mout <- lookupIO (addr_utxo info) outpoint
+
+    case mout of
+        Just out -> return info
+        Nothing -> do
+            insertIO (addr_utxo info) outpoint output
+            return info {
+                addr_balance = addr_balance info + value output
+            }
 
 -- tx should not be coinbase
 addTxIfMine :: Wallet -> TxPayload -> IO ()
 addTxIfMine wallet tx = do
     -- remove all used outpoints
     forM_ (tx_in tx) $ \input ->
-        -- apply for each utxo map
-        eachUTXO wallet $ \utxo ->
-            deleteIO utxo (prev_out input)
+        removeOutPointIfMine wallet (prev_out input)
 
     -- add outpoint if isMine
     forM_ ([0..] `zip` tx_out tx) $ \(i, out) -> do
@@ -312,8 +348,15 @@ addTxIfMine wallet tx = do
 removeTxIfMine :: Wallet -> TxPayload -> IO ()
 removeTxIfMine wallet tx =
     forM_ ([0..] `zip` tx_out tx) $ \(i, _) ->
-        eachUTXO wallet $ \utxo ->
-            deleteIO utxo (OutPoint (txid tx) i)
+        removeOutPointIfMine wallet (OutPoint (txid tx) i)
+
+removeOutPointIfMine :: Wallet -> OutPoint -> IO ()
+removeOutPointIfMine wallet outpoint = do
+    eachAddress wallet $ \addr info -> do
+        info <- removeAddressOutPoint info outpoint
+        insertIO (wal_addr_utxo wallet) addr info
+
+    deleteIO (wal_unknown_utxo wallet) outpoint
 
 addOutPointIfMine :: Wallet -> OutPoint -> TxOutput -> IO ()
 addOutPointIfMine wallet outpoint output = do
@@ -321,18 +364,26 @@ addOutPointIfMine wallet outpoint output = do
             encodeAddress (wal_conf wallet) <$>
             pubKeyScriptToAddress (decodeFailLE (pk_script output))
 
-        insert :: UTXOBucket -> IO ()
-        insert utxo = insertIO utxo outpoint Placeholder
-        unknown = wal_unknown_utxo wallet
+        insert :: String -> AddressMemInfo -> IO ()
+        insert addr info = void $ do
+            info <- addAddressOutPoint info outpoint output
+            insertIO (wal_addr_utxo wallet) addr info
+
+        unknown = insertIO (wal_unknown_utxo wallet) outpoint output
 
     is_mine <- isMine wallet output
 
     when is_mine $
         case maddr of
-            Nothing -> insert unknown
+            Nothing -> unknown
             Just addr -> do
-                mutxo <- MAP.lookup addr <$> getA (wal_addr_utxo wallet)
+                minfo <- lookupIO (wal_addr_utxo wallet) addr
 
-                case mutxo of
-                    Nothing -> insert unknown
-                    Just utxo -> insert utxo
+                case minfo of
+                    Nothing -> unknown
+                    Just info -> insert addr info
+
+isWatchOnly :: Wallet -> String -> IO Bool
+isWatchOnly wallet addr =
+    (== Just WatchOnly) <$>
+    lookupIO (wal_bucket_addr wallet) addr

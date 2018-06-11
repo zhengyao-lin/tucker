@@ -117,13 +117,13 @@ data TxState u =
         -- currently useless without mining
         -- valid yet not included in blocks
         tx_out_mask    :: Atom (SET.TSet OutPoint), -- outputs used by mem pool txns
-        tx_out_new     :: Atom (UTXOArg MAP.TMap), -- new outputs enabled by the mem pool txns
-        tx_mem_pool    :: Atom (MAP.TMap Hash256 PoolTx),
+        tx_out_new     :: AtomMap OutPoint UTXOValue, -- new outputs enabled by the mem pool txns
+        tx_mem_pool    :: AtomMap Hash256 PoolTx,
 
         -- NOTE: make sure out_mask and out_new may overlap
         
         -- input not found but may be valid in the near future
-        tx_orphan_pool :: Atom (MAP.TMap Hash256 PoolTx)
+        tx_orphan_pool :: AtomMap Hash256 PoolTx
     }
 
 instance NFData (TxState a) where
@@ -258,10 +258,9 @@ lookupUTXOMemPool state outpoint = do
         res <- lookupIO (utxo_map state) outpoint
 
         case res of
-            Nothing -> do
+            Nothing ->
                 -- look up out_new
-                res <- MAP.lookup outpoint <$> getA (tx_out_new state)
-                return res
+                lookupIO (tx_out_new state) outpoint
 
             Just _ -> return res
 
@@ -274,11 +273,11 @@ addMemPoolTx (TxState {
     now <- unixTimestamp
 
     -- add the tx to the mem pool
-    appA (MAP.insert (txid tx) PoolTx {
+    insertIO mem_pool (txid tx) PoolTx {
         tx_data = tx,
         inc_time = now,
         tx_fee = fee
-    }) mem_pool
+    }
 
     -- add all used output to out_mask
     forM_ (tx_in tx) $ \input ->
@@ -286,7 +285,7 @@ addMemPoolTx (TxState {
 
     -- add new output enabled by the tx
     forM_ ([0..] `zip` tx_out tx) $ \(i, out) ->
-        flip appA out_new $ MAP.insert (OutPoint (txid tx) (fi i)) (UTXOValue {
+        insertIO out_new (OutPoint (txid tx) (fi i)) (UTXOValue {
             parent_ts = now, -- mem pool tx is always "current"
             parent_height = maxBound,
             tx_index = maxBound,
@@ -299,13 +298,13 @@ removeMemPoolTx (TxState {
     tx_out_new = out_new,
     tx_mem_pool = mem_pool
 }) txid = do
-    mtx <- MAP.lookup txid <$> getA mem_pool
+    mtx <- lookupIO mem_pool txid
 
     case mtx of
         Nothing -> return ()
         Just (PoolTx { tx_data = tx }) -> do
             -- delete tx from the mem pool
-            appA (MAP.delete txid) mem_pool
+            deleteIO mem_pool txid
 
             -- remove outputs in the out_mask
             forM_ (tx_in tx) $ \input ->
@@ -313,21 +312,20 @@ removeMemPoolTx (TxState {
 
             -- remove new output enabled by the tx
             forM_ ([0..] `zip` tx_out tx) $ \(i, out) ->
-                appA (MAP.delete (OutPoint txid (fi i))) out_new
+                deleteIO out_new (OutPoint txid (fi i))
 
 addOrphanTx :: UTXOMap a => TxState a -> TxPayload -> IO ()
-addOrphanTx state tx = void $ do
+addOrphanTx state tx = do
     now <- unixTimestamp
-    appA (MAP.insert (txid tx) PoolTx {
+    insertIO (tx_orphan_pool state) (txid tx) PoolTx {
         tx_data = tx,
         inc_time = now,
         tx_fee = error "no fee for orphan tx"
-    }) (tx_orphan_pool state)
+    }
 
 removeOrphanTx :: UTXOMap a => TxState a -> Hash256 -> IO ()
-removeOrphanTx state txid = do
-    appA (MAP.delete txid) (tx_orphan_pool state)
-    return ()
+removeOrphanTx state txid =
+    deleteIO (tx_orphan_pool state) txid
 
 removePoolTx :: UTXOMap a => TxState a -> Hash256 -> IO ()
 removePoolTx state txid = do
@@ -352,10 +350,10 @@ txPoolSize state =
         <*> orphanPoolSize state
 
 memPoolSize :: UTXOMap a => TxState a -> IO Int
-memPoolSize state = MAP.size <$> getA (tx_mem_pool state)
+memPoolSize state = countIO (tx_mem_pool state)
 
 orphanPoolSize :: UTXOMap a => TxState a -> IO Int
-orphanPoolSize state = MAP.size <$> getA (tx_orphan_pool state)
+orphanPoolSize state = countIO (tx_orphan_pool state)
 
 hasTxInMemPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
 hasTxInMemPool state hash =
@@ -370,7 +368,7 @@ orphanPoolTxns state = filterOrphanPoolTx state (const True)
 
 lookupMemPoolTx :: UTXOMap a => TxState a -> Hash256 -> IO (Maybe TxPayload)
 lookupMemPoolTx state txid =
-    (tx_data <$>) <$> MAP.lookup txid <$> getA (tx_mem_pool state)
+    (tx_data <$>) <$> lookupIO (tx_mem_pool state) txid
 
 hasTxInOrphanPool :: UTXOMap a => TxState a -> Hash256 -> IO Bool
 hasTxInOrphanPool state hash =
