@@ -54,6 +54,7 @@ dependencies:
 - aeson
 - HTTP
 - base64-bytestring
+- vector
 
 library:
   source-dirs: src

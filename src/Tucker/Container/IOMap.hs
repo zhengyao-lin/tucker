@@ -27,6 +27,12 @@ class IOMap a k v | a -> k, a -> v where
 
     foldKeyIO :: a -> b -> (b -> k -> IO b) -> IO b
 
+    foldValueIO :: a -> b -> (b -> v -> IO b) -> IO b
+    foldValueIO a i f =
+        foldKeyIO a i $ \i k -> do
+            Just v <- lookupIO a k
+            f i v
+
     mapKeyIO :: a -> (k -> IO b) -> IO [b]
     mapKeyIO a f = foldKeyIO a [] $ \lst k -> do
         r <- f k
@@ -93,5 +99,9 @@ instance MAP.Constraint k => IOMap (AtomMap k v) k v where
     foldKeyIO amap init proc =
         join $
         MAP.foldlWithKey' (\mv k _ -> mv >>= flip proc k) (return init) <$> getA amap
+
+    foldValueIO amap init proc =
+        join $
+        MAP.foldlWithKey' (\mv _ v -> mv >>= flip proc v) (return init) <$> getA amap
 
     countIO amap = fromIntegral <$> MAP.size <$> getA amap

@@ -347,6 +347,9 @@ envCloseTrans env trans = do
 
     -- envMsg env ("transport closed, " ++ show cur_s ++ " left")
 
+envWithWallet :: MainLoopEnv -> (Wallet -> IO a) -> IO [a]
+envWithWallet env proc = mapM proc (wallets env)
+
 -- need timeout
 envConnect :: MainLoopEnv -> AddrInfo -> IO Transport
 envConnect env addr = do

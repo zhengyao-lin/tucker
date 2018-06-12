@@ -1,9 +1,11 @@
-{-# LANGUAGE OverloadedStrings, GADTs #-}
+{-# LANGUAGE OverloadedStrings, OverloadedLists, GADTs #-}
 
 module Tucker.RPC.Protocol where
 
 import Data.Aeson
 import Data.Aeson.Types
+import qualified Data.Text as TXT
+import qualified Data.Vector as VEC
 
 import Tucker.Conf
 
@@ -38,18 +40,15 @@ instance Show r => Show (RPCResult r) where
 
 data RPCCall
     = RPCGetInfo
-    | RPCSetTxFee Coin
     | RPCUnknown String
+    | RPCGetBalance (Maybe String)
     deriving (Show)
 
-parseRPCCall :: String -> Maybe Value -> Parser RPCCall
+parseRPCCall :: String -> [Value] -> Parser RPCCall
 parseRPCCall "getinfo" _ = return RPCGetInfo
 
-parseRPCCall "settxfee" (Just val) = do
-    [amount] <- parseJSON val
-    return (RPCSetTxFee amount)
-
-parseRPCCall "settxfee" _ = fail "settxfee needs a parameter"
+parseRPCCall "getbalance" (String addr:_) = return (RPCGetBalance (Just (TXT.unpack addr)))
+parseRPCCall "getbalance" [] = return (RPCGetBalance Nothing)
 
 parseRPCCall method _ = return (RPCUnknown method)
 
@@ -59,7 +58,7 @@ instance FromJSON RPCRequest where
         mparams <- v .:? "params"
         id <- v .: "id"
 
-        call <- parseRPCCall method mparams
+        call <- parseRPCCall method (maybe [] VEC.toList mparams)
 
         return (RPCRequest id call)
 

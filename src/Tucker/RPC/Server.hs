@@ -14,9 +14,12 @@ import Tucker.Conf
 import Tucker.Thread
 
 import Tucker.P2P.Node
+import Tucker.P2P.Init
 
 import Tucker.RPC.HTTP
 import Tucker.RPC.Protocol
+
+import Tucker.Wallet.Wallet
 
 encodeStrict :: JSON.ToJSON r => r -> ByteString
 encodeStrict = LBSR.toStrict . JSON.encode
@@ -38,11 +41,10 @@ mkJSONResponse dat =
     ] dat
 
 serverRPC :: TCKRConf -> MainLoopEnv -> IO ()
-serverRPC conf env = do
-    tstate <- initThread conf
+serverRPC conf env =
     serverHTTP tstate (tckr_rpc_server_addr conf) (fi (tckr_rpc_server_port conf)) handler
     where
-        -- tstate = envThreadState env
+        tstate = envThreadState env
 
         unauth =
             mkResponse 401 "Unauthorized"
@@ -90,21 +92,30 @@ err req code msg = return $
 
 execCall :: TCKRConf -> MainLoopEnv -> RPCRequest -> RPCCall -> IO ByteString
 execCall conf env req RPCGetInfo = suc req "hello"
+
+execCall conf env req (RPCGetBalance maddr) = do
+    bal <- envWithWallet env $ \wal ->
+        getBalance wal maddr
+
+    case bal of
+        [] -> err req RPCInternalError "wallet not enabled"
+        b:_ -> suc req b
+
 execCall conf env req (RPCUnknown method) =
     err req RPCMethodNotFound ("method " ++ show method ++ " does not exists")
 
-execCall conf env req _ =
-    err req RPCInternalError "method not implemented"
+-- execCall conf env req _ =
+--     err req RPCInternalError "method not implemented"
 
 {-
 
-simpleHTTP (postRequestWithBody "http://tucker:sonia@127.0.0.1:3150/" "application/x-json" "{\"method\":\"getinfo\",\"id\":10086}")
+simpleHTTP (postRequestWithBody "http://tucker:sonia@127.0.0.1:3150/" "application/x-json" "{\"method\":\"getbalance\",\"id\":10086}")
 
 -}
 
 {-
 
--- AddMultiSigAddress: adds a P2SH multisig address to the wallet.
+AddMultiSigAddress: adds a P2SH multisig address to the wallet.
 BackupWallet: safely copies wallet.dat to the specified file, which can be a directory or a path with filename.
 DumpPrivKey: returns the wallet-import-format (WIP) private key corresponding to an address. (But does not remove it from the wallet.)
 DumpWallet: creates or overwrites a file with all wallet keys in a human-readable format.

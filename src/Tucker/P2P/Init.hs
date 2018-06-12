@@ -175,3 +175,9 @@ mainLoopForever :: TCKRConf -> IO a
 mainLoopForever conf =
     runResourceT $
     mainLoop conf >> lift (forever yieldWait)
+
+mainLoopForkForever :: TCKRConf -> IO MainLoopEnv
+mainLoopForkForever conf = runResourceT $ do
+    env <- mainLoop conf
+    resourceForkIO (lift (forever yieldWait))
+    return env
