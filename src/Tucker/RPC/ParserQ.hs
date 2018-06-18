@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings, GADTs, TemplateHaskell #-}
 
-module Tucker.RPC.Parse where
+-- template part of the parser
+
+module Tucker.RPC.ParserQ where
 
 import Language.Haskell.TH
 

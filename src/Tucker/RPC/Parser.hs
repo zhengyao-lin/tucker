@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, OverloadedLists, GADTs, TemplateHaskell, CPP #-}
 
-module Tucker.RPC.Protocol where
+module Tucker.RPC.Parser where
 
 import Data.Aeson
 import Data.Aeson.Types
@@ -12,7 +12,7 @@ import Control.Monad
 import Tucker.Msg
 import Tucker.Conf
 
-import Tucker.RPC.Parse
+import Tucker.RPC.ParserQ
 
 type RPCId = Value
 
@@ -80,8 +80,6 @@ respondTo :: RPCRequest -> RPCResult r -> RPCResponse r
 respondTo (RPCRequest id _) res =
     RPCResponse id res
 
--- call parsing
-
 data RPCCall
     = RPCGetInfo
     | RPCUnknown String
@@ -90,12 +88,13 @@ data RPCCall
     | RPCGetBlock Hash256 Int
     deriving (Show)
 
-#define P(n) $(parseNParams n)
+#define CALL0(name, cons) parseRPCCall name = $(parseNParams 0) (cons)
+#define CALLN(name, cons, n, args) parseRPCCall name = $(parseNParams n) (cons) (args)
 
 parseRPCCall :: String -> [Value] -> Maybe RPCCall
 
-parseRPCCall "getinfo" = P(0) RPCGetInfo
-parseRPCCall "getbalance" = P(1) RPCGetBalance (RPCString :~ [])
-parseRPCCall "getbestblockhash" = P(0) RPCGetBestBlockHash
-parseRPCCall "getblock" = P(2) RPCGetBlock (RPCHash256, RPCInt :~ 1)
-parseRPCCall method = P(0) (RPCUnknown method)
+CALL0("getinfo", RPCGetInfo)
+CALL0("getbestblockhash", RPCGetBestBlockHash)
+CALLN("getblock", RPCGetBlock, 2, (RPCHash256, RPCInt :~ 1))
+CALLN("getbalance", RPCGetBalance, 1, RPCString :~ [])
+CALL0(other, RPCUnknown other)

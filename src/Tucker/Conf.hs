@@ -347,7 +347,7 @@ tucker_default_conf_mainnet mpath = do
         tckr_node_max_blacklist_count = 5,
 
         tckr_sync_inv_timeout = 3,
-        tckr_sync_inv_node = 0.2,
+        tckr_sync_inv_node = 0.5,
 
         tckr_coinbase_maturity = 100,
 

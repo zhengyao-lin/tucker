@@ -1,5 +1,6 @@
 module Tucker.RPC.Server where
 
+import qualified Data.Text as TXT
 import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LBSR
@@ -9,6 +10,7 @@ import Network.HTTP
 import Network.HTTP.Auth
 
 import Tucker.Enc
+import Tucker.Msg
 import Tucker.Util
 import Tucker.Conf
 import Tucker.Thread
@@ -17,7 +19,9 @@ import Tucker.P2P.Node
 import Tucker.P2P.Init
 
 import Tucker.RPC.HTTP
-import Tucker.RPC.Protocol
+import Tucker.RPC.Parser
+
+import Tucker.State.Chain
 
 import Tucker.Wallet.Wallet
 
@@ -81,6 +85,9 @@ serverRPC conf env =
 
                 _ -> return badreq
 
+instance JSON.ToJSON Hash256 where
+    toJSON = JSON.String . TXT.pack . show
+
 -- request handlers
 
 suc :: JSON.ToJSON r => RPCRequest -> r -> IO ByteString
@@ -95,21 +102,22 @@ execCall :: TCKRConf -> MainLoopEnv -> RPCRequest -> RPCCall -> IO ByteString
 execCall conf env req RPCGetInfo = suc req "hello"
 
 execCall conf env req (RPCGetBalance addr) = do
-    bal <- envWithWallet env $ \wal ->
+    balance <- envWithWallet env $ \wal ->
         getBalance wal (if null addr then Nothing else Just addr)
 
-    case bal of
+    case balance of
         [] -> err req RPCInternalError "wallet not enabled"
         b:_ -> suc req b
+
+execCall conf env req RPCGetBestBlockHash =
+    envWithChain env (return . block_hash . mainBranchTip)
+    >>= suc req
 
 execCall conf env req (RPCUnknown method) =
     err req RPCMethodNotFound ("method " ++ show method ++ " does not exists")
 
 execCall conf env req _ =
     err req RPCInternalError "not implemented"
-
--- execCall conf env req _ =
---     err req RPCInternalError "method not implemented"
 
 {-
 

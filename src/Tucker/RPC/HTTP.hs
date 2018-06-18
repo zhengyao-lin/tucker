@@ -35,8 +35,6 @@ serverHTTP tstate host port handler = do
                 stream <- socketConnection host port conn
                 res <- receiveHTTP stream
 
-                tLnM (show res)
-
                 case res of
                     Right req -> handler req >>= respondHTTP stream
                     Left err -> tLnM ("http error: " ++ show err)

@@ -547,7 +547,24 @@ envFilterExistingBlock env hashes =
 
 envAddBlock :: MainLoopEnv -> Node -> Block -> IO ()
 envAddBlock env node block =
-    envAddBlocks env node [block]
+    envWithChain env $ \bc -> do
+        res <- addBlock bc block
+
+        case res of
+            Left rej -> do
+                -- error ("error when adding block " ++ show block ++ ": " ++ show err)
+                nodeErr env node ("block rejected: " ++ show block ++ ": " ++ show rej)
+                nodeReject env node BTC_CMD_BLOCK (encodeLE (block_hash block)) rej
+
+                -- TODO: this is for test only
+                error (show rej)
+
+            Right bc -> do
+                nodeMsg env node $
+                        "added " ++ show block ++
+                        "[" ++ show (mainBranchHeight bc) ++ "]"
+
+                setA (block_chain env) bc
 
 envAddBlockIfNotExist :: MainLoopEnv -> Node -> Block -> IO Bool
 envAddBlockIfNotExist env node block =
@@ -570,28 +587,9 @@ nodeReject env node cmd dat rej = do
 -- removing explicit reference to the block list
 -- NOTE: may help reduce space leaks?
 envAddBlocks :: MainLoopEnv -> Node -> [Block] -> IO ()
-envAddBlocks env node =
-    (>>= after) .
-    (before >>=) .
-    (flip (addBlocks proc))
-
-    where
-        before = LK.acquire (chain_lock env) >> getA (block_chain env)
-        after chain = setA (block_chain env) chain >> LK.release (chain_lock env)
-        proc block res =
-            case res of
-                Left rej -> do
-                    -- error ("error when adding block " ++ show block ++ ": " ++ show err)
-                    nodeErr env node ("block rejected: " ++ show block ++ ": " ++ show rej)
-                    nodeReject env node BTC_CMD_BLOCK (encodeLE (block_hash block)) rej
-
-                    -- TODO: this is for test only
-                    error (show rej)
-                
-                Right bc -> do
-                    nodeMsg env node $
-                        "added " ++ show block ++
-                        "[" ++ show (mainBranchHeight bc) ++ "]"
+envAddBlocks env node [] = return ()
+envAddBlocks env node (block:rst) =
+    envAddBlock env node block >> envAddBlocks env node rst
 
 envHasTx :: MainLoopEnv -> Hash256 -> IO Bool
 envHasTx env hash = envWithChain env (`hasTx` hash)
