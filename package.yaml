@@ -55,6 +55,7 @@ dependencies:
 - HTTP
 - base64-bytestring
 - vector
+- template-haskell
 
 library:
   source-dirs: src

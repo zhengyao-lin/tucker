@@ -105,13 +105,9 @@ instance Show Hash256 where
     show = map toLower . hex . BS.unpack . BS.reverse . hash256ToBS
 
 instance Read Hash256 where
-    readsPrec _ str = [(
-        bsToHash256 .
-        BS.reverse .
-        BS.pack .
-        (!!0) .
-        unhex .
-        map toUpper $ str, "")]
+    readsPrec _ str =
+        unhex (map toUpper str) >>= \res ->
+            return (bsToHash256 (BS.reverse (BS.pack res)), [])
 
 instance Encodable Hash256 where
     encode end (Hash256 bs) = bs

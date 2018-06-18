@@ -31,7 +31,8 @@ procRequest conf env body =
             return $ encodeStrict $
             RPCResponse JSON.Null (RPCError RPCParseError err Nothing)
         
-        Right req ->
+        Right req -> do
+            tLnM (show req)
             execCall conf env req (requestCall req)
 
 mkJSONResponse :: ByteString -> Response ByteString
@@ -93,9 +94,9 @@ err req code msg = return $
 execCall :: TCKRConf -> MainLoopEnv -> RPCRequest -> RPCCall -> IO ByteString
 execCall conf env req RPCGetInfo = suc req "hello"
 
-execCall conf env req (RPCGetBalance maddr) = do
+execCall conf env req (RPCGetBalance addr) = do
     bal <- envWithWallet env $ \wal ->
-        getBalance wal maddr
+        getBalance wal (if null addr then Nothing else Just addr)
 
     case bal of
         [] -> err req RPCInternalError "wallet not enabled"
@@ -104,12 +105,15 @@ execCall conf env req (RPCGetBalance maddr) = do
 execCall conf env req (RPCUnknown method) =
     err req RPCMethodNotFound ("method " ++ show method ++ " does not exists")
 
+execCall conf env req _ =
+    err req RPCInternalError "not implemented"
+
 -- execCall conf env req _ =
 --     err req RPCInternalError "method not implemented"
 
 {-
 
-simpleHTTP (postRequestWithBody "http://tucker:sonia@127.0.0.1:3150/" "application/x-json" "{\"method\":\"getbalance\",\"id\":10086}")
+rspBody <$> either undefined id <$> simpleHTTP (postRequestWithBody "http://tucker:sonia@127.0.0.1:3150/" "application/x-json" "{\"method\":\"getbalance\",\"id\":10086}")
 
 -}
 

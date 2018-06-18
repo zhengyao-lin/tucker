@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, OverloadedLists, GADTs #-}
+{-# LANGUAGE OverloadedStrings, OverloadedLists, GADTs, TemplateHaskell, CPP #-}
 
 module Tucker.RPC.Protocol where
 
@@ -7,7 +7,12 @@ import Data.Aeson.Types
 import qualified Data.Text as TXT
 import qualified Data.Vector as VEC
 
+import Control.Monad
+
+import Tucker.Msg
 import Tucker.Conf
+
+import Tucker.RPC.Parse
 
 type RPCId = Value
 
@@ -38,27 +43,15 @@ instance Show r => Show (RPCResult r) where
     show (RPCError code msg mobj) =
         "RPCError " ++ show code ++ " " ++ show msg ++ " " ++ show mobj
 
-data RPCCall
-    = RPCGetInfo
-    | RPCUnknown String
-    | RPCGetBalance (Maybe String)
-    deriving (Show)
-
-parseRPCCall :: String -> [Value] -> Parser RPCCall
-parseRPCCall "getinfo" _ = return RPCGetInfo
-
-parseRPCCall "getbalance" (String addr:_) = return (RPCGetBalance (Just (TXT.unpack addr)))
-parseRPCCall "getbalance" [] = return (RPCGetBalance Nothing)
-
-parseRPCCall method _ = return (RPCUnknown method)
-
 instance FromJSON RPCRequest where
     parseJSON = withObject "RPCRequest" $ \v -> do
         method <- v .: "method"
         mparams <- v .:? "params"
         id <- v .: "id"
 
-        call <- parseRPCCall method (maybe [] VEC.toList mparams)
+        let params = maybe [] VEC.toList mparams
+
+        call <- maybe (fail "failed to parse params") return (parseRPCCall method params)
 
         return (RPCRequest id call)
 
@@ -86,3 +79,23 @@ requestCall (RPCRequest _ call) = call
 respondTo :: RPCRequest -> RPCResult r -> RPCResponse r
 respondTo (RPCRequest id _) res =
     RPCResponse id res
+
+-- call parsing
+
+data RPCCall
+    = RPCGetInfo
+    | RPCUnknown String
+    | RPCGetBalance String
+    | RPCGetBestBlockHash
+    | RPCGetBlock Hash256 Int
+    deriving (Show)
+
+#define P(n) $(parseNParams n)
+
+parseRPCCall :: String -> [Value] -> Maybe RPCCall
+
+parseRPCCall "getinfo" = P(0) RPCGetInfo
+parseRPCCall "getbalance" = P(1) RPCGetBalance (RPCString :~ [])
+parseRPCCall "getbestblockhash" = P(0) RPCGetBestBlockHash
+parseRPCCall "getblock" = P(2) RPCGetBlock (RPCHash256, RPCInt :~ 1)
+parseRPCCall method = P(0) (RPCUnknown method)
